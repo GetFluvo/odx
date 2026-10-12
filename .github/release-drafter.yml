@@ -1,0 +1,54 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+categories:
+  - title: ":boom: Breaking changes"
+    label: breaking
+  - title: ":rocket: Features"
+    label: enhancement
+  - title: ":beetle: Fixes"
+    label: bug
+  - title: ":racehorse: Performance"
+    label: performance
+  - title: ":books: Documentation"
+    label: documentation
+  - title: ":hammer: Refactoring"
+    label: refactoring
+  - title: ":rotating_light: Testing"
+    label: testing
+  - title: ":construction_worker: CI"
+    label: ci
+  - title: ":package: Dependencies and build"
+    labels: [dependencies, build]
+change-template: "- $TITLE (#$NUMBER)"
+version-resolver:
+  major:
+    labels: [breaking]
+  minor:
+    labels: [enhancement]
+  default: patch
+# Labels from the conventional-commit PR title (PRs are squash-merged).
+autolabeler:
+  - label: breaking
+    title: ['/^\w+(\(.+\))?!:/']
+  - label: enhancement
+    title: ['/^feat(\(.+\))?!?:/']
+  - label: bug
+    title: ['/^fix(\(.+\))?!?:/']
+  - label: performance
+    title: ['/^perf(\(.+\))?!?:/']
+  - label: documentation
+    title: ['/^docs(\(.+\))?!?:/']
+  - label: refactoring
+    title: ['/^refactor(\(.+\))?!?:/']
+  - label: testing
+    title: ['/^test(\(.+\))?!?:/']
+  - label: ci
+    title: ['/^ci(\(.+\))?!?:/']
+  - label: build
+    title: ['/^(build|chore)(\(.+\))?!?:/']
+template: |
+  ## Changes
+
+  $CHANGES
+
+  Built with Rust & AI-accelerated engineering.
