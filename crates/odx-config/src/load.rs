@@ -539,7 +539,11 @@ environment = "staging"
         let source = discover(&fs, Path::new("/w"), Some(Path::new("pyproject.toml"))).unwrap();
         assert!(source.project().is_some());
         let err = discover(&fs, Path::new("/w"), Some(Path::new("other.toml"))).unwrap_err();
-        assert_eq!(err.to_string(), "/w/other.toml: no [tool.odx] table");
+        let other = Path::new("/w").join("other.toml");
+        assert_eq!(
+            err.to_string(),
+            format!("{}: no [tool.odx] table", other.display())
+        );
         for name in ["repos.yaml", "repos.yml"] {
             let source = discover(&fs, Path::new("/w"), Some(Path::new(name))).unwrap();
             assert_eq!(source.project(), None);
@@ -565,7 +569,11 @@ environment = "staging"
         let fs = fs_with(&[("/w/pyproject.toml", ODX)]);
         fs.fail_next(ErrorKind::PermissionDenied);
         let err = discover(&fs, Path::new("/w"), None).unwrap_err();
-        assert!(err.to_string().starts_with("/w/pyproject.toml: "));
+        let file = Path::new("/w").join("pyproject.toml");
+        assert!(
+            err.to_string()
+                .starts_with(&format!("{}: ", file.display()))
+        );
         assert!(std::error::Error::source(&err).is_some());
     }
 
@@ -574,7 +582,11 @@ environment = "staging"
         let fs = fs_with(&[("/w/pyproject.toml", ODX)]);
         fs.fail_next(ErrorKind::PermissionDenied);
         let err = discover(&fs, Path::new("/w"), Some(Path::new("pyproject.toml"))).unwrap_err();
-        assert!(err.to_string().starts_with("/w/pyproject.toml: "));
+        let file = Path::new("/w").join("pyproject.toml");
+        assert!(
+            err.to_string()
+                .starts_with(&format!("{}: ", file.display()))
+        );
     }
 
     #[test]
