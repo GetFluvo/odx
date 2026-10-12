@@ -189,7 +189,7 @@ fn real_file_system_round_trip() {
     let mut out = Vec::new();
     let exit = odx_cli::run_in(
         ["odx", "export"],
-        &odx_cli::system::OsFs,
+        &odx_core::system::OsFs,
         dir.path(),
         &mut out,
         &mut Vec::new(),
@@ -198,7 +198,7 @@ fn real_file_system_round_trip() {
     let mut out = Vec::new();
     let exit = odx_cli::run_in(
         ["odx", "import"],
-        &odx_cli::system::OsFs,
+        &odx_core::system::OsFs,
         dir.path(),
         &mut out,
         &mut Vec::new(),

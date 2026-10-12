@@ -9,13 +9,14 @@ use std::path::PathBuf;
 ///
 /// let git = Invocation::new("git").arg("status").current_dir("/tmp");
 /// assert_eq!(git.program(), "git");
-/// assert_eq!(git.args(), ["status"]);
+/// assert_eq!(git.arguments(), ["status"]);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
     program: OsString,
     args: Vec<OsString>,
     current_dir: Option<PathBuf>,
+    envs: Vec<(OsString, OsString)>,
 }
 
 impl Invocation {
@@ -25,6 +26,7 @@ impl Invocation {
             program: program.into(),
             args: Vec::new(),
             current_dir: None,
+            envs: Vec::new(),
         }
     }
 
@@ -32,6 +34,24 @@ impl Invocation {
     #[must_use]
     pub fn arg(mut self, arg: impl Into<OsString>) -> Self {
         self.args.push(arg.into());
+        self
+    }
+
+    /// Append several arguments.
+    #[must_use]
+    pub fn args<I, A>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = A>,
+        A: Into<OsString>,
+    {
+        self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    /// Set an environment variable for the process.
+    #[must_use]
+    pub fn env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.envs.push((key.into(), value.into()));
         self
     }
 
@@ -48,8 +68,13 @@ impl Invocation {
     }
 
     /// The arguments, in order.
-    pub fn args(&self) -> &[OsString] {
+    pub fn arguments(&self) -> &[OsString] {
         &self.args
+    }
+
+    /// Extra environment variables, in order.
+    pub fn envs(&self) -> &[(OsString, OsString)] {
+        &self.envs
     }
 
     /// The working directory, if one was set.
@@ -105,9 +130,11 @@ mod tests {
     fn invocation_builder_keeps_order_and_dir() {
         let inv = Invocation::new("uv")
             .arg("lock")
-            .arg("--upgrade-package")
+            .args(["--upgrade-package", "x"])
+            .env("UV_OFFLINE", "1")
             .current_dir("/work");
-        assert_eq!(inv.args(), ["lock", "--upgrade-package"]);
+        assert_eq!(inv.arguments(), ["lock", "--upgrade-package", "x"]);
+        assert_eq!(inv.envs(), [("UV_OFFLINE".into(), "1".into())]);
         assert_eq!(inv.working_dir(), Some(&PathBuf::from("/work")));
         assert_eq!(Invocation::new("git").working_dir(), None);
     }

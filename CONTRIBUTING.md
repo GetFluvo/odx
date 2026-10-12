@@ -146,6 +146,9 @@ code is written to be testable:
   build is a separate binary from the one other crates' tests link against,
   and llvm-cov counts their regions separately, so a branch exercised only
   from another crate's tests still shows as missed.
+- Prefer non-generic functions in library code: every instantiation of a
+  generic function (including one per closure type) is counted on its own,
+  so a generic helper needs every branch covered for every caller.
 - Avoid branches that cannot be reached (an `Option` that is always `Some`):
   restructure instead of covering or excluding them.
 - `#[cfg_attr(coverage_nightly, coverage(off))]` is reserved for glue that

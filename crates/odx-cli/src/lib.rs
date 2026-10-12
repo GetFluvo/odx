@@ -5,7 +5,6 @@
 
 pub mod cli;
 mod cmd;
-pub mod system;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
@@ -37,7 +36,7 @@ where
     T: Into<OsString> + Clone,
 {
     let cwd = std::env::current_dir().unwrap_or_default();
-    run_in(args, &system::OsFs, &cwd, out, err)
+    run_in(args, &odx_core::system::OsFs, &cwd, out, err)
 }
 
 /// Like [`run`], with an explicit file system and working directory.
