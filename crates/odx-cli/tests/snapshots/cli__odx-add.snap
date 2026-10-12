@@ -8,17 +8,29 @@ Usage: odx add [OPTIONS] <SPEC>
 
 Arguments:
   <SPEC>
-          For example `OCA/sale-workflow#1234` or `odoo-addon-contract`
+          `owner/repo#PR`, `owner/repo@REF`, a pull request URL, or `URL#PR` / `URL@REF`
 
 Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --package <DIST>
+          Add as package DIST instead of as a merge
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
+      --subdirectory <DIR>
+          Subdirectory of the addon in the repository (packages)
+
+      --group <GROUP>
+          Dependency group of the package
+
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --odoo-version <SERIES>
+          Odoo series for a new [tool.odx] table
 
       --offline
           Serve forge and index data from the cache only

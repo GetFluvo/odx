@@ -84,6 +84,8 @@ fn execute(
         Command::GitAggregate(args) => git_aggregate_rs::execute(args, "odx git-aggregate", err),
         Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),
         Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),
+        Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),
+        Command::Drop(args) => cmd::edit::run_drop(args, ctx).emit(out, err),
         command => {
             writeln!(
                 err,

@@ -23,9 +23,6 @@ pub(crate) fn run_import(args: &ImportArgs, ctx: &Context<'_>) -> Report {
 }
 
 fn import_report(args: &ImportArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    if args.write {
-        return Err(Report::stub("import --write", 1));
-    }
     let repos_path = ctx.dir.join(&args.repos);
     let repos = parse_repos(&read_text(ctx.fs, &repos_path)?)
         .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", repos_path.display())))?;
@@ -44,7 +41,17 @@ fn import_report(args: &ImportArgs, ctx: &Context<'_>) -> Result<Report, Report>
     };
     let result = import(&repos, addons.as_ref());
     report.warnings.extend(result.warnings.iter().cloned());
-    report.out = result.to_toml();
+    if args.write {
+        let written = super::edit::write_repositories(
+            ctx,
+            &result.repositories,
+            args.odoo_version.as_deref(),
+        )?;
+        report.warnings.extend(written.warnings);
+        report.out = written.out;
+    } else {
+        report.out = result.to_toml();
+    }
     Ok(report)
 }
 

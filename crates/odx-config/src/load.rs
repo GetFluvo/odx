@@ -140,12 +140,23 @@ pub fn discover(
             .map(|project| Source::Pyproject(Box::new(project)))
             .ok_or(ConfigError::NoOdxTable { file });
     }
+    find_pyproject(fs, start).map(|project| Source::Pyproject(Box::new(project)))
+}
+
+/// Find the first `pyproject.toml` with a `[tool.odx]` table in `start` or
+/// its parents.
+///
+/// # Errors
+///
+/// [`ConfigError::NotFound`] when there is none, and the errors of
+/// [`parse_pyproject`] for a file that cannot be read or is invalid.
+pub fn find_pyproject(fs: &dyn FileSystem, start: &Path) -> Result<Project, ConfigError> {
     for dir in start.ancestors() {
         let file = dir.join("pyproject.toml");
         if fs.exists(&file)
             && let Some(project) = load_file(fs, &file)?
         {
-            return Ok(Source::Pyproject(Box::new(project)));
+            return Ok(project);
         }
     }
     Err(ConfigError::NotFound {

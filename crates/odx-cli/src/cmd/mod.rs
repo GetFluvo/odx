@@ -11,6 +11,7 @@ use odx_config::Problem;
 use odx_core::Exit;
 
 pub(crate) mod compat;
+pub(crate) mod edit;
 
 /// What a command produced.
 #[derive(Debug, Default)]
@@ -35,17 +36,6 @@ impl Report {
         }
     }
 
-    /// A report for a command or option that is not implemented yet.
-    pub(crate) fn stub(name: &str, phase: u8) -> Self {
-        Self {
-            exit: Exit::Usage,
-            error: Some(format!(
-                "odx {name}: not implemented yet (roadmap phase {phase})"
-            )),
-            ..Self::default()
-        }
-    }
-
     /// Write the report: warnings and the error to `err`, output to `out`.
     pub(crate) fn emit(self, out: &mut dyn Write, err: &mut dyn Write) -> io::Result<Exit> {
         let mut diagnostics = String::new();
@@ -53,12 +43,7 @@ impl Report {
             let _ = writeln!(diagnostics, "warning: {warning}");
         }
         if let Some(error) = &self.error {
-            let prefix = if error.starts_with("odx ") {
-                ""
-            } else {
-                "error: "
-            };
-            let _ = writeln!(diagnostics, "{prefix}{error}");
+            let _ = writeln!(diagnostics, "error: {error}");
         }
         err.write_all(diagnostics.as_bytes())?;
         out.write_all(self.out.as_bytes())?;
@@ -98,17 +83,6 @@ mod tests {
             "warning: k: m\nerror: boom\n"
         );
         assert_eq!(String::from_utf8(out).unwrap(), "partial\n");
-    }
-
-    #[test]
-    fn stub_errors_are_not_prefixed() {
-        let mut err = Vec::new();
-        let exit = Report::stub("import --write", 1).emit(&mut Vec::new(), &mut err);
-        assert_eq!(exit.unwrap(), Exit::Usage);
-        assert_eq!(
-            String::from_utf8(err).unwrap(),
-            "odx import --write: not implemented yet (roadmap phase 1)\n"
-        );
     }
 
     #[test]

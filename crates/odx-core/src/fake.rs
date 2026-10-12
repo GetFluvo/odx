@@ -90,6 +90,7 @@ pub struct MemoryFs {
     files: Mutex<BTreeMap<PathBuf, Vec<u8>>>,
     failures: Mutex<VecDeque<io::ErrorKind>>,
     failing_paths: Mutex<BTreeMap<PathBuf, io::ErrorKind>>,
+    failing_writes: Mutex<BTreeMap<PathBuf, io::ErrorKind>>,
 }
 
 impl MemoryFs {
@@ -103,6 +104,11 @@ impl MemoryFs {
     /// Make every `read` and `write` of `path` fail with `kind`.
     pub fn fail_on(&self, path: impl Into<PathBuf>, kind: io::ErrorKind) {
         lock(&self.failing_paths).insert(path.into(), kind);
+    }
+
+    /// Make every `write` of `path` fail with `kind`; reads still succeed.
+    pub fn fail_writes_to(&self, path: impl Into<PathBuf>, kind: io::ErrorKind) {
+        lock(&self.failing_writes).insert(path.into(), kind);
     }
 
     fn injected_failure(&self, path: &Path) -> io::Result<()> {
@@ -126,6 +132,9 @@ impl FileSystem for MemoryFs {
 
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         self.injected_failure(path)?;
+        if let Some(kind) = lock(&self.failing_writes).get(path) {
+            return Err(io::Error::from(*kind));
+        }
         lock(&self.files).insert(path.to_path_buf(), contents.to_vec());
         Ok(())
     }
@@ -221,6 +230,18 @@ mod tests {
             io::ErrorKind::ReadOnlyFilesystem
         );
         fs.write(Path::new("other.yaml"), b"x").unwrap();
+    }
+
+    #[test]
+    fn memory_fs_can_fail_only_writes() {
+        let fs = MemoryFs::default();
+        fs.write(Path::new("p.toml"), b"x").unwrap();
+        fs.fail_writes_to("p.toml", io::ErrorKind::ReadOnlyFilesystem);
+        assert_eq!(fs.read(Path::new("p.toml")).unwrap(), b"x");
+        assert_eq!(
+            fs.write(Path::new("p.toml"), b"y").unwrap_err().kind(),
+            io::ErrorKind::ReadOnlyFilesystem
+        );
     }
 
     #[test]

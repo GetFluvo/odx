@@ -133,8 +133,8 @@ the [Documentation].
 
 ## Writing testable code
 
-Coverage is 100% lines and is not negotiable, so code is written to be
-testable:
+Coverage is 100% lines, functions and regions and is not negotiable, so
+code is written to be testable:
 
 - Keep `main` to runtime setup and a call into `run()`.
 - Put filesystem, process, git, network and secret-store access behind the
@@ -142,6 +142,12 @@ testable:
   use git fixtures from `tests/fixtures` and recorded HTTP responses, never
   the network.
 - Every error variant needs a test that triggers it.
+- A library's own unit tests must cover all of its branches. Its `#[cfg(test)]`
+  build is a separate binary from the one other crates' tests link against,
+  and llvm-cov counts their regions separately, so a branch exercised only
+  from another crate's tests still shows as missed.
+- Avoid branches that cannot be reached (an `Option` that is always `Some`):
+  restructure instead of covering or excluding them.
 - `#[cfg_attr(coverage_nightly, coverage(off))]` is reserved for glue that
   cannot run in a test process. Justify every use in the PR description;
   reviewers will push back on exclusions of logic.
