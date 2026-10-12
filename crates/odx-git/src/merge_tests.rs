@@ -134,7 +134,11 @@ fn clean_merges_build_a_detached_worktree() {
     );
     let work = &plan.target_dir;
     assert_eq!(
-        fs::read_to_string(work.join("text.txt")).unwrap(),
+        fs::read_to_string(work.join("text.txt")).unwrap().replace(
+            "
+", "
+"
+        ),
         "one\nA\nthree\n"
     );
     assert_eq!(git(work, &["rev-parse", "HEAD"]), result.head);

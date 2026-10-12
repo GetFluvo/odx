@@ -88,7 +88,9 @@ fn mergiraf_resolves_additions_at_the_same_place() {
         .aggregate(&plan)
         .expect("mergiraf resolves the conflict");
     assert_eq!(result.steps[1].1, StepOutcome::Merged);
-    let code = fs::read_to_string(plan.target_dir.join("code.py")).expect("read");
+    let code = fs::read_to_string(plan.target_dir.join("code.py"))
+        .expect("read")
+        .replace("\r\n", "\n");
     assert!(
         code.contains("def c(self):") && code.contains("def d(self):") && !code.contains("<<<<<<<"),
         "{code}"
