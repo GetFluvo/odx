@@ -56,6 +56,26 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install mergiraf
+        shell: bash
+        env:
+          VERSION: v0.20.0
+        run: |
+          case "$RUNNER_OS" in
+            Linux) asset=mergiraf_x86_64-unknown-linux-gnu.tar.gz; sum=4341127da8d1da29eced669fbacc1e5d6e530115098de0b82cc9dc551a1acf37 ;;
+            macOS) asset=mergiraf_aarch64-apple-darwin.tar.gz; sum=641b8a0c379d56b8b4b61070e60c3dac6e1a2fba5b59edd374a9e795b992ee5b ;;
+            Windows) asset=mergiraf_x86_64-pc-windows-gnu.zip; sum=4f5e77e973febda3cacd2b52f0c0b2756854e2bff1377af69159cf0aa4051397 ;;
+          esac
+          dir="$RUNNER_TEMP/mergiraf"
+          mkdir -p "$dir"
+          curl -sSfL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
+          if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
+          echo "$sum  $dir/$asset" | $check
+          case "$asset" in
+            *.zip) unzip -q -o "$dir/$asset" -d "$dir" ;;
+            *) tar xzf "$dir/$asset" -C "$dir" ;;
+          esac
+          echo "$dir" >> "$GITHUB_PATH"
       - run: cargo test --workspace --all-features --locked
         env:
           INSTA_UPDATE: "no"
@@ -97,6 +117,26 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install mergiraf
+        shell: bash
+        env:
+          VERSION: v0.20.0
+        run: |
+          case "$RUNNER_OS" in
+            Linux) asset=mergiraf_x86_64-unknown-linux-gnu.tar.gz; sum=4341127da8d1da29eced669fbacc1e5d6e530115098de0b82cc9dc551a1acf37 ;;
+            macOS) asset=mergiraf_aarch64-apple-darwin.tar.gz; sum=641b8a0c379d56b8b4b61070e60c3dac6e1a2fba5b59edd374a9e795b992ee5b ;;
+            Windows) asset=mergiraf_x86_64-pc-windows-gnu.zip; sum=4f5e77e973febda3cacd2b52f0c0b2756854e2bff1377af69159cf0aa4051397 ;;
+          esac
+          dir="$RUNNER_TEMP/mergiraf"
+          mkdir -p "$dir"
+          curl -sSfL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
+          if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
+          echo "$sum  $dir/$asset" | $check
+          case "$asset" in
+            *.zip) unzip -q -o "$dir/$asset" -d "$dir" ;;
+            *) tar xzf "$dir/$asset" -C "$dir" ;;
+          esac
+          echo "$dir" >> "$GITHUB_PATH"
       - run: >-
           cargo +nightly llvm-cov --workspace --all-features --doctests --locked
           --fail-under-lines 100 --fail-under-functions 100 --fail-under-regions 100
