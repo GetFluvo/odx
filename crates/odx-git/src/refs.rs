@@ -54,6 +54,10 @@ pub enum Source {
     Pr(u32),
     /// A commit, abbreviated or full.
     Commit(String),
+    /// A ref exactly as written in git-aggregator's `repos.yaml`: a branch
+    /// or tag name, or a full ref such as `refs/pull/12/head`; the remote
+    /// resolves short names.
+    Ref(String),
 }
 
 impl fmt::Display for Source {
@@ -62,6 +66,7 @@ impl fmt::Display for Source {
             Self::Branch(branch) => write!(f, "branch {branch}"),
             Self::Pr(pr) => write!(f, "#{pr}"),
             Self::Commit(sha) => write!(f, "commit {sha}"),
+            Self::Ref(reference) => write!(f, "{reference}"),
         }
     }
 }
@@ -94,6 +99,7 @@ impl Source {
             (Self::Pr(pr), Forge::Github | Forge::Gitea) => format!("refs/pull/{pr}/head"),
             (Self::Commit(_), _) if self.is_abbreviated() => "refs/heads/*".to_owned(),
             (Self::Commit(sha), _) => sha.clone(),
+            (Self::Ref(reference), _) => reference.clone(),
         }
     }
 
@@ -121,6 +127,11 @@ impl Source {
             (Self::Pr(pr), _) => format!("refs/odx/{}/pull/{pr}/head", forge.name()),
             (Self::Commit(sha), _) if self.is_abbreviated() => sha.clone(),
             (Self::Commit(sha), _) => format!("refs/odx/commits/{sha}"),
+            (Self::Ref(reference), remote) => format!(
+                "refs/odx/named/{}/{}",
+                remote.map_or_else(|| "origin".to_owned(), url_hash),
+                reference.strip_prefix("refs/").unwrap_or(reference)
+            ),
         }
     }
 
@@ -174,6 +185,19 @@ mod tests {
         assert!(other.starts_with("+refs/heads/*:refs/odx/branches/") && !other.contains("origin"));
         let full = Source::Commit("a".repeat(40));
         assert_eq!(full.remote_ref(Forge::Github), "a".repeat(40));
+    }
+
+    #[test]
+    fn literal_refs() {
+        let short = Source::Ref("17.0".into());
+        assert_eq!(
+            short.refspec(Forge::Github, None),
+            "+17.0:refs/odx/named/origin/17.0"
+        );
+        let full = Source::Ref("refs/pull/12/head".into());
+        let other = full.local_ref(Forge::Github, Some("https://x/y.git"));
+        assert!(other.starts_with("refs/odx/named/") && other.ends_with("/pull/12/head"));
+        assert_eq!(full.to_string(), "refs/pull/12/head");
     }
 
     #[test]

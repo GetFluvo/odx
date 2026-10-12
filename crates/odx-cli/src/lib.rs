@@ -3,8 +3,6 @@
 //! This crate is the `odx` binary. [`run`] parses the command line and
 //! dispatches to the library crates; `main` only wires it to the process.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 pub mod cli;
 mod cmd;
 
@@ -102,7 +100,14 @@ fn execute(
             clap_complete::generate(args.shell, &mut Cli::command(), "odx", out);
             Ok(Exit::Success)
         }
-        Command::GitAggregate(args) => git_aggregate_rs::execute(args, "odx git-aggregate", err),
+        Command::GitAggregate(args) => {
+            let context = git_aggregate_rs::Context {
+                fs: ctx.fs,
+                env: ctx.env,
+                dir: ctx.dir.clone(),
+            };
+            git_aggregate_rs::execute(args, "odx git-aggregate", &context, out, err)
+        }
         Command::Aggregate(args) => {
             cmd::aggregate::run_aggregate(args, &cli.global, ctx).emit(out, err)
         }

@@ -3,13 +3,16 @@
 use assert_cmd::Command;
 
 #[test]
-fn binary_reports_not_implemented_with_usage_exit() {
-    Command::cargo_bin("git-aggregate-rs")
+fn binary_fails_without_a_configuration() {
+    let tmp = tempfile::tempdir().unwrap();
+    let assert = Command::cargo_bin("git-aggregate-rs")
         .unwrap()
-        .arg("aggregate")
+        .current_dir(tmp.path())
+        .args(["-c", "missing.yaml"])
         .assert()
-        .code(2)
-        .stderr("git-aggregate-rs aggregate: not implemented yet (roadmap phase 3)\n");
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    assert!(stderr.starts_with("error: cannot read "), "{stderr}");
 }
 
 #[test]

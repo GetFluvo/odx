@@ -48,11 +48,11 @@ pub struct MergeSpec {
     pub reference: String,
 }
 
-/// `target: <remote> <branch>`.
+/// `target: [<remote>] <branch>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetSpec {
-    /// Push remote.
-    pub remote: String,
+    /// Push remote, when the result can be pushed.
+    pub remote: Option<String>,
     /// Target branch.
     pub branch: String,
 }
@@ -149,17 +149,19 @@ pub(crate) fn parse(text: &str) -> Result<(ReposFile, Vec<Problem>), String> {
                 },
             }
         }
-        let target = match raw.target.as_deref().map(split_pair) {
+        let target = match raw.target.as_deref().map(split_target) {
             None => None,
             Some(None) => {
-                problem("target: expected \"<remote> <branch>\"".to_owned());
+                problem("target: expected \"[<remote>] <branch>\"".to_owned());
                 None
             }
-            Some(Some((remote, branch))) => {
-                if url_of(&remote).is_none() {
+            Some(Some(target)) => {
+                if let Some(remote) = &target.remote
+                    && url_of(remote).is_none()
+                {
                     problem(format!("target: unknown remote `{remote}`"));
                 }
-                Some(TargetSpec { remote, branch })
+                Some(target)
             }
         };
         let shell_command_after = match raw.shell_command_after {
@@ -180,6 +182,22 @@ pub(crate) fn parse(text: &str) -> Result<(ReposFile, Vec<Problem>), String> {
         }
     }
     Ok((ReposFile { repos }, problems))
+}
+
+/// Split `"[<remote>] <branch>"`.
+fn split_target(text: &str) -> Option<TargetSpec> {
+    let mut words = text.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some(branch), None, None) => Some(TargetSpec {
+            remote: None,
+            branch: branch.to_owned(),
+        }),
+        (Some(remote), Some(branch), None) => Some(TargetSpec {
+            remote: Some(remote.to_owned()),
+            branch: branch.to_owned(),
+        }),
+        _ => None,
+    }
 }
 
 /// Split `"<a> <b>"` on whitespace into exactly two words.
@@ -247,13 +265,28 @@ mod tests {
         assert_eq!(
             repo.target,
             Some(TargetSpec {
-                remote: "acsone".into(),
+                remote: Some("acsone".into()),
                 branch: "aggregated_branch_name".into()
             })
         );
         assert_eq!(repo.shell_command_after, ["echo done"]);
         assert_eq!(file.repos[1].shell_command_after, ["a", "b"]);
         assert_eq!(file.repos[1].target, None);
+    }
+
+    #[test]
+    fn target_without_remote() {
+        let (file, problems) =
+            parse("./x:\n  remotes:\n    oca: u\n  merges:\n    - oca 17.0\n  target: local\n")
+                .unwrap();
+        assert_eq!(problems, []);
+        assert_eq!(
+            file.repos[0].target,
+            Some(TargetSpec {
+                remote: None,
+                branch: "local".into()
+            })
+        );
     }
 
     #[test]
@@ -265,7 +298,7 @@ mod tests {
   merges:
     - oca
     - ghost 17.0
-  target: oca
+  target: oca too many
 ./y:
   merges: []
   target: ghost branch
@@ -277,7 +310,7 @@ mod tests {
             [
                 "./x: merges[0]: expected \"<remote> <ref>\"",
                 "./x: merges[1]: unknown remote `ghost`",
-                "./x: target: expected \"<remote> <branch>\"",
+                "./x: target: expected \"[<remote>] <branch>\"",
                 "./y: needs at least one merge (the base branch)",
                 "./y: target: unknown remote `ghost`",
             ]

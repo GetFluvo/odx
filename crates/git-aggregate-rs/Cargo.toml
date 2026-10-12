@@ -18,11 +18,17 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-odx-core.workspace = true
+odx-aggregate.workspace = true
+odx-config.workspace = true
+odx-core = { workspace = true, features = ["system"] }
+odx-git.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
 insta.workspace = true
+odx-core = { workspace = true, features = ["fakes", "system"] }
+tempfile.workspace = true
 
 [lints]
 workspace = true

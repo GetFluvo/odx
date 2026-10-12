@@ -445,3 +445,27 @@ fn up_to_date_merges_base_only_repositories_and_json_errors() {
         "{json}"
     );
 }
+
+#[test]
+fn git_aggregate_builds_repos_yaml_targets() {
+    let project = project("");
+    std::fs::write(
+        project.root.join("repos.yaml"),
+        format!(
+            "./vendor/pos:\n  remotes:\n    oca: {}\n  merges:\n    - oca 17.0\n    - oca refs/pull/1/head\n",
+            project.upstream
+        ),
+    )
+    .unwrap();
+    let (exit, out, err) = run(&project, &["git-aggregate", "--json"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(json["repos"][0]["dir"], "./vendor/pos");
+    assert_eq!(
+        git(
+            &project.root.join("vendor").join("pos"),
+            &["rev-parse", "HEAD^2"]
+        ),
+        project.pr
+    );
+}

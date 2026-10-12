@@ -28,9 +28,10 @@ readiness). The same engine is available as a drop-in replacement for
 git-aggregator's `gitaggregate`: `odx git-aggregate`, or the standalone
 `git-aggregate-rs` package.
 
-> Status: pre-alpha. The workspace skeleton (roadmap phase 0) is in place:
-> the full command line exists, and every command not yet implemented names
-> the roadmap phase in which it lands.
+> Status: pre-alpha. Working today: the `[tool.odx]` configuration,
+> `odx import`/`export`/`add`/`drop`, `odx aggregate` and the gitaggregate
+> drop-in (`odx git-aggregate`, `git-aggregate-rs`). Every command not yet
+> implemented names the roadmap phase in which it lands.
 
 ## Features
 

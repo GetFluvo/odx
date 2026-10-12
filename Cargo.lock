@@ -372,7 +372,12 @@ dependencies = [
  "assert_cmd",
  "clap",
  "insta",
+ "odx-aggregate",
+ "odx-config",
  "odx-core",
+ "odx-git",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -483,6 +488,7 @@ dependencies = [
  "odx-core",
  "odx-git",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -508,7 +514,6 @@ dependencies = [
  "odx-git",
  "serde_json",
  "tempfile",
- "tokio",
 ]
 
 [[package]]
