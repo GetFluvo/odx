@@ -92,6 +92,39 @@ pub fn expand_home(path: &Path, env: &dyn Env) -> PathBuf {
     }
 }
 
+/// The shared cache directory outside any project: `ODX_CACHE_DIR`, else
+/// `[cache].dir` of the user configuration, else the platform cache
+/// directory.
+pub fn cache_dir(user: &UserConfig, env: &dyn Env) -> Option<PathBuf> {
+    if let Some(dir) = env.var("ODX_CACHE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if let Some(dir) = user.cache.as_ref().and_then(|cache| cache.dir.as_ref()) {
+        return Some(expand_home(dir, env));
+    }
+    platform_cache_dir(env)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn platform_cache_dir(env: &dyn Env) -> Option<PathBuf> {
+    env.var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env.var("HOME").map(|home| Path::new(&home).join(".cache")))
+        .map(|dir| dir.join("odx"))
+}
+
+#[cfg(target_os = "macos")]
+fn platform_cache_dir(env: &dyn Env) -> Option<PathBuf> {
+    env.var("HOME")
+        .map(|home| Path::new(&home).join("Library").join("Caches").join("odx"))
+}
+
+#[cfg(windows)]
+fn platform_cache_dir(env: &dyn Env) -> Option<PathBuf> {
+    env.var("LOCALAPPDATA")
+        .map(|dir| Path::new(&dir).join("odx").join("cache"))
+}
+
 /// The user configuration directory: `ODX_CONFIG_DIR`, else the platform
 /// configuration directory.
 pub fn config_dir(env: &dyn Env) -> Option<PathBuf> {
@@ -255,6 +288,53 @@ projects = ["/home/dev/p"]
             err.to_string()
                 .starts_with(&format!("{}: ", file.display())),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn cache_dir_precedence() {
+        let user = parse_user_config("[cache]\ndir = \"~/c\"\n", Path::new("c")).unwrap();
+        let env = MapEnv::default().with("HOME", "/home/dev");
+        assert_eq!(cache_dir(&user, &env), Some(PathBuf::from("/home/dev/c")));
+        let env = env.with("ODX_CACHE_DIR", "/tmp/odx");
+        assert_eq!(cache_dir(&user, &env), Some(PathBuf::from("/tmp/odx")));
+        assert_eq!(cache_dir(&UserConfig::default(), &MapEnv::default()), None);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn xdg_cache_dir() {
+        let user = UserConfig::default();
+        let xdg = MapEnv::default().with("XDG_CACHE_HOME", "/x");
+        assert_eq!(cache_dir(&user, &xdg), Some(PathBuf::from("/x/odx")));
+        let home = MapEnv::default().with("HOME", "/home/dev");
+        assert_eq!(
+            cache_dir(&user, &home),
+            Some(PathBuf::from("/home/dev/.cache/odx"))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_cache_dir() {
+        let home = MapEnv::default().with("HOME", "/Users/dev");
+        assert_eq!(
+            cache_dir(&UserConfig::default(), &home),
+            Some(PathBuf::from("/Users/dev/Library/Caches/odx"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cache_dir() {
+        let env = MapEnv::default().with("LOCALAPPDATA", "C:/Users/dev/AppData/Local");
+        assert_eq!(
+            cache_dir(&UserConfig::default(), &env),
+            Some(
+                Path::new("C:/Users/dev/AppData/Local")
+                    .join("odx")
+                    .join("cache")
+            )
         );
     }
 

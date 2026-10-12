@@ -244,6 +244,18 @@ fn foreign_directories_are_replaced_only_with_force() {
 }
 
 #[test]
+fn an_empty_directory_becomes_a_worktree() {
+    let fx = fixture();
+    let plan = fx.plan(&[("a", false)]);
+    fs::create_dir_all(&plan.target_dir).unwrap();
+    merger().aggregate(&plan).unwrap();
+    assert_eq!(
+        fs::read_to_string(plan.target_dir.join("text.txt")).unwrap(),
+        "one\nA\nthree\n"
+    );
+}
+
+#[test]
 fn mergiraf_is_registered_as_merge_driver() {
     let fx = fixture();
     // A shell snippet stands in for mergiraf: the driver runs and reports a
@@ -447,5 +459,64 @@ fn a_file_in_place_of_the_target_cannot_be_replaced() {
             .unwrap_err()
             .to_string()
             .starts_with("cannot run git")
+    );
+}
+
+#[test]
+fn push_forces_the_result_to_a_branch() {
+    let fx = fixture();
+    let plan = fx.plan(&[("a", false)]);
+    let result = merger().aggregate(&plan).unwrap();
+    let remote = fx.root.join("remote.git");
+    git(
+        &fx.root,
+        &["init", "--quiet", "--bare", remote.to_str().unwrap()],
+    );
+    merger()
+        .push(&plan.target_dir, remote.to_str().unwrap(), "17.0-agg")
+        .unwrap();
+    assert_eq!(git(&remote, &["rev-parse", "17.0-agg"]), result.head);
+    assert!(
+        merger()
+            .push(&plan.target_dir, "/nonexistent/remote.git", "x")
+            .is_err()
+    );
+}
+
+#[test]
+fn outcome_statuses() {
+    let skipped = StepOutcome::Skipped { files: Vec::new() };
+    assert_eq!(
+        [
+            StepOutcome::Merged.status(),
+            StepOutcome::UpToDate.status(),
+            skipped.status()
+        ],
+        ["merged", "up-to-date", "skipped"]
+    );
+}
+
+#[test]
+fn describe_counts_outcomes() {
+    let built = |steps: Vec<(&str, StepOutcome)>| Aggregated {
+        head: String::new(),
+        tree: String::new(),
+        steps: steps.into_iter().map(|(l, o)| (l.to_owned(), o)).collect(),
+    };
+    assert_eq!(built(vec![]).describe(), "base only");
+    assert_eq!(
+        built(vec![
+            ("#1", StepOutcome::Merged),
+            ("#2", StepOutcome::Merged),
+            ("#3", StepOutcome::UpToDate),
+            (
+                "#4",
+                StepOutcome::Skipped {
+                    files: vec!["a.xml".into(), "b.py".into()]
+                }
+            ),
+        ])
+        .describe(),
+        "2 merged, 1 up to date, 1 skipped: #4 conflicts in a.xml, b.py"
     );
 }

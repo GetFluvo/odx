@@ -6,18 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use std::ffi::OsString;
-
-use odx_aggregate::{BuildOptions, RepoAggregation, RepoPlan, aggregations, fetch_plans};
-use odx_config::schema::MergirafMode;
-use odx_config::user::{CloneMode, UserConfig, expand_home, load_user_config};
+use odx_aggregate::{
+    BuildOptions, RepoAggregation, RepoPlan, aggregations, fetch_plans, local_clones,
+    mergiraf_program, run_pipeline,
+};
+use odx_config::user::{self, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Source, discover};
 use odx_core::system::OsRunner;
-use odx_core::{Env, Exit, Invocation, ProcessRunner};
+use odx_core::{Env, Exit};
 use odx_git::{
-    Aggregated, Aggregation, Cache, CancellationToken, Clones, FetchPlan, Fetched, GitBackend,
-    GitError, Limits, MergeError, Merger, Outcome, StepOutcome, SystemGit, Via, aggregate_all,
-    fetch_all,
+    Aggregated, Aggregation, Cache, Fetched, GitBackend, Limits, MergeError, Merger, Outcome,
+    StepOutcome, SystemGit, Via,
 };
 
 use super::Report;
@@ -28,57 +27,19 @@ use crate::cli::{AggregateArgs, GlobalArgs};
 const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The cache directory: `cache_dir` from the project configuration
-/// (relative to the project root, `~/` expanded), else `ODX_CACHE_DIR`,
-/// else `[cache].dir` from the user configuration, else the platform cache
-/// directory.
+/// (relative to the project root, `~/` expanded), else the shared cache
+/// directory (`ODX_CACHE_DIR`, the user configuration, the platform), else
+/// `.odx/cache` in the project.
 pub(crate) fn cache_dir(
     config: &OdxConfig,
     user: &UserConfig,
     root: &Path,
     env: &dyn Env,
 ) -> PathBuf {
-    if let Some(dir) = &config.cache_dir {
-        return root.join(expand_home(dir, env));
-    }
-    if let Some(dir) = env.var("ODX_CACHE_DIR") {
-        return PathBuf::from(dir);
-    }
-    if let Some(dir) = user.cache.as_ref().and_then(|cache| cache.dir.as_ref()) {
-        return expand_home(dir, env);
-    }
-    let home = env.var("HOME").or_else(|| env.var("USERPROFILE"));
-    platform_cache_dir(env, home).unwrap_or_else(|| root.join(".odx").join("cache"))
-}
-
-/// The local clones configured in `[clones]` of the user configuration.
-pub(crate) fn local_clones(user: &UserConfig, env: &dyn Env) -> Clones {
-    user.clones.as_ref().map_or_else(Clones::default, |clones| {
-        let dirs: Vec<PathBuf> = clones
-            .dirs
-            .iter()
-            .map(|dir| expand_home(dir, env))
-            .collect();
-        Clones::scan(&dirs, clones.mode == Some(CloneMode::Update))
-    })
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn platform_cache_dir(env: &dyn Env, home: Option<String>) -> Option<PathBuf> {
-    env.var("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| home.map(|home| Path::new(&home).join(".cache")))
-        .map(|dir| dir.join("odx"))
-}
-
-#[cfg(target_os = "macos")]
-fn platform_cache_dir(_: &dyn Env, home: Option<String>) -> Option<PathBuf> {
-    home.map(|home| Path::new(&home).join("Library").join("Caches").join("odx"))
-}
-
-#[cfg(windows)]
-fn platform_cache_dir(env: &dyn Env, _: Option<String>) -> Option<PathBuf> {
-    env.var("LOCALAPPDATA")
-        .map(|dir| Path::new(&dir).join("odx").join("cache"))
+    config.cache_dir.as_ref().map_or_else(
+        || user::cache_dir(user, env).unwrap_or_else(|| root.join(".odx").join("cache")),
+        |dir| root.join(expand_home(dir, env)),
+    )
 }
 
 /// What `--fetch-only` and a full aggregation share.
@@ -138,85 +99,6 @@ fn prepare(
     })
 }
 
-/// The mergiraf executable to use: `ODX_MERGIRAF` or `mergiraf`, when the
-/// configured mode wants it and it runs.
-///
-/// # Errors
-///
-/// A message when the mode is `always` and the executable cannot be run.
-pub(crate) fn mergiraf_program(
-    mode: MergirafMode,
-    env: &dyn Env,
-    runner: &dyn ProcessRunner,
-) -> Result<Option<OsString>, String> {
-    let program = env
-        .var("ODX_MERGIRAF")
-        .unwrap_or_else(|| "mergiraf".to_owned());
-    let runs = || {
-        runner
-            .run(&Invocation::new(&program).arg("--version"))
-            .is_ok_and(|out| out.success())
-    };
-    match mode {
-        MergirafMode::Never => Ok(None),
-        MergirafMode::Auto => Ok(runs().then(|| OsString::from(&program))),
-        MergirafMode::Always if runs() => Ok(Some(OsString::from(&program))),
-        MergirafMode::Always => Err(format!(
-            "mergiraf = \"always\" is configured, but {program} cannot be run"
-        )),
-    }
-}
-
-/// Fetch, then build working trees from what was fetched, on a runtime of
-/// its own; pending work is cancelled when Ctrl-C is pressed.
-///
-/// Excluded from coverage: building the runtime only fails when the OS
-/// refuses threads, and a real SIGINT cannot be raised inside the test
-/// process. Everything it calls is tested on its own.
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn run_pipeline(
-    prepared: &Prepared,
-    backend: &Arc<dyn GitBackend>,
-    merger: Option<&Arc<Merger>>,
-    build: &dyn Fn(&[Outcome]) -> Vec<Aggregation>,
-) -> (Vec<Outcome>, Vec<Result<Aggregated, MergeError>>) {
-    let plans: Vec<FetchPlan> = prepared.plans.iter().map(|p| p.plan.clone()).collect();
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(e) => {
-            let message = e.to_string();
-            let outcomes = plans
-                .into_iter()
-                .map(|plan| Outcome {
-                    url: plan.url,
-                    result: Err(GitError::Io(std::io::Error::other(message.clone()))),
-                })
-                .collect();
-            return (outcomes, Vec::new());
-        }
-    };
-    runtime.block_on(async {
-        let cancel = CancellationToken::new();
-        let on_signal = cancel.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                on_signal.cancel();
-            }
-        });
-        let outcomes = fetch_all(&prepared.cache, backend, plans, prepared.limits, &cancel).await;
-        let results = match merger {
-            Some(merger) => {
-                aggregate_all(merger, build(&outcomes), prepared.limits.jobs, &cancel).await
-            }
-            None => Vec::new(),
-        };
-        (outcomes, results)
-    })
-}
-
 /// `odx aggregate [--fetch-only] [--repo NAME] [--prefer-mirror] [--keep-conflicts] [--force]`.
 pub(crate) fn run_aggregate(
     args: &AggregateArgs,
@@ -269,8 +151,10 @@ fn aggregate(
         runnable
     };
     let (outcomes, results) = run_pipeline(
-        &prepared,
+        &prepared.cache,
         &backend,
+        prepared.plans.iter().map(|p| p.plan.clone()).collect(),
+        prepared.limits,
         merger.as_ref().map(|(m, _)| m),
         &plan_builds,
     );
@@ -386,7 +270,7 @@ impl Summary {
                         let _ = writeln!(
                             report.out,
                             "built {name} in {dir}: {} ({})",
-                            describe(built),
+                            built.describe(),
                             short(&built.head)
                         );
                     }
@@ -449,39 +333,6 @@ fn short(sha: &str) -> &str {
     sha.get(..12).unwrap_or(sha)
 }
 
-/// `2 merged, 1 up to date, 1 skipped (conflicts in a.xml)`, or `base only`.
-fn describe(built: &Aggregated) -> String {
-    let count =
-        |want: fn(&StepOutcome) -> bool| built.steps.iter().filter(|(_, o)| want(o)).count();
-    let merged = count(|o| *o == StepOutcome::Merged);
-    let current = count(|o| *o == StepOutcome::UpToDate);
-    let skipped: Vec<String> = built
-        .steps
-        .iter()
-        .filter_map(|(label, outcome)| match outcome {
-            StepOutcome::Skipped { files } => {
-                Some(format!("{label} conflicts in {}", files.join(", ")))
-            }
-            _ => None,
-        })
-        .collect();
-    let mut parts = Vec::new();
-    if merged > 0 {
-        parts.push(format!("{merged} merged"));
-    }
-    if current > 0 {
-        parts.push(format!("{current} up to date"));
-    }
-    if !skipped.is_empty() {
-        parts.push(format!("{} skipped: {}", skipped.len(), skipped.join("; ")));
-    }
-    if parts.is_empty() {
-        "base only".to_owned()
-    } else {
-        parts.join(", ")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,19 +343,14 @@ mod tests {
     }
 
     #[test]
-    fn user_cache_dir_and_clones() {
-        let user = odx_config::user::parse_user_config(
-            "[cache]\ndir = \"~/c\"\n[clones]\ndirs = [\"~/none\"]\nmode = \"update\"\n",
-            Path::new("config.toml"),
-        )
-        .unwrap();
+    fn user_cache_dir() {
+        let user =
+            user::parse_user_config("[cache]\ndir = \"~/c\"\n", Path::new("config.toml")).unwrap();
         let env = MapEnv::default().with("HOME", "/home/dev");
         assert_eq!(
             cache_dir(&config(""), &user, Path::new("/p"), &env),
             Path::new("/home/dev/c")
         );
-        assert!(local_clones(&user, &env).is_empty());
-        assert!(local_clones(&UserConfig::default(), &env).is_empty());
     }
 
     fn config(toml: &str) -> OdxConfig {
@@ -541,41 +387,6 @@ mod tests {
         assert_eq!(
             cache_dir_of(&config(""), root, &MapEnv::default()),
             root.join(".odx").join("cache")
-        );
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    #[test]
-    fn xdg_cache_dir() {
-        let root = Path::new("/p");
-        let xdg = MapEnv::default().with("XDG_CACHE_HOME", "/x");
-        assert_eq!(cache_dir_of(&config(""), root, &xdg), Path::new("/x/odx"));
-        let home = MapEnv::default().with("HOME", "/home/dev");
-        assert_eq!(
-            cache_dir_of(&config(""), root, &home),
-            Path::new("/home/dev/.cache/odx")
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_cache_dir() {
-        let home = MapEnv::default().with("HOME", "/Users/dev");
-        assert_eq!(
-            cache_dir_of(&config(""), Path::new("/p"), &home),
-            Path::new("/Users/dev/Library/Caches/odx")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_cache_dir() {
-        let env = MapEnv::default().with("LOCALAPPDATA", "C:/Users/dev/AppData/Local");
-        assert_eq!(
-            cache_dir_of(&config(""), Path::new("C:/p"), &env),
-            Path::new("C:/Users/dev/AppData/Local")
-                .join("odx")
-                .join("cache")
         );
     }
 }

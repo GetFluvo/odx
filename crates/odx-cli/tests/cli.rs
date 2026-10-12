@@ -72,7 +72,7 @@ fn git_aggregate_subcommand_uses_the_drop_in() {
     assert_eq!(exit, Exit::Usage);
     assert_eq!(
         err,
-        "odx git-aggregate show-all-prs: not implemented yet (roadmap phase 3)\n"
+        "odx git-aggregate show-all-prs: not implemented yet (roadmap phase 7)\n"
     );
 }
 

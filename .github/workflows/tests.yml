@@ -91,6 +91,23 @@ jobs:
         env:
           INSTA_UPDATE: "no"
 
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Install git-aggregator
+        run: |
+          uv tool install git-aggregator==4.1
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - run: cargo test -p git-aggregate-rs --test aggregate --locked -- --ignored parity
+
   doc:
     runs-on: ubuntu-latest
     steps:
@@ -265,7 +282,7 @@ jobs:
 
   all-checks:
     if: always()
-    needs: [fmt, clippy, test, doc, docs, coverage, deny, machete, msrv, typos, commits, package, zizmor]
+    needs: [fmt, clippy, test, parity, doc, docs, coverage, deny, machete, msrv, typos, commits, package, zizmor]
     runs-on: ubuntu-latest
     steps:
       - name: Every required job succeeded

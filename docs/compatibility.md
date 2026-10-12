@@ -46,3 +46,45 @@ marking them as generated. The repository URL becomes remote `origin`;
 branches from other URLs get a remote named after the URL's owner. GitLab
 repositories use `refs/merge-requests/N/head`. Exporting and importing again
 yields the same repositories, merges, targets and addon lists.
+
+## gitaggregate drop-in
+
+```console
+$ odx git-aggregate -c repos.yaml          # or the standalone git-aggregate-rs
+$ odx git-aggregate -c repos.yaml -d '*/sale-*' -j 8
+$ odx git-aggregate -c repos.yaml -e --env-file .env -p
+```
+
+`odx git-aggregate` (and the `git-aggregate-rs` package) runs a `repos.yaml`
+the way `gitaggregate` does, on the odx engine: every remote is fetched once
+into the shared cache, concurrently, and each target directory becomes a
+working tree of that cache with the merges applied in order. Target
+directories are relative to the current directory, as with `gitaggregate`.
+
+| Option | Effect |
+| --- | --- |
+| `-c, --config <FILE>` | the `repos.yaml` (default `repos.yaml`) |
+| `-d, --dirmatch <PATTERN>` | only target directories matching the fnmatch pattern |
+| `-e, --expand-env` | expand `$VAR` and `${VAR}`; the environment wins over `--env-file` |
+| `--env-file <FILE>` | `KEY=VALUE` lines for `--expand-env` |
+| `-f, --force` | discard local changes; replace directories odx did not create |
+| `-p, --push` | push the result to `target: <remote> <branch>` |
+| `-j, --jobs <N>` | repositories at once (default: number of CPUs) |
+| `--log-level <LEVEL>` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
+| `--allow-shell` | run `shell_command_after` (skipped with a warning otherwise) |
+| `--mergiraf` | resolve conflicts with mergiraf (`ODX_MERGIRAF` names the executable) |
+| `--json` | summary on stdout (schema 1) |
+
+Differences from `gitaggregate`:
+
+- Target directories are detached working trees of the cache: `git log`,
+  `git diff` and `git status` work, but the remotes are not configured in
+  them and the target branch only exists on the push remote.
+- Directories created by `gitaggregate` are replaced only with `-f`.
+- Every merge is a merge commit, so commit ids differ; the resulting trees
+  are identical, which CI checks against git-aggregator 4.1.
+- With `-e`, an unset variable is left as written with a warning.
+- `show-closed-prs` and `show-all-prs` land in roadmap phase 7.
+
+The cache and local clones are shared with `odx aggregate` (see
+[Command line](cli.md)).

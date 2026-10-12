@@ -2,20 +2,26 @@
 //!
 //! The command line mirrors `gitaggregate`: the same `repos.yaml` format,
 //! the same actions (`aggregate`, `show-closed-prs`, `show-all-prs`) and the
-//! same flags, plus a few opt-in extensions (`--allow-shell`, `--lock`,
-//! `--mergiraf`, `--json`). The `odx` binary exposes the same interface as
+//! same flags, plus a few opt-in extensions (`--allow-shell`, `--mergiraf`,
+//! `--json`). The `odx` binary exposes the same interface as
 //! `odx git-aggregate`.
 //!
-//! In the workspace skeleton every action parses its arguments and then
-//! reports that it is not implemented yet; the engine lands in roadmap
-//! phase 3.
+//! Every remote is fetched once into a shared cache of bare repositories
+//! (the odx cache), concurrently; each target directory becomes a detached
+//! working tree of that cache with the merges applied. `--push` pushes the
+//! result to the target remote's branch.
+
+mod aggregate;
+mod dirmatch;
+
+pub use dirmatch::fnmatch;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, ValueEnum};
-use odx_core::Exit;
+use odx_core::{Env, Exit, FileSystem};
 
 /// Command-line interface of `git-aggregate-rs`.
 #[derive(Debug, Parser)]
@@ -37,51 +43,47 @@ pub struct Cli {
     #[arg(short, long, value_name = "FILE", default_value = "repos.yaml")]
     pub config: PathBuf,
 
-    /// Number of repositories to process in parallel.
-    #[arg(short, long, value_name = "N", default_value_t = 1)]
-    pub jobs: usize,
-
-    /// Only process target directories matching this glob.
-    #[arg(short, long, value_name = "GLOB")]
-    pub dirmatch: Option<String>,
-
-    /// Push each aggregated target branch to its remote.
+    /// Push the result to the target remote and branch.
     #[arg(short, long)]
     pub push: bool,
 
-    /// Expand `$VAR` and `${VAR}` in the repositories file.
-    #[arg(long)]
-    pub expand_env: bool,
-
-    /// Load environment variables from FILE before expanding.
-    #[arg(short, long, value_name = "FILE")]
-    pub env_file: Option<PathBuf>,
-
-    /// Discard local changes in the target directories.
-    #[arg(short, long)]
-    pub force: bool,
+    /// Only process target directories matching this fnmatch pattern.
+    #[arg(short, long, value_name = "PATTERN")]
+    pub dirmatch: Option<String>,
 
     /// Logging verbosity.
     #[arg(long, value_enum, ignore_case = true, default_value_t = LogLevel::Info)]
     pub log_level: LogLevel,
 
-    /// Disable colored output (also honors `NO_COLOR`).
+    /// Expand `$VAR` and `${VAR}` in the repositories file.
+    #[arg(short, long)]
+    pub expand_env: bool,
+
+    /// Variables for --expand-env (the environment takes precedence).
+    #[arg(long, value_name = "FILE")]
+    pub env_file: Option<PathBuf>,
+
+    /// Discard local changes, and replace directories not built by odx.
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Repositories fetched and built at once [default: number of CPUs].
+    #[arg(short, long, value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// Disable colored output.
     #[arg(long)]
     pub no_color: bool,
 
-    /// Allow `shell_command_after` entries to run (off by default).
+    /// Run `shell_command_after` entries (skipped with a warning otherwise).
     #[arg(long, action = ArgAction::SetTrue)]
     pub allow_shell: bool,
 
-    /// Write a reproducible lockfile with the resolved commits.
-    #[arg(long, value_name = "FILE")]
-    pub lock: Option<PathBuf>,
-
-    /// Use mergiraf for syntax-aware conflict resolution.
+    /// Resolve conflicts with mergiraf (`ODX_MERGIRAF` names the executable).
     #[arg(long)]
     pub mergiraf: bool,
 
-    /// Machine-readable output on stdout.
+    /// Machine-readable summary on stdout.
     #[arg(long)]
     pub json: bool,
 }
@@ -111,7 +113,7 @@ impl Action {
 /// Logging levels accepted by `--log-level`, case-insensitive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum LogLevel {
-    /// Everything, including fetch and merge details.
+    /// Everything.
     Debug,
     /// Progress per repository.
     Info,
@@ -119,23 +121,49 @@ pub enum LogLevel {
     Warning,
     /// Errors only.
     Error,
+    /// Errors only (git-aggregator's highest level).
+    Critical,
 }
 
-/// Execute an already parsed command line.
+/// What a run needs from its environment, so tests can supply fakes.
+#[derive(Debug)]
+pub struct Context<'a> {
+    /// File system access, for the repositories, env and user files.
+    pub fs: &'a dyn FileSystem,
+    /// Environment variables.
+    pub env: &'a dyn Env,
+    /// The directory target directories are relative to.
+    pub dir: PathBuf,
+}
+
+/// Execute an already parsed command line; `prefix` names the command in
+/// messages.
 ///
 /// # Errors
 ///
-/// Returns an error when writing to `err` fails.
-pub fn execute(cli: &Cli, prefix: &str, err: &mut dyn Write) -> io::Result<Exit> {
-    writeln!(
-        err,
-        "{prefix} {}: not implemented yet (roadmap phase 3)",
-        cli.action.name()
-    )?;
-    Ok(Exit::Usage)
+/// Returns an error when writing to `out` or `err` fails.
+pub fn execute(
+    cli: &Cli,
+    prefix: &str,
+    ctx: &Context<'_>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> io::Result<Exit> {
+    match cli.action {
+        Action::Aggregate => aggregate::aggregate(cli, ctx, out, err),
+        action => {
+            writeln!(
+                err,
+                "{prefix} {}: not implemented yet (roadmap phase 7)",
+                action.name()
+            )?;
+            Ok(Exit::Usage)
+        }
+    }
 }
 
-/// Parse `args` (including the program name) and run the command.
+/// Parse `args` (including the program name) and run the command in the
+/// current directory, with the real file system and environment.
 ///
 /// Help and version output go to `out`, diagnostics to `err`.
 pub fn run<I, T>(args: I, out: &mut dyn Write, err: &mut dyn Write) -> Exit
@@ -143,8 +171,22 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    let ctx = Context {
+        fs: &odx_core::system::OsFs,
+        env: &odx_core::system::OsEnv,
+        dir: std::env::current_dir().unwrap_or_default(),
+    };
+    run_with(args, &ctx, out, err)
+}
+
+/// Like [`run`], with an explicit context.
+pub fn run_with<I, T>(args: I, ctx: &Context<'_>, out: &mut dyn Write, err: &mut dyn Write) -> Exit
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
     let result = match Cli::try_parse_from(args) {
-        Ok(cli) => execute(&cli, "git-aggregate-rs", err),
+        Ok(cli) => execute(&cli, "git-aggregate-rs", ctx, out, err),
         Err(error) => report_clap_error(&error, out, err),
     };
     result.unwrap_or(Exit::Failure)
@@ -174,11 +216,17 @@ pub fn report_clap_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use odx_core::fake::{MapEnv, MemoryFs};
 
     fn run_args(args: &[&str]) -> (Exit, String, String) {
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let exit = run(args, &mut out, &mut err);
+        let ctx = Context {
+            fs: &MemoryFs::default(),
+            env: &MapEnv::default(),
+            dir: PathBuf::from("/work"),
+        };
+        let exit = run_with(args, &ctx, &mut out, &mut err);
         (
             exit,
             String::from_utf8(out).unwrap(),
@@ -191,6 +239,8 @@ mod tests {
         let cli = Cli::try_parse_from(["git-aggregate-rs"]).unwrap();
         assert_eq!(cli.action, Action::Aggregate);
         assert_eq!(cli.config, PathBuf::from("repos.yaml"));
+        assert_eq!(cli.jobs, None);
+        assert_eq!(Action::Aggregate.name(), "aggregate");
     }
 
     #[test]
@@ -204,32 +254,42 @@ mod tests {
             "-d",
             "*/sale-*",
             "-p",
-            "--expand-env",
             "-e",
+            "--env-file",
             ".env",
             "-f",
+            "--no-color",
             "--log-level",
-            "DEBUG",
+            "CRITICAL",
             "show-closed-prs",
         ])
         .unwrap();
         assert_eq!(cli.action, Action::ShowClosedPrs);
-        assert_eq!(cli.jobs, 4);
-        assert_eq!(cli.log_level, LogLevel::Debug);
-        assert!(cli.push && cli.force && cli.expand_env);
+        assert_eq!(cli.jobs, Some(4));
+        assert_eq!(cli.log_level, LogLevel::Critical);
+        assert_eq!(cli.env_file, Some(PathBuf::from(".env")));
+        assert!(cli.push && cli.force && cli.expand_env && cli.no_color);
     }
 
     #[test]
-    fn every_action_is_not_implemented_yet() {
-        for action in ["aggregate", "show-closed-prs", "show-all-prs"] {
+    fn pull_request_actions_are_not_implemented_yet() {
+        for action in ["show-closed-prs", "show-all-prs"] {
             let (exit, out, err) = run_args(&["git-aggregate-rs", action]);
             assert_eq!(exit, Exit::Usage);
             assert_eq!(out, "");
             assert_eq!(
                 err,
-                format!("git-aggregate-rs {action}: not implemented yet (roadmap phase 3)\n")
+                format!("git-aggregate-rs {action}: not implemented yet (roadmap phase 7)\n")
             );
         }
+    }
+
+    #[test]
+    fn missing_configuration_fails() {
+        let (exit, out, err) = run_args(&["git-aggregate-rs"]);
+        assert_eq!(exit, Exit::Failure);
+        assert_eq!(out, "");
+        assert!(err.starts_with("error: cannot read "), "{err}");
     }
 
     #[test]
@@ -260,7 +320,11 @@ mod tests {
             }
         }
         assert!(Broken.flush().is_ok());
-        let exit = run(["git-aggregate-rs"], &mut Broken, &mut Broken);
+        let exit = run(
+            ["git-aggregate-rs", "show-all-prs"],
+            &mut Broken,
+            &mut Broken,
+        );
         assert_eq!(exit, Exit::Failure);
         let exit = run(["git-aggregate-rs", "--help"], &mut Broken, &mut Broken);
         assert_eq!(exit, Exit::Failure);

@@ -2,11 +2,19 @@
 //!
 //! [`fetch_plans`] turns `[tool.odx]` into one fetch plan per repository
 //! URL for the git cache; [`aggregations`] turns the fetched commits into
-//! one working-tree build per repository.
+//! one working-tree build per repository. [`yaml_fetch_plans`] and
+//! [`yaml_aggregations`] do the same for a git-aggregator `repos.yaml`, and
+//! [`run_pipeline`] runs both stages.
+
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod aggregation;
+mod pipeline;
+mod repos_yaml;
 
 pub use aggregation::{BuildOptions, RepoAggregation, aggregations};
+pub use pipeline::{local_clones, mergiraf_program, run_pipeline};
+pub use repos_yaml::{yaml_aggregations, yaml_fetch_plans, yaml_source};
 
 use odx_config::OdxConfig;
 use odx_config::schema::{ForgeKind, MergeSource};

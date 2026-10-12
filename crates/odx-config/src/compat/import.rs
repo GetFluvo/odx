@@ -84,12 +84,11 @@ fn import_repo(
             entry
         })
         .collect();
-    if let Some(target) = &spec.target
-        && spec.remote_url(&target.remote) != Some(url.as_str())
+    if let Some(remote) = spec.target.as_ref().and_then(|t| t.remote.as_ref())
+        && spec.remote_url(remote) != Some(url.as_str())
     {
         warn(format!(
-            "push remote `{}` is not imported; odx vaults locked commits to [tool.odx.mirror]",
-            target.remote
+            "push remote `{remote}` is not imported; odx vaults locked commits to [tool.odx.mirror]"
         ));
     }
     if !spec.shell_command_after.is_empty() {

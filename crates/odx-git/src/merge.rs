@@ -52,6 +52,17 @@ pub enum StepOutcome {
     },
 }
 
+impl StepOutcome {
+    /// `merged`, `up-to-date` or `skipped`, as in machine-readable output.
+    pub const fn status(&self) -> &'static str {
+        match self {
+            Self::Merged => "merged",
+            Self::UpToDate => "up-to-date",
+            Self::Skipped { .. } => "skipped",
+        }
+    }
+}
+
 /// The result of an aggregation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Aggregated {
@@ -61,6 +72,53 @@ pub struct Aggregated {
     pub tree: String,
     /// One outcome per step, in order.
     pub steps: Vec<(String, StepOutcome)>,
+}
+
+impl Aggregated {
+    /// `2 merged, 1 up to date, 1 skipped: #3 conflicts in a.xml`, or
+    /// `base only`.
+    ///
+    /// ```
+    /// use odx_git::{Aggregated, StepOutcome};
+    ///
+    /// let built = Aggregated {
+    ///     head: "h".into(),
+    ///     tree: "t".into(),
+    ///     steps: vec![("#1".into(), StepOutcome::Merged), ("#2".into(), StepOutcome::UpToDate)],
+    /// };
+    /// assert_eq!(built.describe(), "1 merged, 1 up to date");
+    /// ```
+    pub fn describe(&self) -> String {
+        let count =
+            |want: fn(&StepOutcome) -> bool| self.steps.iter().filter(|(_, o)| want(o)).count();
+        let merged = count(|o| *o == StepOutcome::Merged);
+        let current = count(|o| *o == StepOutcome::UpToDate);
+        let skipped: Vec<String> = self
+            .steps
+            .iter()
+            .filter_map(|(label, outcome)| match outcome {
+                StepOutcome::Skipped { files } => {
+                    Some(format!("{label} conflicts in {}", files.join(", ")))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut parts = Vec::new();
+        if merged > 0 {
+            parts.push(format!("{merged} merged"));
+        }
+        if current > 0 {
+            parts.push(format!("{current} up to date"));
+        }
+        if !skipped.is_empty() {
+            parts.push(format!("{} skipped: {}", skipped.len(), skipped.join("; ")));
+        }
+        if parts.is_empty() {
+            "base only".to_owned()
+        } else {
+            parts.join(", ")
+        }
+    }
 }
 
 /// Errors from aggregating.
@@ -143,6 +201,20 @@ impl Merger {
             .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
+    /// Push the working tree's commit to branch `branch` of `remote`
+    /// (forced, as git-aggregator does).
+    ///
+    /// # Errors
+    ///
+    /// When git cannot push.
+    pub fn push(&self, target: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
+        let invocation = self
+            .git(target)
+            .args(["push", "--force", "--quiet", remote])
+            .arg(format!("HEAD:refs/heads/{branch}"));
+        self.run("push", &invocation).map(drop)
+    }
+
     /// Create or reset the working tree, apply every step and return the
     /// result.
     ///
@@ -179,12 +251,14 @@ impl Merger {
     }
 
     /// Make `target_dir` a clean, detached working tree of the cache at
-    /// the base commit.
+    /// the base commit. A missing or empty directory becomes a new working
+    /// tree.
     fn prepare(&self, plan: &Aggregation) -> Result<(), MergeError> {
         let cache = &plan.cache_repo;
         let target = &plan.target_dir;
         self.run("worktree", &self.git(cache).args(["worktree", "prune"]))?;
-        if target.exists() {
+        let empty = fs::read_dir(target).is_ok_and(|mut entries| entries.next().is_none());
+        if target.exists() && !empty {
             if !self.is_worktree_of(target, cache) {
                 if !plan.force {
                     return Err(MergeError::NotAWorktree(target.clone()));
