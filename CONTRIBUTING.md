@@ -182,10 +182,15 @@ can be discussed first.
 
 ## Releasing (maintainers)
 
-1. `cog bump --auto` updates `CHANGELOG.md` and tags `vX.Y.Z`.
-2. CI builds release binaries with `cargo-dist`, signs them with Sigstore,
-   publishes the crates to crates.io and the `odx-cli` binary wheel to PyPI
-   with trusted publishing, and publishes the VS Code extension to the Visual
-   Studio Marketplace and Open VSX when its version changed.
-3. The GitHub Release notes are generated from the changelog; the benchmark
-   numbers in `docs/benchmarks.md` are refreshed before tagging.
+1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` (and the
+   internal crate versions in `[workspace.dependencies]`) in a
+   `build: release vX.Y.Z` pull request.
+2. Release Drafter keeps a draft GitHub Release up to date from the merged,
+   auto-labeled pull requests. Review it, set the tag `vX.Y.Z`, and publish.
+3. Publishing the release runs `.github/workflows/release.yml`: it checks the
+   tag against the workspace version, builds wheels of `odx-cli` and
+   `git-aggregate-rs` for Linux (glibc and musl, x86_64 and aarch64), macOS
+   and Windows plus sdists, attests and signs them with Sigstore, publishes
+   them to PyPI and then the crates to crates.io. Both registries use trusted
+   publishing (no tokens); the `pypi` and `crates-io` environments only accept
+   `v*` tags.
