@@ -1,8 +1,10 @@
 //! `odx add`, `odx drop` and the writing half of `odx import --write`.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use odx_config::edit::{Added, PyprojectEdit, Target, parse_spec};
+use odx_config::lock::{LockSource, Lockfile};
 use odx_config::schema::Repository;
 use odx_config::{ConfigError, Source, discover, find_pyproject, parse_pyproject};
 use odx_core::Exit;
@@ -137,28 +139,85 @@ pub(crate) fn run_drop(args: &DropArgs, ctx: &Context<'_>) -> Report {
 fn drop(args: &DropArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let file = locate(ctx)?;
     let mut doc = open(ctx, &file)?;
-    let what = if args.package {
+    let lock_path = lock_path(ctx, &file);
+    let mut lock = read_lock(ctx, &lock_path)?;
+    let (what, in_lock) = if args.package {
         let groups = group_names(ctx, &file);
         let groups: Vec<&str> = groups.iter().map(String::as_str).collect();
         doc.drop_package(&args.spec, &groups)
             .map_err(|e| Report::error(Exit::Failure, e.to_string()))?;
-        format!("package {}", args.spec)
+        let in_lock = lock
+            .as_mut()
+            .is_some_and(|lock| lock.remove_package(&args.spec));
+        (format!("package {}", args.spec), in_lock)
     } else {
         let spec = parse_spec(&args.spec).map_err(|e| Report::error(Exit::Usage, e))?;
         doc.drop_merge(&spec)
             .map_err(|e| Report::error(Exit::Failure, e.to_string()))?;
-        format!("{} {}", describe(&spec.target), spec.url)
+        let source = LockSource {
+            pr: None,
+            sha: None,
+            branch: None,
+            remote: None,
+        };
+        let source = match &spec.target {
+            Target::Pr(pr) => LockSource {
+                pr: Some(*pr),
+                ..source
+            },
+            Target::Sha(sha) => LockSource {
+                sha: Some(sha.clone()),
+                ..source
+            },
+            Target::Branch(branch) => LockSource {
+                branch: Some(branch.clone()),
+                ..source
+            },
+        };
+        let in_lock = lock
+            .as_mut()
+            .is_some_and(|lock| lock.remove_merge(&spec.url, &source));
+        (format!("{} {}", describe(&spec.target), spec.url), in_lock)
     };
     save(ctx, &file, &doc)?;
-    let reason = args
-        .reason
-        .as_ref()
-        .map(|reason| format!(" (reason: {reason})"))
-        .unwrap_or_default();
+    let mut out = format!("dropped {what} from {}", file.display());
+    if let Some(lock) = lock.filter(|_| in_lock) {
+        ctx.fs
+            .write(&lock_path, lock.render().as_bytes())
+            .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", lock_path.display())))?;
+        let _ = write!(out, " and {}", lock_path.display());
+    }
+    if let Some(reason) = &args.reason {
+        let _ = write!(out, " (reason: {reason})");
+    }
+    out.push('\n');
     Ok(Report {
-        out: format!("dropped {what} from {}{reason}\n", file.display()),
+        out,
         ..Report::default()
     })
+}
+
+/// The lockfile of the project whose configuration is `file`.
+fn lock_path(ctx: &Context<'_>, file: &Path) -> PathBuf {
+    match discover(ctx.fs, &ctx.dir, Some(file)) {
+        Ok(Source::Pyproject(project)) => file.with_file_name(project.config.lockfile()),
+        _ => file.with_file_name("odx.lock"),
+    }
+}
+
+/// The lockfile, if it exists; a lockfile that cannot be read stops the
+/// command before anything is written.
+fn read_lock(ctx: &Context<'_>, path: &Path) -> Result<Option<Lockfile>, Report> {
+    if !ctx.fs.exists(path) {
+        return Ok(None);
+    }
+    let bytes = ctx
+        .fs
+        .read(path)
+        .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", path.display())))?;
+    Lockfile::parse(&String::from_utf8_lossy(&bytes))
+        .map(Some)
+        .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", path.display())))
 }
 
 /// The dependency group names configured in `[tool.odx.groups]`.

@@ -43,4 +43,6 @@ A package goes into the project's convention: as a PEP 508 direct reference
 when its dependency group already lists direct references, otherwise as a
 `[tool.odx.packages]` entry. `drop --package` removes it from
 `[tool.odx.packages]`, from direct references in the configured groups, and
-from `[tool.uv.sources]`.
+from `[tool.uv.sources]`. Both forms of `drop` also remove the entry from
+`odx.lock`; a lockfile that cannot be read stops the command before anything
+is written.

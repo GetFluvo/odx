@@ -12,6 +12,8 @@ mod duration;
 pub mod edit;
 mod error;
 mod load;
+pub mod lock;
+pub mod mutes;
 pub mod schema;
 
 pub use duration::{Span, SpanError};
