@@ -316,7 +316,7 @@ fn aggregate_builds_the_working_tree() {
     assert_eq!((exit, err.as_str()), (Exit::Success, ""));
     insta::assert_snapshot!(redact(&out));
     assert!(project.root.join("vendor/pos/b.txt").exists());
-    let (exit, out, _) = run(&project, &["--json", "aggregate"]);
+    let (exit, out, _) = run(&project, &["--json", "aggregate", "--update"]);
     assert_eq!(exit, Exit::Success);
     insta::assert_snapshot!(redact(&out));
 }
@@ -343,9 +343,9 @@ fn conflicts_stop_or_are_skipped() {
     assert_eq!(exit, Exit::Success);
     assert_eq!(
         redact(&out),
-        "fetched pos: 3 refs\nbuilt pos in vendor/pos: 1 merged, 1 skipped: #2 conflicts in b.txt (<sha>)\n"
+        "fetched pos: 3 refs\nbuilt pos in vendor/pos: 1 merged, 1 skipped: #2 conflicts in b.txt (<sha>)\nlocked pos at <sha>\n"
     );
-    let (_, json, _) = run(&project, &["--json", "aggregate"]);
+    let (_, json, _) = run(&project, &["--json", "aggregate", "--update"]);
     assert!(
         json.contains("\"status\":\"skipped\",\"files\":[\"b.txt\"]")
             || json.contains("\"files\":[\"b.txt\"],\"label\":\"#2\",\"status\":\"skipped\""),
@@ -426,7 +426,7 @@ fn up_to_date_merges_base_only_repositories_and_json_errors() {
         out.contains("built pos in vendor/pos: 1 up to date ("),
         "{out}"
     );
-    let (_, json, _) = run(&project, &["--json", "aggregate"]);
+    let (_, json, _) = run(&project, &["--json", "aggregate", "--update"]);
     assert!(json.contains("\"status\":\"up-to-date\""), "{json}");
 
     write_config(&project, "mergiraf = \"never\"", "");
@@ -488,4 +488,201 @@ fn merges_are_rebased_unless_configured() {
     assert_eq!(exit, Exit::Success, "{err}");
     let work = merged.root.join("vendor").join("pos");
     assert_eq!(git(&work, &["rev-parse", "HEAD^2"]), merged.pr);
+}
+
+fn upstream_dir(project: &Project) -> PathBuf {
+    let dir = PathBuf::from(project.upstream.trim_start_matches("file://"));
+    if cfg!(windows) {
+        PathBuf::from(dir.to_string_lossy().trim_start_matches('/'))
+    } else {
+        dir
+    }
+}
+
+fn read_lock(project: &Project) -> String {
+    std::fs::read_to_string(project.root.join("odx.lock")).unwrap()
+}
+
+#[test]
+fn lock_then_aggregate_from_the_lock() {
+    let project = project("mergiraf = \"never\"");
+    let (exit, out, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.contains("resolved pos: 1 merged ("), "{out}");
+    assert!(out.contains("locked pos at "), "{out}");
+    assert!(
+        !project.root.join("vendor").exists(),
+        "lock does not build the project"
+    );
+    let locked = read_lock(&project);
+    assert!(
+        locked.contains(&format!("sha = \"{}\"", project.pr)),
+        "{locked}"
+    );
+
+    // Nothing changed upstream: nothing to resolve, the file stays the same.
+    let (exit, out, _) = run(&project, &["lock"]);
+    assert_eq!((exit, out.as_str()), (Exit::Success, ""));
+    assert_eq!(read_lock(&project), locked);
+    assert_eq!(run(&project, &["lock", "--check"]).0, Exit::Success);
+
+    let (exit, out, err) = run(&project, &["aggregate", "--locked"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.contains("built pos in vendor/pos"), "{out}");
+    assert_eq!(read_lock(&project), locked);
+
+    // The working tree is what the lock describes: no fetch, no merge.
+    let (exit, out, _) = run(&project, &["aggregate"]);
+    assert_eq!(
+        (exit, out.as_str()),
+        (Exit::Success, "up to date pos in vendor/pos (locked)\n")
+    );
+    let (_, json, _) = run(&project, &["--json", "aggregate"]);
+    assert!(
+        json.contains("\"current\":[{\"name\":\"pos\",\"target_dir\":\"vendor/pos\"}]"),
+        "{json}"
+    );
+}
+
+#[test]
+fn moved_heads_stay_pinned_until_updated() {
+    let project = project("mergiraf = \"never\"");
+    assert_eq!(run(&project, &["aggregate"]).0, Exit::Success);
+    // The pull request gets different changes upstream.
+    add_pr(&project, 1, "changed");
+    let (exit, out, _) = run(&project, &["aggregate"]);
+    assert_eq!(
+        (exit, out.as_str()),
+        (Exit::Success, "up to date pos in vendor/pos (locked)\n")
+    );
+    assert_eq!(run(&project, &["lock", "--check"]).0, Exit::Success);
+    let (exit, out, _) = run(&project, &["lock", "--update"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(
+        redact(&out).contains("updated pos #1: <sha> -> <sha> (changed)"),
+        "{out}"
+    );
+    let (exit, out, _) = run(&project, &["aggregate", "--locked"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(out.contains("built pos"), "{out}");
+    let b = std::fs::read_to_string(project.root.join("vendor/pos/b.txt")).unwrap();
+    assert_eq!(b.trim(), "changed");
+
+    // The base moves and the pull request is rebased with the same change.
+    let up = upstream_dir(&project);
+    let pr = git(&up, &["rev-parse", "refs/pull/1/head"]);
+    git(&up, &["checkout", "--quiet", "17.0"]);
+    std::fs::write(up.join("c.txt"), "c").unwrap();
+    git(&up, &["add", "c.txt"]);
+    git(&up, &["commit", "--quiet", "-m", "c"]);
+    git(&up, &["checkout", "--quiet", "--detach", "17.0"]);
+    git(&up, &["cherry-pick", &pr]);
+    let rebased = git(&up, &["rev-parse", "HEAD"]);
+    git(&up, &["update-ref", "refs/pull/1/head", &rebased]);
+    git(&up, &["checkout", "--quiet", "17.0"]);
+    let (exit, out, _) = run(&project, &["--json", "aggregate", "--update"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(out.contains("\"change\":\"rebased (same patch)\""), "{out}");
+    assert!(out.contains("\"item\":\"base 17.0\""), "{out}");
+}
+
+#[test]
+fn configuration_changes_invalidate_the_lock() {
+    let project = project("mergiraf = \"never\"");
+    assert_eq!(run(&project, &["lock"]).0, Exit::Success);
+    let locked = read_lock(&project);
+    write_config(
+        &project,
+        "mergiraf = \"never\"",
+        "{ pr = 1 }, { branch = \"17.0\" }",
+    );
+    let (exit, _, err) = run(&project, &["lock", "--check"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("odx.lock is not up to date; run `odx lock`"),
+        "{err}"
+    );
+    assert_eq!(read_lock(&project), locked);
+    let (exit, _, err) = run(&project, &["aggregate", "--locked"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("odx.lock does not lock pos as configured; run `odx lock`"),
+        "{err}"
+    );
+
+    // Without repositories, the entry goes away.
+    std::fs::write(
+        project.root.join("pyproject.toml"),
+        "[tool.odx]\nodoo_version = \"17.0\"\n",
+    )
+    .unwrap();
+    let (exit, out, _) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(redact(&out).contains("unlocked pos (was <sha>)"), "{out}");
+}
+
+#[test]
+fn lock_errors() {
+    let project = project("mergiraf = \"never\"");
+    let (exit, _, err) = run(&project, &["lock", "--auto-update"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("roadmap phase 5"), "{err}");
+    let (exit, _, err) = run(&project, &["lock", "--repo", "nope"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("no repository named \"nope\""), "{err}");
+    let (exit, _, err) = run(&project, &["aggregate", "--repo", "nope"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("no repository named \"nope\""), "{err}");
+
+    std::fs::write(project.root.join("odx.lock"), "version = 1\n[[bogus]]\n").unwrap();
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("odx.lock"), "{err}");
+    std::fs::remove_file(project.root.join("odx.lock")).unwrap();
+
+    write_config(
+        &project,
+        "mergiraf = \"never\"\nlockfile = \"missing/odx.lock\"",
+        "{ pr = 1 }",
+    );
+    let (exit, _, err) = run(&project, &["lock", "--repo", "pos"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("odx.lock"), "{err}");
+    let (exit, _, err) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("odx.lock"), "{err}");
+
+    // A failed build locks nothing.
+    add_pr(&project, 2, "conflicting");
+    write_config(&project, "mergiraf = \"never\"", "{ pr = 1 }, { pr = 2 }");
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("#2 conflicts in b.txt"), "{err}");
+    assert!(!project.root.join("odx.lock").exists());
+}
+
+#[test]
+fn unnamed_repositories_are_locked_by_url() {
+    let mut project = project("mergiraf = \"never\"");
+    std::fs::write(
+        project.root.join("pyproject.toml"),
+        format!(
+            "[tool.odx]\nodoo_version = \"17.0\"\nmergiraf = \"never\"\n[[tool.odx.repositories]]\nurl = \"{}\"\nmerges = [{{ pr = 1 }}]\n",
+            project.upstream
+        ),
+    )
+    .unwrap();
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(read_lock(&project).contains(&format!("name = \"{}\"", project.upstream)));
+    assert_eq!(run(&project, &["lock", "--check"]).0, Exit::Success);
+
+    write_config(&project, "mergiraf = \"always\"", "{ pr = 1 }");
+    project.env = project
+        .env
+        .clone()
+        .with("ODX_MERGIRAF", "odx-surely-missing-mergiraf");
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("cannot be run"), "{err}");
 }

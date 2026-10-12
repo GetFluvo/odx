@@ -29,6 +29,8 @@ pub enum Via {
     Mirror,
     /// A local clone, which was brought up to date first (update mode).
     Clone,
+    /// Nothing was fetched: the commit was already in the cache.
+    Cache,
 }
 
 /// A fetched source and the commit it resolved to.
@@ -74,10 +76,24 @@ pub fn fetch(
     if let Some(clone) = &plan.clone {
         borrow_from(&dir, clone)?;
     }
+    // Commits are immutable: one fetched before needs no network.
+    let cached: Vec<usize> = plan
+        .sources
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, source))| {
+            source.is_full_commit()
+                && matches!(
+                    backend.resolve(&dir, &source.local_ref(plan.forge, None)),
+                    Ok(Some(_))
+                )
+        })
+        .map(|(i, _)| i)
+        .collect();
     let mirrored = plan
         .mirror
         .as_deref()
-        .map(|mirror| fetch_from_mirror(backend, &dir, plan, mirror))
+        .map(|mirror| fetch_from_mirror(backend, &dir, plan, mirror, &cached))
         .unwrap_or_default();
     let through_clone = match &plan.clone {
         Some(clone) if clone.update => fetch_through_clone(backend, &dir, plan, clone)?,
@@ -92,7 +108,10 @@ pub fn fetch(
             .iter()
             .enumerate()
             .filter(|(i, (r, _))| {
-                r.as_deref() == remote && !mirrored.contains(i) && !through_clone.contains(i)
+                r.as_deref() == remote
+                    && !cached.contains(i)
+                    && !mirrored.contains(i)
+                    && !through_clone.contains(i)
             })
             .map(|(_, (_, source))| source.refspec(plan.forge, remote))
             .collect();
@@ -113,7 +132,9 @@ pub fn fetch(
                     command: "resolve".to_owned(),
                     stderr: format!("{source} did not resolve to a commit after fetching"),
                 })?;
-            let via = if mirrored.contains(&i) {
+            let via = if cached.contains(&i) {
+                Via::Cache
+            } else if mirrored.contains(&i) {
                 Via::Mirror
             } else if through_clone.contains(&i) {
                 Via::Clone
@@ -216,12 +237,15 @@ fn fetch_from_mirror(
     dir: &Path,
     plan: &FetchPlan,
     mirror: &str,
+    cached: &[usize],
 ) -> Vec<usize> {
     let commits: Vec<usize> = plan
         .sources
         .iter()
         .enumerate()
-        .filter(|(_, (remote, source))| remote.is_none() && source.is_full_commit())
+        .filter(|(i, (remote, source))| {
+            remote.is_none() && source.is_full_commit() && !cached.contains(i)
+        })
         .map(|(i, _)| i)
         .collect();
     let refspecs: Vec<String> = commits

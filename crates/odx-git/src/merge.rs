@@ -224,6 +224,63 @@ impl Merger {
             .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
+    /// Whether `target` is a clean working tree of `cache` whose checkout
+    /// has tree `tree`: then there is nothing to build.
+    pub fn is_current(&self, target: &Path, cache: &Path, tree: &str) -> bool {
+        self.is_worktree_of(target, cache)
+            && self
+                .stdout("status", &self.git(target).args(["status", "--porcelain"]))
+                .is_ok_and(|status| status.is_empty())
+            && self.tree(target, "HEAD").is_ok_and(|head| head == tree)
+    }
+
+    /// The tree of commit `rev` in `repo`.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot resolve it.
+    pub fn tree(&self, repo: &Path, rev: &str) -> Result<String, GitError> {
+        self.stdout(
+            "rev-parse",
+            &self
+                .git(repo)
+                .arg("rev-parse")
+                .arg(format!("{rev}^{{tree}}")),
+        )
+    }
+
+    /// `git patch-id --stable` of the changes `sha` brings on top of `base`
+    /// (from their merge base), so a rebase that keeps the change keeps the
+    /// id. A commit already contained in `base` has no changes; its id is
+    /// all zeros.
+    ///
+    /// # Errors
+    ///
+    /// When git fails.
+    pub fn patch_id(&self, repo: &Path, base: &str, sha: &str) -> Result<String, GitError> {
+        let fork_point = self.stdout(
+            "merge-base",
+            &self.git(repo).args(["merge-base", base, sha]),
+        )?;
+        let diff = self
+            .run(
+                "diff",
+                &self
+                    .git(repo)
+                    .args(["diff", "--no-color", "--no-ext-diff", "--full-index"])
+                    .args([fork_point.as_str(), sha]),
+            )?
+            .stdout;
+        let id = self.stdout(
+            "patch-id",
+            &self.git(repo).args(["patch-id", "--stable"]).stdin(diff),
+        )?;
+        Ok(id
+            .split_whitespace()
+            .next()
+            .map_or_else(|| "0".repeat(40), str::to_owned))
+    }
+
     /// Push the working tree's commit to branch `branch` of `remote`
     /// (forced, as git-aggregator does).
     ///

@@ -185,11 +185,20 @@ pub struct AggregateArgs {
     /// Discard local changes in working trees and replace directories odx does not manage.
     #[arg(long)]
     pub force: bool,
+    /// Fail instead of resolving anything odx.lock does not pin; never write odx.lock.
+    #[arg(long, conflicts_with = "update")]
+    pub locked: bool,
+    /// Resolve every branch and pull request again instead of using odx.lock.
+    #[arg(long)]
+    pub update: bool,
 }
 
 /// Arguments of `odx lock`.
 #[derive(Debug, Args)]
 pub struct LockArgs {
+    /// Only this repository (its `name`, or its URL when unnamed).
+    #[arg(long, value_name = "NAME")]
+    pub repo: Option<String>,
     /// Fail if odx.lock would change.
     #[arg(long, conflicts_with = "update")]
     pub check: bool,

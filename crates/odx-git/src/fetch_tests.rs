@@ -394,6 +394,29 @@ fn locked_commits_come_from_the_mirror_first() {
 }
 
 #[test]
+fn cached_commits_are_not_fetched_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let mirror = mirror_of(tmp.path(), &up);
+    let cache = Cache::new(tmp.path().join("cache"));
+    let plan = FetchPlan {
+        url: file_url(&up.dir),
+        forge: Forge::Github,
+        sources: vec![(None, Source::Commit(up.pull.clone()))],
+        mirror: Some(file_url(&mirror)),
+        clone: None,
+    };
+    fetch(&cache, &system(), &plan, WAIT).unwrap();
+    let backend = Counting {
+        inner: system(),
+        urls: Mutex::new(Vec::new()),
+    };
+    let fetched = fetch(&cache, &backend, &plan, WAIT).unwrap();
+    assert_eq!(fetched[0].via, Via::Cache);
+    assert!(backend.urls.lock().unwrap().is_empty());
+}
+
+#[test]
 fn commits_the_mirror_lacks_come_from_upstream() {
     let tmp = tempfile::tempdir().unwrap();
     let up = upstream(tmp.path(), "pos");

@@ -10,6 +10,8 @@ use std::path::PathBuf;
 /// let git = Invocation::new("git").arg("status").current_dir("/tmp");
 /// assert_eq!(git.program(), "git");
 /// assert_eq!(git.arguments(), ["status"]);
+/// assert_eq!(git.input(), None);
+/// assert_eq!(git.stdin("diff").input(), Some(&b"diff"[..]));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
@@ -17,6 +19,7 @@ pub struct Invocation {
     args: Vec<OsString>,
     current_dir: Option<PathBuf>,
     envs: Vec<(OsString, OsString)>,
+    stdin: Option<Vec<u8>>,
 }
 
 impl Invocation {
@@ -27,6 +30,7 @@ impl Invocation {
             args: Vec::new(),
             current_dir: None,
             envs: Vec::new(),
+            stdin: None,
         }
     }
 
@@ -60,6 +64,18 @@ impl Invocation {
     pub fn current_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.current_dir = Some(dir.into());
         self
+    }
+
+    /// Feed `input` to the process on standard input.
+    #[must_use]
+    pub fn stdin(mut self, input: impl Into<Vec<u8>>) -> Self {
+        self.stdin = Some(input.into());
+        self
+    }
+
+    /// What is fed on standard input, if anything.
+    pub fn input(&self) -> Option<&[u8]> {
+        self.stdin.as_deref()
     }
 
     /// The program to run.

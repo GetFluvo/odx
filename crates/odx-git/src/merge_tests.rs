@@ -631,3 +631,66 @@ fn describe_counts_outcomes() {
         "2 merged, 1 up to date, 1 skipped: #4 conflicts in a.xml, b.py"
     );
 }
+
+#[test]
+fn trees_and_patch_ids() {
+    let fx = fixture();
+    let m = merger();
+    let a = fx.sha("a");
+    assert_eq!(
+        m.tree(&fx.cache, &a).unwrap(),
+        git(&fx.cache, &["rev-parse", "a^{tree}"])
+    );
+    let id = m.patch_id(&fx.cache, &fx.base, &a).unwrap();
+    assert_eq!(id.len(), 40);
+    assert_ne!(id, "0".repeat(40));
+    // The same change on another base keeps its id.
+    git(&fx.cache, &["config", "user.email", "x@example.com"]);
+    git(&fx.cache, &["config", "user.name", "x"]);
+    let work = fx.root.join("rebased");
+    git(
+        &fx.cache,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            work.to_str().unwrap(),
+            "clean",
+        ],
+    );
+    git(&work, &["cherry-pick", "a"]);
+    let picked = git(&work, &["rev-parse", "HEAD"]);
+    assert_eq!(
+        m.patch_id(&fx.cache, &fx.sha("clean"), &picked).unwrap(),
+        id
+    );
+    // Contained in the base: no changes.
+    assert_eq!(m.patch_id(&fx.cache, &a, &fx.base).unwrap(), "0".repeat(40));
+    assert!(m.patch_id(&fx.cache, &fx.base, &"0".repeat(40)).is_err());
+    assert!(m.tree(&fx.cache, "nope").is_err());
+    for needle in ["diff", "patch-id"] {
+        assert!(
+            FailOn::merger(needle, 1)
+                .patch_id(&fx.cache, &fx.base, &a)
+                .unwrap_err()
+                .to_string()
+                .contains("injected failure"),
+            "{needle}"
+        );
+    }
+}
+
+#[test]
+fn current_worktrees_need_no_build() {
+    let fx = fixture();
+    let plan = fx.rebase(&[("a", false)]);
+    let m = merger();
+    assert!(!m.is_current(&plan.target_dir, &fx.cache, "x"));
+    let built = m.aggregate(&plan).unwrap();
+    assert!(m.is_current(&plan.target_dir, &fx.cache, &built.tree));
+    assert!(!m.is_current(&plan.target_dir, &fx.cache, &fx.base));
+    fs::write(plan.target_dir.join("text.txt"), "edited").unwrap();
+    assert!(!m.is_current(&plan.target_dir, &fx.cache, &built.tree));
+    assert!(!FailOn::merger("--porcelain", 1).is_current(&plan.target_dir, &fx.cache, &built.tree));
+}

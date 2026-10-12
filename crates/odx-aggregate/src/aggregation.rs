@@ -1,17 +1,14 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
 
-use odx_config::OdxConfig;
-use odx_config::schema::{MergeSource, OnConflict};
 use odx_core::repo_key;
-use odx_git::{Aggregation, Cache, Fetched, Source, Step, Strategy};
+use odx_git::{Aggregation, Cache, Fetched, Step, Strategy};
 
-use crate::PlanError;
+use crate::{PlanError, Planned, PlannedSource};
 
-/// How one configured repository is built.
+/// How one repository is built.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoAggregation {
-    /// The repository's name (its URL when unnamed).
+    /// The repository's name.
     pub name: String,
     /// What to build.
     pub aggregation: Aggregation,
@@ -30,99 +27,55 @@ pub struct BuildOptions {
     pub force: bool,
 }
 
-/// The working tree of a repository: `target_dir`, else
-/// `<layout.aggregate_dir or "vendor">/<name>`, relative to `root`.
-fn target_dir(
-    config: &OdxConfig,
-    root: &Path,
-    repo: &odx_config::schema::Repository,
-    name: &str,
-) -> PathBuf {
-    repo.target_dir.as_ref().map_or_else(
-        || {
-            let parent = config
-                .layout
-                .as_ref()
-                .and_then(|layout| layout.aggregate_dir.clone())
-                .unwrap_or_else(|| PathBuf::from("vendor"));
-            root.join(parent)
-                .join(name.rsplit('/').next().unwrap_or(name))
-        },
-        |dir| root.join(dir),
-    )
-}
-
-fn sha_of<'a>(fetched: &'a [Fetched], remote: Option<&str>, source: &Source) -> Option<&'a str> {
+fn sha_of<'a>(fetched: &'a [Fetched], wanted: &PlannedSource) -> Option<&'a str> {
     fetched
         .iter()
-        .find(|f| f.remote.as_deref() == remote && f.source == *source)
+        .find(|f| f.remote == wanted.remote && f.source == wanted.source)
         .map(|f| f.sha.as_str())
 }
 
-/// One aggregation per configured repository, using the commits `fetched`
-/// for its URL. Repositories whose URL was not fetched are reported.
+/// One aggregation per planned repository, using the commits `fetched`
+/// for its URL.
 ///
 /// # Errors
 ///
 /// [`PlanError::NotFetched`] for a repository without fetch results or with
-/// a source missing from them, and [`PlanError::InvalidMerge`].
+/// a source missing from them.
 pub fn aggregations(
-    config: &OdxConfig,
-    root: &Path,
-    only: Option<&str>,
+    planned: &[Planned],
     cache: &Cache,
     fetched: &[(String, Vec<Fetched>)],
     options: &BuildOptions,
 ) -> Vec<Result<RepoAggregation, PlanError>> {
-    let default_skip = config.on_conflict == Some(OnConflict::Skip);
-    config
-        .repositories
+    planned
         .iter()
-        .map(|repo| (repo.name.clone().unwrap_or_else(|| repo.url.clone()), repo))
-        .filter(|(name, _)| only.is_none_or(|only| only == name))
-        .map(|(name, repo)| {
-            let not_fetched = || PlanError::NotFetched(name.clone());
+        .map(|repo| {
+            let not_fetched = || PlanError::NotFetched(repo.name.clone());
             let key = repo_key(&repo.url);
             let commits = fetched
                 .iter()
                 .find(|(url, _)| repo_key(url) == key)
                 .map(|(_, commits)| commits.as_slice())
                 .ok_or_else(not_fetched)?;
-            let base_branch = repo.base.as_deref().unwrap_or(&config.odoo_version);
-            let base = sha_of(commits, None, &Source::Branch(base_branch.to_owned()))
-                .ok_or_else(not_fetched)?;
-            let mut steps = Vec::with_capacity(repo.merges.len());
-            for merge in &repo.merges {
-                let source = merge.source().map_err(|message| PlanError::InvalidMerge {
-                    repository: name.clone(),
-                    message,
-                })?;
-                let (remote, source, label) = match source {
-                    MergeSource::Pr(pr) => (None, Source::Pr(pr), format!("#{pr}")),
-                    MergeSource::Sha(sha) => (
-                        None,
-                        Source::Commit(sha.to_owned()),
-                        format!("commit {sha}"),
-                    ),
-                    MergeSource::Branch { branch, remote } => (
-                        remote,
-                        Source::Branch(branch.to_owned()),
-                        format!("branch {branch}"),
-                    ),
-                };
-                let sha = sha_of(commits, remote, &source).ok_or_else(not_fetched)?;
-                steps.push(Step {
-                    label,
-                    sha: sha.to_owned(),
-                    skip_on_conflict: merge
-                        .on_conflict
-                        .map_or(default_skip, |c| c == OnConflict::Skip),
-                });
-            }
+            let base = sha_of(commits, &repo.base).ok_or_else(not_fetched)?;
+            let steps = repo
+                .steps
+                .iter()
+                .map(|step| {
+                    Ok(Step {
+                        label: step.label.clone(),
+                        sha: sha_of(commits, &step.from)
+                            .ok_or_else(not_fetched)?
+                            .to_owned(),
+                        skip_on_conflict: step.skip_on_conflict,
+                    })
+                })
+                .collect::<Result<Vec<_>, PlanError>>()?;
             Ok(RepoAggregation {
+                name: repo.name.clone(),
                 aggregation: Aggregation {
                     cache_repo: cache.repo_dir(&repo.url),
-                    target_dir: target_dir(config, root, repo, &name),
+                    target_dir: repo.target_dir.clone(),
                     base: base.to_owned(),
                     steps,
                     strategy: options.strategy,
@@ -130,7 +83,6 @@ pub fn aggregations(
                     keep_conflicts: options.keep_conflicts,
                     force: options.force,
                 },
-                name,
             })
         })
         .collect()
@@ -139,8 +91,10 @@ pub fn aggregations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use odx_config::parse_pyproject;
-    use odx_git::Via;
+    use crate::plan_config;
+    use odx_config::{OdxConfig, parse_pyproject};
+    use odx_git::{Source, Via};
+    use std::path::Path;
 
     fn config(toml: &str) -> OdxConfig {
         let text = format!("[tool.odx]\nodoo_version = \"17.0\"\n{toml}");
@@ -189,7 +143,12 @@ mod tests {
             force: true,
         };
         let cache = Cache::new("/cache");
-        let result = aggregations(&config, Path::new("/p"), None, &cache, &commits(), &options);
+        let result = aggregations(
+            &plan_config(&config, Path::new("/p"), None).unwrap(),
+            &cache,
+            &commits(),
+            &options,
+        );
         let repo = result[0].as_ref().unwrap();
         assert_eq!(repo.name, "pos");
         let a = &repo.aggregation;
@@ -222,9 +181,7 @@ mod tests {
             "[[tool.odx.repositories]]\nurl = \"{URL}\"\ntarget_dir = \"addons/pos\"\nbase = \"17.0\"\n[[tool.odx.repositories]]\nname = \"web\"\nurl = \"https://github.com/OCA/web.git\"\n"
         ));
         let result = aggregations(
-            &config,
-            Path::new("/p"),
-            None,
+            &plan_config(&config, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
             &commits(),
             &BuildOptions::default(),
@@ -239,9 +196,7 @@ mod tests {
             &PlanError::NotFetched("web".into())
         );
         let only = aggregations(
-            &config,
-            Path::new("/p"),
-            Some("web"),
+            &plan_config(&config, Path::new("/p"), Some("web")).unwrap(),
             &Cache::new("/c"),
             &commits(),
             &BuildOptions::default(),
@@ -255,9 +210,7 @@ mod tests {
             "[[tool.odx.repositories]]\nurl = \"https://github.com/OCA/pos.git\"\nmerges = [{ pr = 1 }]\n",
         );
         let result = aggregations(
-            &config,
-            Path::new("/p"),
-            None,
+            &plan_config(&config, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
             &commits(),
             &BuildOptions::default(),
@@ -274,9 +227,7 @@ mod tests {
             "[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{URL}\"\nmerges = [{{ pr = 9 }}]\n"
         ));
         let result = aggregations(
-            &missing,
-            Path::new("/p"),
-            None,
+            &plan_config(&missing, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
             &commits(),
             &BuildOptions::default(),
@@ -286,9 +237,7 @@ mod tests {
             "[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{URL}\"\nbase = \"16.0\"\n"
         ));
         let result = aggregations(
-            &no_base,
-            Path::new("/p"),
-            None,
+            &plan_config(&no_base, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
             &commits(),
             &BuildOptions::default(),
@@ -298,16 +247,10 @@ mod tests {
             "[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{URL}\"\nmerges = [{{ pr = 1 }}]\n"
         ));
         invalid.repositories[0].merges[0].branch = Some("x".into());
-        let result = aggregations(
-            &invalid,
-            Path::new("/p"),
-            None,
-            &Cache::new("/c"),
-            &commits(),
-            &BuildOptions::default(),
-        );
         assert_eq!(
-            result[0].as_ref().unwrap_err().to_string(),
+            plan_config(&invalid, Path::new("/p"), None)
+                .unwrap_err()
+                .to_string(),
             "pos: set only one of `pr`, `sha` or `branch`"
         );
     }

@@ -37,11 +37,17 @@ Options:
       --fresh
           Ignore cached data; refresh everything before answering
 
+      --locked
+          Fail instead of resolving anything odx.lock does not pin; never write odx.lock
+
       --no-refresh
           Use cached data even when stale
 
       --refresh-index
           Rebuild the addon index for the series involved
+
+      --update
+          Resolve every branch and pull request again instead of using odx.lock
 
       --json
           Machine-readable output on stdout

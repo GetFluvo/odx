@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use odx_aggregate::{
-    BuildOptions, PlanError, RepoAggregation, local_clones, mergiraf_program, run_pipeline,
-    yaml_aggregations, yaml_fetch_plans,
+    BuildOptions, PlanError, RepoAggregation, aggregations, fetch_plans, local_clones,
+    mergiraf_program, plan_yaml, run_pipeline,
 };
 use odx_config::compat::{RepoSpec, expand_env, parse_env_file, parse_repos};
 use odx_config::schema::MergirafMode;
@@ -225,7 +225,8 @@ fn prepare_and_run(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<Vec<Bu
         user::cache_dir(&user, ctx.env).unwrap_or_else(|| ctx.dir.join(".odx").join("cache")),
     );
     let clones = local_clones(&user, ctx.env);
-    let mut plans = yaml_fetch_plans(&selected);
+    let to_build = plan_yaml(&selected, &ctx.dir);
+    let mut plans = fetch_plans(&to_build, None);
     for plan in &mut plans {
         plan.plan.clone = clones.find(&plan.plan.url).cloned();
     }
@@ -254,7 +255,7 @@ fn prepare_and_run(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<Vec<Bu
             .iter()
             .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
             .collect();
-        let repos = yaml_aggregations(&selected, &ctx.dir, &cache, &fetched, &options);
+        let repos = aggregations(&to_build, &cache, &fetched, &options);
         let runnable: Vec<Aggregation> = repos
             .iter()
             .filter_map(|r| r.as_ref().ok().map(|r| r.aggregation.clone()))
