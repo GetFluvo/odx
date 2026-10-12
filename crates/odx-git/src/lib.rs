@@ -15,6 +15,7 @@ mod cache;
 mod clones;
 mod fetch;
 mod lock;
+mod merge;
 mod refs;
 mod run;
 
@@ -23,6 +24,7 @@ pub use cache::{Cache, url_hash};
 pub use clones::{Clones, LocalClone, remote_urls};
 pub use fetch::{FetchPlan, Fetched, Via, fetch};
 pub use lock::RepoLock;
+pub use merge::{Aggregated, Aggregation, MergeError, Merger, Step, StepOutcome};
 pub use refs::{Forge, Source};
 pub use run::{Limits, Outcome, fetch_all};
 pub use tokio_util::sync::CancellationToken;
