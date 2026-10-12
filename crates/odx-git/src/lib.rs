@@ -15,9 +15,12 @@ mod cache;
 mod fetch;
 mod lock;
 mod refs;
+mod run;
 
 pub use backend::{GitBackend, GitError, SystemGit};
 pub use cache::{Cache, url_hash};
-pub use fetch::{FetchPlan, Fetched, fetch};
+pub use fetch::{FetchPlan, Fetched, Via, fetch};
 pub use lock::RepoLock;
 pub use refs::{Forge, Source};
+pub use run::{Limits, Outcome, fetch_all};
+pub use tokio_util::sync::CancellationToken;

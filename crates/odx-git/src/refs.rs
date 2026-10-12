@@ -67,11 +67,16 @@ impl fmt::Display for Source {
 }
 
 impl Source {
+    /// Whether this is a full commit id (40 or 64 hex characters).
+    pub fn is_full_commit(&self) -> bool {
+        matches!(self, Self::Commit(sha) if matches!(sha.len(), 40 | 64))
+    }
+
     /// Whether this is an abbreviated commit id, which git cannot fetch
     /// directly: the remote's branches are fetched and the commit is looked
     /// up among them.
     fn is_abbreviated(&self) -> bool {
-        matches!(self, Self::Commit(sha) if !matches!(sha.len(), 40 | 64))
+        matches!(self, Self::Commit(_)) && !self.is_full_commit()
     }
 
     /// The ref (or object id) to ask the remote for.

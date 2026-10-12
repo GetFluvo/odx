@@ -20,13 +20,17 @@ odx-core = { path = "crates/odx-core", version = "0.0.3" }
 git-aggregate-rs = { path = "crates/git-aggregate-rs", version = "0.0.3" }
 odx-config = { path = "crates/odx-config", version = "0.0.3" }
 odx-git = { path = "crates/odx-git", version = "0.0.3" }
+odx-aggregate = { path = "crates/odx-aggregate", version = "0.0.3" }
 
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = { version = "1", default-features = false, features = ["deserialize"] }
 thiserror = "2"
+tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "sync", "macros", "signal", "time"] }
+tokio-util = "0.7"
 toml = "1"
 toml_edit = "0.25"
 

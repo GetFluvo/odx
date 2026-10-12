@@ -1,7 +1,7 @@
 //! Fetching over the `git://` protocol from a local `git daemon`.
 //!
-//! Skipped (with a message) where `git daemon` is not installed; the CI
-//! runners have it.
+//! Skipped (with a message) where `git daemon` is not installed locally;
+//! on CI (`CI` set) a missing `git daemon` fails the test instead.
 
 #![cfg(unix)]
 #![expect(clippy::expect_used, reason = "test helpers should fail loudly")]
@@ -47,6 +47,10 @@ fn fetches_over_the_git_protocol() {
         .status()
         .is_ok_and(|s| s.success());
     if !available {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "`git daemon` must be available on CI so this test really runs"
+        );
         eprintln!("skipped: `git daemon` is not installed");
         return;
     }
@@ -89,6 +93,7 @@ fn fetches_over_the_git_protocol() {
         url: format!("git://127.0.0.1:{port}/pos"),
         forge: Forge::Github,
         sources: vec![(None, Source::Branch("17.0".into())), (None, Source::Pr(1))],
+        mirror: None,
     };
     let backend = SystemGit::new(Arc::new(OsRunner));
     let fetched = fetch(

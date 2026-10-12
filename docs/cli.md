@@ -46,3 +46,25 @@ when its dependency group already lists direct references, otherwise as a
 from `[tool.uv.sources]`. Both forms of `drop` also remove the entry from
 `odx.lock`; a lockfile that cannot be read stops the command before anything
 is written.
+
+## Fetching into the cache
+
+```console
+$ odx aggregate --fetch-only                  # every repository
+$ odx aggregate --fetch-only --repo pos       # one repository
+$ odx aggregate --fetch-only --prefer-mirror  # locked commits from the private mirror first
+```
+
+`--fetch-only` brings the base branch and every merge (pull requests,
+commits, branches from other remotes) of each repository into a shared
+cache: one bare repository per URL, fetched once per run however many
+repositories point at it. Fetches run in parallel, at most `--jobs` (or
+`jobs`) at a time and at most `[tool.odx.http].per_host_concurrency` per
+host. Ctrl-C stops fetches that have not started; running ones finish so no
+repository is left half-updated.
+
+The cache lives in `cache_dir` from `[tool.odx]`, else `$ODX_CACHE_DIR`,
+else the platform cache directory (`$XDG_CACHE_HOME/odx` or
+`~/.cache/odx` on Linux, `~/Library/Caches/odx` on macOS,
+`%LOCALAPPDATA%\odx\cache` on Windows). Concurrent odx processes take
+turns per repository through an advisory lock.

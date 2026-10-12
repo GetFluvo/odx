@@ -12,5 +12,11 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[dependencies]
+odx-config.workspace = true
+odx-core.workspace = true
+odx-git.workspace = true
+thiserror.workspace = true
+
 [lints]
 workspace = true

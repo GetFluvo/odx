@@ -3,6 +3,8 @@
 //! This crate is the `odx` binary. [`run`] parses the command line and
 //! dispatches to the library crates; `main` only wires it to the process.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 pub mod cli;
 mod cmd;
 
@@ -11,7 +13,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{CommandFactory, Parser};
-use odx_core::{Exit, FileSystem};
+use odx_core::{Env, Exit, FileSystem};
 
 use crate::cli::{Cli, Command};
 
@@ -20,6 +22,8 @@ use crate::cli::{Cli, Command};
 pub struct Context<'a> {
     /// File system access.
     pub fs: &'a dyn FileSystem,
+    /// Environment variables.
+    pub env: &'a dyn Env,
     /// The directory odx runs in (after `-C`).
     pub dir: PathBuf,
     /// The configuration file given with `--config`, if any.
@@ -39,10 +43,27 @@ where
     run_in(args, &odx_core::system::OsFs, &cwd, out, err)
 }
 
-/// Like [`run`], with an explicit file system and working directory.
+/// Like [`run`], with an explicit file system and working directory, and
+/// the real environment.
 pub fn run_in<I, T>(
     args: I,
     fs: &dyn FileSystem,
+    cwd: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Exit
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    run_with_env(args, fs, &odx_core::system::OsEnv, cwd, out, err)
+}
+
+/// Like [`run_in`], with an explicit environment.
+pub fn run_with_env<I, T>(
+    args: I,
+    fs: &dyn FileSystem,
+    env: &dyn Env,
     cwd: &Path,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -55,6 +76,7 @@ where
         Ok(cli) => {
             let ctx = Context {
                 fs,
+                env,
                 dir: cli
                     .global
                     .project_dir
@@ -81,6 +103,9 @@ fn execute(
             Ok(Exit::Success)
         }
         Command::GitAggregate(args) => git_aggregate_rs::execute(args, "odx git-aggregate", err),
+        Command::Aggregate(args) if args.fetch_only => {
+            cmd::aggregate::run_fetch_only(args, &cli.global, ctx).emit(out, err)
+        }
         Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),
         Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),
         Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),

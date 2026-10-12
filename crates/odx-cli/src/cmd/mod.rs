@@ -10,6 +10,7 @@ use std::io::{self, Write};
 use odx_config::Problem;
 use odx_core::Exit;
 
+pub(crate) mod aggregate;
 pub(crate) mod compat;
 pub(crate) mod edit;
 
