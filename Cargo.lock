@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "git-aggregate-rs"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -430,19 +430,19 @@ dependencies = [
 
 [[package]]
 name = "odx-aggregate"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-analyze"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-bot"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "odx-config"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "insta",
  "odx-core",
@@ -470,55 +470,55 @@ dependencies = [
 
 [[package]]
 name = "odx-core"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-dashboard"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-dev"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-env"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-forge"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-git"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-index"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-lint"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-platform"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-port"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-sync"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-vendor"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "odx-verdicts"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "once_cell"
