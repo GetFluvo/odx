@@ -4,3 +4,6 @@ extend-exclude = ["*.svg", "*.png", "*.jpg", "Cargo.lock", "uv.lock", "**/snapsh
 [default.extend-words]
 # Odoo / OCA vocabulary.
 odoo = "odoo"
+# Deliberate typos in tests of unknown-key errors.
+versoin = "versoin"
+lok = "lok"
