@@ -49,9 +49,17 @@ impl Fixture {
                     skip_on_conflict: *skip,
                 })
                 .collect(),
+            strategy: Strategy::Merge,
             mergiraf: None,
             keep_conflicts: false,
             force: false,
+        }
+    }
+
+    fn rebase(&self, steps: &[(&str, bool)]) -> Aggregation {
+        Aggregation {
+            strategy: Strategy::Rebase,
+            ..self.plan(steps)
         }
     }
 }
@@ -158,6 +166,89 @@ fn clean_merges_build_a_detached_worktree() {
     assert!(!work.join("untracked.txt").exists());
     // A clean worktree needs no force.
     assert_eq!(merger().aggregate(&plan).unwrap().tree, result.tree);
+}
+
+#[test]
+fn rebases_keep_history_linear() {
+    let fx = fixture();
+    let plan = fx.rebase(&[
+        ("a", false),
+        ("clean", false),
+        ("base", false),
+        ("a", false),
+    ]);
+    let result = merger().aggregate(&plan).unwrap();
+    assert_eq!(
+        result.steps,
+        [
+            ("a".to_owned(), StepOutcome::Merged),
+            ("clean".to_owned(), StepOutcome::Merged),
+            ("base".to_owned(), StepOutcome::UpToDate),
+            ("a".to_owned(), StepOutcome::UpToDate),
+        ]
+    );
+    let work = &plan.target_dir;
+    assert_eq!(git(work, &["rev-list", "--merges", "HEAD"]), "");
+    assert_eq!(git(work, &["log", "--format=%s", "-2"]), "clean\na");
+    assert!(work.join("new.txt").exists());
+    // The trees match the merge strategy's.
+    let merged = merger()
+        .aggregate(&Aggregation {
+            target_dir: fx.root.join("work").join("merged"),
+            ..fx.plan(&[("a", false), ("clean", false)])
+        })
+        .unwrap();
+    assert_eq!(merged.tree, result.tree);
+}
+
+#[test]
+fn rebase_conflicts_return_to_the_result_so_far() {
+    let fx = fixture();
+    let plan = fx.rebase(&[("a", false), ("b", false)]);
+    let err = merger().aggregate(&plan).unwrap_err();
+    assert_eq!(err.to_string(), "b conflicts in text.txt");
+    let work = &plan.target_dir;
+    assert_eq!(git(work, &["status", "--porcelain"]), "");
+    assert_eq!(git(work, &["log", "-1", "--format=%s"]), "a");
+
+    let skipping = fx.rebase(&[("a", false), ("b", true), ("clean", false)]);
+    let result = merger().aggregate(&skipping).unwrap();
+    assert_eq!(
+        result.steps[1].1,
+        StepOutcome::Skipped {
+            files: vec!["text.txt".to_owned()]
+        }
+    );
+    assert_eq!(result.steps[2].1, StepOutcome::Merged);
+    assert_eq!(git(work, &["log", "--format=%s", "-2"]), "clean\na");
+}
+
+#[test]
+fn kept_rebase_conflicts_are_cleared_with_force() {
+    let fx = fixture();
+    let plan = Aggregation {
+        keep_conflicts: true,
+        ..fx.rebase(&[("a", false), ("b", false)])
+    };
+    let err = merger().aggregate(&plan).unwrap_err();
+    assert_eq!(err.to_string(), "b conflicts in text.txt (left in place)");
+    let forced = Aggregation {
+        force: true,
+        ..fx.rebase(&[("a", false), ("clean", false)])
+    };
+    let result = merger().aggregate(&forced).unwrap();
+    assert_eq!(result.steps[1].1, StepOutcome::Merged);
+    assert_eq!(
+        git(&plan.target_dir, &["log", "-1", "--format=%s"]),
+        "clean"
+    );
+}
+
+#[test]
+fn strategy_commands() {
+    assert_eq!(Strategy::default(), Strategy::Rebase);
+    assert_eq!(Strategy::Rebase.command(), "rebase");
+    assert_eq!(Strategy::Merge.command(), "merge");
 }
 
 #[test]
@@ -429,6 +520,23 @@ fn every_git_call_failure_is_reported() {
         assert!(
             err.to_string().contains("injected failure"),
             "{needle} #{nth}: {err}"
+        );
+    }
+}
+
+#[test]
+fn rebase_git_call_failures_are_reported() {
+    for (needle, steps) in [
+        ("merge-base", &[("a", false)][..]),
+        ("checkout", &[("a", false), ("b", false)][..]),
+    ] {
+        let fx = fixture();
+        let err = FailOn::merger(needle, 1)
+            .aggregate(&fx.rebase(steps))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("injected failure"),
+            "{needle}: {err}"
         );
     }
 }

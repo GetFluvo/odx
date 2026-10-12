@@ -108,9 +108,13 @@ $ odx aggregate --force            # discard local changes in the working trees
 
 Each repository is checked out from the cache at its base branch into
 `target_dir` (default `vendor/<name>`, or `[tool.odx.layout].aggregate_dir`)
-and its merges are applied in order with `git merge --no-ff`. The working
-tree is a detached checkout of the shared cache, so several projects can use
-the same cache without their branch names getting in each other's way.
+and its merges are applied in order. By default each merge is rebased onto
+the result so far (`merge_strategy = "rebase"`), so history stays linear and
+commits that are already applied are dropped; `merge_strategy = "merge"`
+creates one merge commit per merge instead (`git merge --no-ff`). The
+working tree is a detached checkout of the shared cache, so several projects
+can use the same cache without their branch names getting in each other's
+way.
 
 A conflict aborts the merge, names the files and ends the command with exit
 code 1; with `on_conflict = "skip"` (per merge or for the whole project) the

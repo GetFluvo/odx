@@ -59,6 +59,9 @@ Options:
       --allow-shell
           Run `shell_command_after` entries (skipped with a warning otherwise)
 
+      --rebase
+          Rebase merges onto the result instead of creating merge commits
+
       --mergiraf
           Resolve conflicts with mergiraf (`ODX_MERGIRAF` names the executable)
 

@@ -165,6 +165,17 @@ fn aggregates_branches_pull_requests_and_forks() {
 }
 
 #[test]
+fn rebase_keeps_history_linear() {
+    let ws = Workspace::new();
+    ws.repos(POS);
+    let (exit, _, err) = ws.run(&["--rebase"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let pos = ws.work.join("pos");
+    assert_eq!(git(&pos, &["rev-list", "--merges", "HEAD"]), "");
+    assert!(pos.join("fix.txt").exists() && pos.join("pr.txt").exists());
+}
+
+#[test]
 fn dirmatch_selects_directories() {
     let ws = Workspace::new();
     ws.repos(&format!(
@@ -447,6 +458,21 @@ fn parity_with_gitaggregate() {
     ws.env = MapEnv::default().with("ORIGIN_URL", ws.upstream.clone());
     let (exit, _, err) = ws.run(&["-e"]);
     assert_eq!(exit, Exit::Success, "{err}");
+    let rebased = ws.root.join("rebased");
+    fs::create_dir_all(&rebased).unwrap();
+    fs::copy(ws.work.join("repos.yaml"), rebased.join("repos.yaml")).unwrap();
+    let ctx = Context {
+        fs: &OsFs,
+        env: &ws.env,
+        dir: rebased.clone(),
+    };
+    let exit = run_with(
+        ["git-aggregate-rs", "-e", "--rebase"],
+        &ctx,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    );
+    assert_eq!(exit, Exit::Success);
 
     let theirs = ws.root.join("theirs");
     fs::create_dir_all(&theirs).unwrap();
@@ -470,6 +496,7 @@ fn parity_with_gitaggregate() {
     for dir in ["branches", "pull", "tag", "commit"] {
         let tree = |root: &Path| git(&root.join(dir), &["rev-parse", "HEAD^{tree}"]);
         assert_eq!(tree(&ws.work), tree(&theirs), "{dir}");
+        assert_eq!(tree(&rebased), tree(&theirs), "{dir} rebased");
     }
     assert_eq!(
         git(&theirs.join("pull"), &["branch", "--show-current"]),

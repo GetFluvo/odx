@@ -80,6 +80,9 @@ Options:
   -q, --quiet
           Errors only
 
+      --rebase
+          Rebase merges onto the result instead of creating merge commits
+
       --mergiraf
           Resolve conflicts with mergiraf (`ODX_MERGIRAF` names the executable)
 

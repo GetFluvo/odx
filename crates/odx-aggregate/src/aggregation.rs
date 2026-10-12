@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use odx_config::OdxConfig;
 use odx_config::schema::{MergeSource, OnConflict};
 use odx_core::repo_key;
-use odx_git::{Aggregation, Cache, Fetched, Source, Step};
+use odx_git::{Aggregation, Cache, Fetched, Source, Step, Strategy};
 
 use crate::PlanError;
 
@@ -20,6 +20,8 @@ pub struct RepoAggregation {
 /// Options that apply to every repository.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildOptions {
+    /// How merges are applied.
+    pub strategy: Strategy,
     /// The mergiraf executable, when mergiraf is used.
     pub mergiraf: Option<OsString>,
     /// Leave conflicted merges in place.
@@ -123,6 +125,7 @@ pub fn aggregations(
                     target_dir: target_dir(config, root, repo, &name),
                     base: base.to_owned(),
                     steps,
+                    strategy: options.strategy,
                     mergiraf: options.mergiraf.clone(),
                     keep_conflicts: options.keep_conflicts,
                     force: options.force,
@@ -180,6 +183,7 @@ mod tests {
             "on_conflict = \"skip\"\n[layout]\naggregate_dir = \"src\"\n[[repositories]]\nname = \"pos\"\nurl = \"{URL}\"\nmerges = [{{ pr = 1, on_conflict = \"abort\" }}, {{ sha = \"abc1234\" }}, {{ branch = \"fix\", remote = \"https://x/fork.git\" }}]\n"
         ).replace("[layout]", "[tool.odx.layout]").replace("[[repositories]]", "[[tool.odx.repositories]]"));
         let options = BuildOptions {
+            strategy: Strategy::Merge,
             mergiraf: Some("mergiraf".into()),
             keep_conflicts: true,
             force: true,
@@ -192,6 +196,7 @@ mod tests {
         assert_eq!(a.target_dir, Path::new("/p/src/pos"));
         assert_eq!(a.cache_repo, cache.repo_dir(URL));
         assert_eq!(a.base, "base");
+        assert_eq!(a.strategy, Strategy::Merge);
         let steps: Vec<_> = a
             .steps
             .iter()

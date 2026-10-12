@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use odx_aggregate::{
     BuildOptions, RepoAggregation, RepoPlan, aggregations, fetch_plans, local_clones,
-    mergiraf_program, run_pipeline,
+    mergiraf_program, run_pipeline, strategy,
 };
 use odx_config::user::{self, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Source, discover};
@@ -125,6 +125,7 @@ fn aggregate(
         Some((Arc::new(Merger::new(runner)), mergiraf))
     };
     let options = BuildOptions {
+        strategy: strategy(prepared.project.config.merge_strategy.unwrap_or_default()),
         mergiraf: merger.as_ref().and_then(|(_, m)| m.clone()),
         keep_conflicts: args.keep_conflicts,
         force: args.force,

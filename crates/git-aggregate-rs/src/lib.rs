@@ -2,8 +2,8 @@
 //!
 //! The command line mirrors `gitaggregate`: the same `repos.yaml` format,
 //! the same actions (`aggregate`, `show-closed-prs`, `show-all-prs`) and the
-//! same flags, plus a few opt-in extensions (`--allow-shell`, `--mergiraf`,
-//! `--json`). The `odx` binary exposes the same interface as
+//! same flags, plus a few opt-in extensions (`--allow-shell`, `--rebase`,
+//! `--mergiraf`, `--json`). The `odx` binary exposes the same interface as
 //! `odx git-aggregate`.
 //!
 //! Every remote is fetched once into a shared cache of bare repositories
@@ -78,6 +78,10 @@ pub struct Cli {
     /// Run `shell_command_after` entries (skipped with a warning otherwise).
     #[arg(long, action = ArgAction::SetTrue)]
     pub allow_shell: bool,
+
+    /// Rebase merges onto the result instead of creating merge commits.
+    #[arg(long)]
+    pub rebase: bool,
 
     /// Resolve conflicts with mergiraf (`ODX_MERGIRAF` names the executable).
     #[arg(long)]

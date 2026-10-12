@@ -17,9 +17,9 @@ pub use pipeline::{local_clones, mergiraf_program, run_pipeline};
 pub use repos_yaml::{yaml_aggregations, yaml_fetch_plans, yaml_source};
 
 use odx_config::OdxConfig;
-use odx_config::schema::{ForgeKind, MergeSource};
+use odx_config::schema::{ForgeKind, MergeSource, MergeStrategy};
 use odx_core::repo_key;
-use odx_git::{FetchPlan, Forge, Source};
+use odx_git::{FetchPlan, Forge, Source, Strategy};
 
 /// Errors from planning.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -48,6 +48,21 @@ pub struct RepoPlan {
     pub names: Vec<String>,
     /// What to fetch.
     pub plan: FetchPlan,
+}
+
+/// The merge engine's strategy for a configured one.
+///
+/// ```
+/// use odx_aggregate::strategy;
+/// use odx_config::schema::MergeStrategy;
+///
+/// assert_eq!(strategy(MergeStrategy::Merge), odx_git::Strategy::Merge);
+/// ```
+pub const fn strategy(configured: MergeStrategy) -> Strategy {
+    match configured {
+        MergeStrategy::Rebase => Strategy::Rebase,
+        MergeStrategy::Merge => Strategy::Merge,
+    }
 }
 
 const fn forge(kind: ForgeKind) -> Forge {
