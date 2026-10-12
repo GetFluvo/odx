@@ -68,7 +68,7 @@ jobs:
           esac
           dir="$RUNNER_TEMP/mergiraf"
           mkdir -p "$dir"
-          curl -sSfL -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
+          curl -sSfL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
           if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
           echo "$sum  $dir/$asset" | $check
           case "$asset" in
@@ -129,7 +129,7 @@ jobs:
           esac
           dir="$RUNNER_TEMP/mergiraf"
           mkdir -p "$dir"
-          curl -sSfL -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
+          curl -sSfL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
           if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
           echo "$sum  $dir/$asset" | $check
           case "$asset" in
