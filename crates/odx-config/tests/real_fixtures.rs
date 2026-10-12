@@ -1,8 +1,6 @@
 //! Real-world `pyproject.toml` files are read correctly, and editing them
 //! leaves every line that is not part of the edit exactly as it was.
 
-#![expect(clippy::unwrap_used, reason = "test helpers should fail loudly")]
-
 use std::path::Path;
 
 use odx_config::deps::{read_group, read_uv_git_sources, set_direct_ref};
