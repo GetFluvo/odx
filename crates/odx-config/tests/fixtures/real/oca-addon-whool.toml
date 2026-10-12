@@ -1,0 +1,4 @@
+# From an addon of OCA/account-financial-tools (build configuration only).
+[build-system]
+requires = ["whool"]
+build-backend = "whool.buildapi"
