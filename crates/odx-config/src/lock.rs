@@ -248,8 +248,9 @@ pub struct OdooPin {
     pub rev: String,
 }
 
-/// The contents of `odx.lock`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+/// The contents of `odx.lock`; the default is an empty lockfile of the
+/// current version.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lockfile {
     /// Format version; [`LOCK_VERSION`] after parsing.
@@ -273,13 +274,21 @@ fn is_object_id(text: &str) -> bool {
     matches!(text.len(), 40 | 64) && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+impl Default for Lockfile {
+    fn default() -> Self {
+        Self {
+            version: LOCK_VERSION,
+            odoo: None,
+            repositories: Vec::new(),
+            packages: BTreeMap::new(),
+        }
+    }
+}
+
 impl Lockfile {
     /// An empty lockfile of the current version.
     pub fn new() -> Self {
-        Self {
-            version: LOCK_VERSION,
-            ..Self::default()
-        }
+        Self::default()
     }
 
     /// Parse `odx.lock` text.

@@ -130,3 +130,39 @@ that each add a method to the same Odoo model.
 fetched pos: 3 refs
 built pos in vendor/pos: 1 merged, 1 skipped: #456 conflicts in views.xml (1a2b3c4d5e6f)
 ```
+
+## Locking
+
+```console
+$ odx lock                    # lock what odx.lock does not pin yet
+$ odx lock --update           # resolve every branch and pull request again
+$ odx lock --check            # exit 1 when odx.lock is not up to date
+$ odx aggregate --locked      # build exactly odx.lock; never resolve anything
+$ odx aggregate --update      # resolve again, build, and update odx.lock
+```
+
+`odx.lock` (see [Files](files.md)) records, per repository, the base commit,
+every merged commit with its tree and patch id, and the resulting tree.
+Commit it: two builds from the same `odx.lock` merge the same commits, even
+after pull request authors push again.
+
+`odx aggregate` uses the commits in `odx.lock` for every repository whose
+configuration is unchanged since it was locked, resolves the others and
+records them, much like `cargo build` keeps `Cargo.lock` current. A working
+tree that already has the locked result is left alone: no fetch and no
+merge. Commits are immutable, so one already in the cache is not fetched
+again.
+
+`odx lock` resolves and merges in scratch working trees inside the cache, so
+the project's working trees are not touched. A repository whose
+configuration changed (a different base, merges added, removed or reordered,
+or a merge that was skipped and may no longer be) is locked again. With
+`--update` the latest heads are taken and the changes are reported: a pull
+request whose new head carries the same change is **rebased (same patch)**,
+one with different changes is **changed**.
+
+```text
+resolved pos: 2 merged (1a2b3c4d5e6f)
+updated pos #123: 1a2b3c4d5e6f -> 6f5e4d3c2b1a (rebased (same patch))
+locked pos #456 at 0a1b2c3d4e5f
+```

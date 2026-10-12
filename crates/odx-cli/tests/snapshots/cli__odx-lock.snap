@@ -10,20 +10,23 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
-      --check
-          Fail if odx.lock would change
+      --repo <NAME>
+          Only this repository (its `name`, or its URL when unnamed)
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --check
+          Fail if odx.lock would change
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
 
       --update
           Re-resolve every entry instead of keeping existing pins
 
       --auto-update
           Apply the configured lock auto-update policy to PyPI packages
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --offline
           Serve forge and index data from the cache only

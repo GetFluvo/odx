@@ -4,3 +4,4 @@ expression: redact(&out)
 ---
 fetched pos: 2 refs
 built pos in vendor/pos: 1 merged (<sha>)
+locked pos at <sha>

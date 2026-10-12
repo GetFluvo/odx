@@ -1,10 +1,11 @@
 use std::path::Path;
 
 use odx_config::compat::{MergeSpec, RepoSpec};
+use odx_config::lock::LockSource;
 use odx_core::repo_key;
-use odx_git::{Aggregation, Cache, FetchPlan, Fetched, Forge, Source, Step};
+use odx_git::{Forge, Source};
 
-use crate::{BuildOptions, PlanError, RepoAggregation, RepoPlan};
+use crate::{Planned, PlannedSource, PlannedStep};
 
 /// The source a `repos.yaml` ref stands for: a commit id when it is 7 to 40
 /// (or 64) hexadecimal digits, else the ref as written, which the remote
@@ -33,120 +34,55 @@ fn remote_of(merge: &MergeSpec, url: &str) -> Option<String> {
     (repo_key(&merge.url) != repo_key(url)).then(|| merge.url.clone())
 }
 
-/// One fetch plan per base URL of `repos`, each named after the target
-/// directories it serves.
-///
-/// The base merge's remote is the repository; merges from other remotes are
-/// fetched from their own URL into the same cache repository.
+/// One plan per entry of `repos`: the base merge's remote is the
+/// repository, merges from other remotes are fetched from their own URL.
+/// Target directories are relative to `root`.
 ///
 /// ```
-/// use odx_aggregate::yaml_fetch_plans;
+/// use odx_aggregate::plan_yaml;
 /// use odx_config::compat::parse_repos;
+/// use std::path::Path;
 ///
 /// let file = parse_repos("./pos:\n  remotes:\n    oca: https://github.com/OCA/pos.git\n    me: https://github.com/me/pos.git\n  merges:\n    - oca 17.0\n    - me fix\n").unwrap();
-/// let plans = yaml_fetch_plans(&file.repos);
-/// assert_eq!(plans[0].names, ["./pos"]);
-/// assert_eq!(plans[0].plan.sources[1].0.as_deref(), Some("https://github.com/me/pos.git"));
+/// let planned = plan_yaml(&file.repos, Path::new("/w"));
+/// assert_eq!(planned[0].name, "./pos");
+/// assert_eq!(planned[0].steps[0].from.remote.as_deref(), Some("https://github.com/me/pos.git"));
 /// ```
-pub fn yaml_fetch_plans(repos: &[RepoSpec]) -> Vec<RepoPlan> {
-    let mut plans: Vec<RepoPlan> = Vec::new();
-    for repo in repos {
-        let sources = std::iter::once(&repo.base)
-            .chain(&repo.merges)
-            .map(|merge| {
-                (
-                    remote_of(merge, &repo.base.url),
-                    yaml_source(&merge.reference),
-                )
-            });
-        let key = repo_key(&repo.base.url);
-        if let Some(existing) = plans.iter_mut().find(|p| repo_key(&p.plan.url) == key) {
-            existing.names.push(repo.dir.clone());
-            for source in sources {
-                if !existing.plan.sources.contains(&source) {
-                    existing.plan.sources.push(source);
-                }
-            }
-        } else {
-            let mut unique = Vec::new();
-            for source in sources {
-                if !unique.contains(&source) {
-                    unique.push(source);
-                }
-            }
-            plans.push(RepoPlan {
-                names: vec![repo.dir.clone()],
-                plan: FetchPlan {
-                    url: repo.base.url.clone(),
-                    forge: Forge::detect(&repo.base.url),
-                    sources: unique,
-                    mirror: None,
-                    clone: None,
-                },
-            });
-        }
-    }
-    plans
-}
-
-/// One aggregation per entry of `repos`, using the commits `fetched` for
-/// its base URL. Target directories are relative to `root`.
-///
-/// # Errors
-///
-/// [`PlanError::NotFetched`] for an entry whose sources were not all
-/// fetched.
-pub fn yaml_aggregations(
-    repos: &[RepoSpec],
-    root: &Path,
-    cache: &Cache,
-    fetched: &[(String, Vec<Fetched>)],
-    options: &BuildOptions,
-) -> Vec<Result<RepoAggregation, PlanError>> {
+pub fn plan_yaml(repos: &[RepoSpec], root: &Path) -> Vec<Planned> {
     repos
         .iter()
         .map(|repo| {
-            let not_fetched = || PlanError::NotFetched(repo.dir.clone());
-            let key = repo_key(&repo.base.url);
-            let commits = fetched
-                .iter()
-                .find(|(url, _)| repo_key(url) == key)
-                .map(|(_, commits)| commits.as_slice())
-                .ok_or_else(not_fetched)?;
-            let sha_of = |merge: &MergeSpec| {
-                let remote = remote_of(merge, &repo.base.url);
-                let source = yaml_source(&merge.reference);
-                commits
-                    .iter()
-                    .find(|f| f.remote == remote && f.source == source)
-                    .map(|f| f.sha.clone())
-                    .ok_or_else(not_fetched)
-            };
-            let base = sha_of(&repo.base)?;
-            let steps = repo
-                .merges
-                .iter()
-                .map(|merge| {
-                    Ok(Step {
-                        label: format!("{} {}", merge.remote, merge.reference),
-                        sha: sha_of(merge)?,
-                        skip_on_conflict: false,
-                    })
-                })
-                .collect::<Result<Vec<_>, PlanError>>()?;
-            Ok(RepoAggregation {
+            let url = &repo.base.url;
+            Planned {
                 name: repo.dir.clone(),
-                aggregation: Aggregation {
-                    cache_repo: cache.repo_dir(&repo.base.url),
-                    target_dir: root.join(&repo.dir),
-                    base,
-                    steps,
-                    strategy: options.strategy,
-                    mergiraf: options.mergiraf.clone(),
-                    keep_conflicts: options.keep_conflicts,
-                    force: options.force,
+                url: url.clone(),
+                forge: Forge::detect(url),
+                target_dir: root.join(&repo.dir),
+                base_name: repo.base.reference.clone(),
+                base: PlannedSource {
+                    remote: None,
+                    source: yaml_source(&repo.base.reference),
                 },
-            })
+                steps: repo
+                    .merges
+                    .iter()
+                    .map(|merge| PlannedStep {
+                        label: format!("{} {}", merge.remote, merge.reference),
+                        from: PlannedSource {
+                            remote: remote_of(merge, url),
+                            source: yaml_source(&merge.reference),
+                        },
+                        skip_on_conflict: false,
+                        lock: LockSource {
+                            pr: None,
+                            sha: None,
+                            branch: Some(merge.reference.clone()),
+                            remote: Some(merge.url.clone()),
+                        },
+                    })
+                    .collect(),
+                pinned: false,
+            }
         })
         .collect()
 }
@@ -154,8 +90,9 @@ pub fn yaml_aggregations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BuildOptions, PlanError};
     use odx_config::compat::parse_repos;
-    use odx_git::{Strategy, Via};
+    use odx_git::{Cache, Fetched, Strategy, Via};
 
     const YAML: &str = "\
 ./pos:
@@ -198,7 +135,7 @@ mod tests {
     #[test]
     fn plans_share_a_url_and_keep_other_remotes_apart() {
         let file = parse_repos(YAML).unwrap();
-        let plans = yaml_fetch_plans(&file.repos);
+        let plans = crate::fetch_plans(&plan_yaml(&file.repos, Path::new("/w")), None);
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[0].names[..2], ["./pos", "./pos-copy"]);
         assert_eq!(
@@ -248,7 +185,12 @@ mod tests {
             keep_conflicts: true,
             force: true,
         };
-        let built = yaml_aggregations(&file.repos, Path::new("/w"), &cache, &fetched, &options);
+        let built = crate::aggregations(
+            &plan_yaml(&file.repos, Path::new("/w")),
+            &cache,
+            &fetched,
+            &options,
+        );
         let pos = built[0].as_ref().unwrap();
         assert_eq!(pos.name, "./pos");
         assert_eq!(pos.aggregation.target_dir, Path::new("/w/./pos"));

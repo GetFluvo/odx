@@ -487,6 +487,7 @@ dependencies = [
  "odx-config",
  "odx-core",
  "odx-git",
+ "tempfile",
  "thiserror",
  "tokio",
 ]

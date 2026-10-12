@@ -207,7 +207,7 @@ fn lock_path(ctx: &Context<'_>, file: &Path) -> PathBuf {
 
 /// The lockfile, if it exists; a lockfile that cannot be read stops the
 /// command before anything is written.
-fn read_lock(ctx: &Context<'_>, path: &Path) -> Result<Option<Lockfile>, Report> {
+pub(crate) fn read_lock(ctx: &Context<'_>, path: &Path) -> Result<Option<Lockfile>, Report> {
     if !ctx.fs.exists(path) {
         return Ok(None);
     }

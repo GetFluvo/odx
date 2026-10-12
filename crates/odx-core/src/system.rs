@@ -4,7 +4,7 @@
 //! binaries (and integration tests that need real processes) construct
 //! these.
 
-use std::io;
+use std::io::{self, Write as _};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
@@ -42,7 +42,8 @@ impl FileSystem for OsFs {
     }
 }
 
-/// Runs real processes with standard input closed and output captured.
+/// Runs real processes with output captured and standard input closed,
+/// unless the invocation gives input.
 ///
 /// ```
 /// use odx_core::system::OsRunner;
@@ -51,6 +52,10 @@ impl FileSystem for OsFs {
 /// let out = OsRunner.run(&Invocation::new("git").arg("--version")).unwrap();
 /// assert!(out.success());
 /// assert!(String::from_utf8_lossy(&out.stdout).starts_with("git version"));
+///
+/// let hash = Invocation::new("git").args(["hash-object", "--stdin"]).stdin("odx\n");
+/// let out = OsRunner.run(&hash).unwrap();
+/// assert_eq!(out.stdout, b"276b3f2421289a6dfc809dc5e36cfcef4a222e07\n");
 /// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OsRunner;
@@ -61,11 +66,31 @@ impl ProcessRunner for OsRunner {
         command
             .args(invocation.arguments())
             .envs(invocation.envs().iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(if invocation.input().is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            });
         if let Some(dir) = invocation.working_dir() {
             command.current_dir(dir);
         }
-        let output = command.output()?;
+        let output = command.spawn().and_then(|mut child| {
+            // Written from a thread of its own, so a process that writes a
+            // lot before reading all of its input cannot deadlock.
+            let writer = child.stdin.take().map(|mut stdin| {
+                let input = invocation.input().unwrap_or_default().to_vec();
+                std::thread::spawn(move || stdin.write_all(&input))
+            });
+            let output = child.wait_with_output();
+            if let Some(writer) = writer {
+                // A process may exit without reading everything (broken
+                // pipe); its exit status is what counts.
+                let _ = writer.join();
+            }
+            output
+        })?;
         Ok(Output {
             status: output.status.code(),
             stdout: output.stdout,

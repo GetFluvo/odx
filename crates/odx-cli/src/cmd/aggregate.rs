@@ -1,4 +1,5 @@
-//! `odx aggregate`: fill the git cache and build the working trees.
+//! `odx aggregate` and `odx lock`: fill the git cache, build the working
+//! trees and keep `odx.lock` current.
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -7,21 +8,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use odx_aggregate::{
-    BuildOptions, RepoAggregation, RepoPlan, aggregations, fetch_plans, local_clones,
-    mergiraf_program, run_pipeline, strategy,
+    BuildOptions, Change, ChangeKind, PlanError, Planned, RepoAggregation, RepoPlan, aggregations,
+    fetch_plans, local_clones, lock_changes, lock_entry, mergiraf_program, pin, plan_config,
+    run_pipeline, strategy, update_lock,
 };
+use odx_config::lock::{LockedRepository, Lockfile};
 use odx_config::user::{self, UserConfig, expand_home, load_user_config};
-use odx_config::{ConfigError, OdxConfig, Source, discover};
+use odx_config::{ConfigError, OdxConfig, Project, Source, discover};
 use odx_core::system::OsRunner;
 use odx_core::{Env, Exit};
 use odx_git::{
-    Aggregated, Aggregation, Cache, Fetched, GitBackend, Limits, MergeError, Merger, Outcome,
-    StepOutcome, SystemGit, Via,
+    Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
+    Outcome, StepOutcome, SystemGit, Via, url_hash,
 };
 
 use super::Report;
+use super::edit::read_lock;
 use crate::Context;
-use crate::cli::{AggregateArgs, GlobalArgs};
+use crate::cli::{AggregateArgs, GlobalArgs, LockArgs};
 
 /// How long to wait for another odx process's repository lock.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -42,19 +46,23 @@ pub(crate) fn cache_dir(
     )
 }
 
-/// What `--fetch-only` and a full aggregation share.
+/// The project, its lockfile and where and how to fetch.
 struct Prepared {
-    project: odx_config::Project,
-    plans: Vec<RepoPlan>,
+    project: Project,
+    lock_path: PathBuf,
+    lock: Option<Lockfile>,
     cache: Cache,
+    clones: Clones,
     limits: Limits,
 }
 
-fn prepare(
-    args: &AggregateArgs,
-    global: &GlobalArgs,
-    ctx: &Context<'_>,
-) -> Result<Prepared, Report> {
+impl Prepared {
+    fn locked(&self) -> &[LockedRepository] {
+        self.lock.as_ref().map_or(&[], |lock| &lock.repositories)
+    }
+}
+
+fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared, Report> {
     let project = match discover(ctx.fs, &ctx.dir, ctx.config) {
         Ok(Source::Pyproject(project)) => project,
         Ok(Source::ReposYaml { file, .. }) => {
@@ -71,12 +79,8 @@ fn prepare(
     };
     let user =
         load_user_config(ctx.fs, ctx.env).map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
-    let mut plans = fetch_plans(&project.config, args.repo.as_deref(), args.prefer_mirror)
-        .map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
-    let clones = local_clones(&user, ctx.env);
-    for plan in &mut plans {
-        plan.plan.clone = clones.find(&plan.plan.url).cloned();
-    }
+    let lock_path = project.root.join(project.config.lockfile());
+    let lock = read_lock(ctx, &lock_path)?;
     let cache = Cache::new(cache_dir(&project.config, &user, &project.root, ctx.env));
     let limits = Limits {
         jobs: global
@@ -92,14 +96,180 @@ fn prepare(
         lock_timeout: LOCK_TIMEOUT,
     };
     Ok(Prepared {
+        clones: local_clones(&user, ctx.env),
         project: *project,
-        plans,
+        lock_path,
+        lock,
         cache,
         limits,
     })
 }
 
-/// `odx aggregate [--fetch-only] [--repo NAME] [--prefer-mirror] [--keep-conflicts] [--force]`.
+/// What a fetch-and-build run produced.
+struct Built {
+    plans: Vec<RepoPlan>,
+    outcomes: Vec<Outcome>,
+    aggregations: Vec<Result<RepoAggregation, PlanError>>,
+    results: Vec<Result<Aggregated, MergeError>>,
+}
+
+impl Built {
+    /// The repositories that were built, with what was built and the result.
+    fn pairs<'a>(
+        &'a self,
+        planned: &'a [Planned],
+    ) -> impl Iterator<
+        Item = (
+            &'a Planned,
+            &'a Aggregation,
+            &'a Result<Aggregated, MergeError>,
+        ),
+    > {
+        planned
+            .iter()
+            .zip(&self.aggregations)
+            .filter_map(|(planned, built)| built.as_ref().ok().map(|b| (planned, &b.aggregation)))
+            .zip(&self.results)
+            .map(|((planned, aggregation), result)| (planned, aggregation, result))
+    }
+}
+
+/// Fetch everything `planned` needs, then build it (unless `merger` is
+/// `None`).
+fn build(
+    prepared: &Prepared,
+    planned: &[Planned],
+    options: &BuildOptions,
+    merger: Option<&Arc<Merger>>,
+    prefer_mirror: bool,
+) -> Built {
+    let mirror = prepared
+        .project
+        .config
+        .mirror
+        .as_ref()
+        .filter(|_| prefer_mirror)
+        .map(|mirror| mirror.url.as_str());
+    let mut plans = fetch_plans(planned, mirror);
+    for plan in &mut plans {
+        plan.plan.clone = prepared.clones.find(&plan.plan.url).cloned();
+    }
+    let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::new(OsRunner)));
+    let aggregated = std::cell::RefCell::new(Vec::new());
+    let plan_builds = |outcomes: &[Outcome]| {
+        let fetched: Vec<(String, Vec<Fetched>)> = outcomes
+            .iter()
+            .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+            .collect();
+        let repos = aggregations(planned, &prepared.cache, &fetched, options);
+        let runnable: Vec<Aggregation> = repos
+            .iter()
+            .filter_map(|r| r.as_ref().ok().map(|r| r.aggregation.clone()))
+            .collect();
+        *aggregated.borrow_mut() = repos;
+        runnable
+    };
+    let (outcomes, results) = run_pipeline(
+        &prepared.cache,
+        &backend,
+        plans.iter().map(|p| p.plan.clone()).collect(),
+        prepared.limits,
+        merger,
+        &plan_builds,
+    );
+    Built {
+        plans,
+        outcomes,
+        aggregations: aggregated.into_inner(),
+        results,
+    }
+}
+
+/// Lock entries for what was built from unpinned sources; failures to
+/// compute one are returned as messages.
+fn lock_entries(
+    planned: &[Planned],
+    built: &Built,
+    merger: &Merger,
+) -> (Vec<LockedRepository>, Vec<String>) {
+    let (entries, failures): (Vec<_>, Vec<_>) = built
+        .pairs(planned)
+        .filter(|(repo, _, result)| !repo.pinned && result.is_ok())
+        .filter_map(|(repo, aggregation, result)| {
+            result
+                .as_ref()
+                .ok()
+                .map(|result| lock_entry(repo, aggregation, result, merger))
+        })
+        .partition(Result::is_ok);
+    (
+        entries.into_iter().filter_map(Result::ok).collect(),
+        failures
+            .into_iter()
+            .filter_map(Result::err)
+            .collect::<Vec<PlanError>>()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    )
+}
+
+/// The lockfile with `entries`; without `--repo`, entries of repositories
+/// no longer configured are dropped.
+fn next_lock(prepared: &Prepared, entries: Vec<LockedRepository>, only: Option<&str>) -> Lockfile {
+    let mut lock = prepared.lock.clone().unwrap_or_default();
+    let names: Vec<String> = prepared
+        .project
+        .config
+        .repositories
+        .iter()
+        .map(|repo| repo.name.clone().unwrap_or_else(|| repo.url.clone()))
+        .collect();
+    update_lock(
+        &mut lock,
+        entries,
+        only.is_none().then_some(names.as_slice()),
+    );
+    lock
+}
+
+fn write_lock(ctx: &Context<'_>, prepared: &Prepared, lock: &Lockfile) -> Result<(), Report> {
+    ctx.fs
+        .write(&prepared.lock_path, lock.render().as_bytes())
+        .map_err(|e| {
+            Report::error(
+                Exit::Failure,
+                format!("{}: {e}", prepared.lock_path.display()),
+            )
+        })
+}
+
+/// The merger and the build options from the project configuration.
+fn merger_and_options(
+    config: &OdxConfig,
+    ctx: &Context<'_>,
+    keep_conflicts: bool,
+    force: bool,
+) -> Result<(Arc<Merger>, BuildOptions), Report> {
+    let runner = Arc::new(OsRunner);
+    let mergiraf = mergiraf_program(
+        config.mergiraf.unwrap_or_default(),
+        ctx.env,
+        runner.as_ref(),
+    )
+    .map_err(|e| Report::error(Exit::Usage, e))?;
+    Ok((
+        Arc::new(Merger::new(runner)),
+        BuildOptions {
+            strategy: strategy(config.merge_strategy.unwrap_or_default()),
+            mergiraf,
+            keep_conflicts,
+            force,
+        },
+    ))
+}
+
+/// `odx aggregate [--fetch-only] [--repo NAME] [--prefer-mirror] [--keep-conflicts] [--force] [--locked | --update]`.
 pub(crate) fn run_aggregate(
     args: &AggregateArgs,
     global: &GlobalArgs,
@@ -113,95 +283,172 @@ fn aggregate(
     global: &GlobalArgs,
     ctx: &Context<'_>,
 ) -> Result<Report, Report> {
-    let prepared = prepare(args, global, ctx)?;
-    let runner = Arc::new(OsRunner);
-    let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::<OsRunner>::clone(&runner)));
-    let merger = if args.fetch_only {
-        None
-    } else {
-        let mode = prepared.project.config.mergiraf.unwrap_or_default();
-        let mergiraf = mergiraf_program(mode, ctx.env, runner.as_ref())
-            .map_err(|e| Report::error(Exit::Usage, e))?;
-        Some((Arc::new(Merger::new(runner)), mergiraf))
-    };
-    let options = BuildOptions {
-        strategy: strategy(prepared.project.config.merge_strategy.unwrap_or_default()),
-        mergiraf: merger.as_ref().and_then(|(_, m)| m.clone()),
-        keep_conflicts: args.keep_conflicts,
-        force: args.force,
-    };
-    let planned = std::cell::RefCell::new(Vec::new());
-    let plan_builds = |outcomes: &[Outcome]| {
-        let fetched: Vec<(String, Vec<Fetched>)> = outcomes
-            .iter()
-            .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
-            .collect();
-        let repos = aggregations(
-            &prepared.project.config,
-            &prepared.project.root,
-            args.repo.as_deref(),
-            &prepared.cache,
-            &fetched,
-            &options,
-        );
-        let runnable: Vec<Aggregation> = repos
-            .iter()
-            .filter_map(|r| r.as_ref().ok().map(|r| r.aggregation.clone()))
-            .collect();
-        *planned.borrow_mut() = repos;
-        runnable
-    };
-    let (outcomes, results) = run_pipeline(
-        &prepared.cache,
-        &backend,
-        prepared.plans.iter().map(|p| p.plan.clone()).collect(),
-        prepared.limits,
-        merger.as_ref().map(|(m, _)| m),
-        &plan_builds,
-    );
-    let planned = planned.into_inner();
-    let summary = Summary::new(
-        &prepared.plans,
-        &outcomes,
-        &planned,
-        &results,
+    let prepared = prepare(global, ctx)?;
+    let mut planned = plan_config(
+        &prepared.project.config,
         &prepared.project.root,
-    );
-    let mut report = if global.json {
-        Report {
-            out: format!("{}\n", summary.to_json(args.fetch_only)),
-            ..Report::default()
+        args.repo.as_deref(),
+    )
+    .map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
+    if !args.update {
+        for repo in &mut planned {
+            pin(repo, prepared.locked());
         }
-    } else {
-        summary.to_text(args.fetch_only)
-    };
-    if !global.json {
-        report.warnings = prepared.project.warnings;
     }
-    if summary.failed() {
-        report.exit = Exit::Failure;
+    if args.locked {
+        let stale: Vec<&str> = planned
+            .iter()
+            .filter(|repo| !repo.pinned)
+            .map(|repo| repo.name.as_str())
+            .collect();
+        if !stale.is_empty() {
+            return Err(Report::error(
+                Exit::Failure,
+                format!(
+                    "{} does not lock {} as configured; run `odx lock`",
+                    prepared.lock_path.display(),
+                    stale.join(", ")
+                ),
+            ));
+        }
     }
-    Ok(report)
+    let (merger, options) = merger_and_options(
+        &prepared.project.config,
+        ctx,
+        args.keep_conflicts,
+        args.force,
+    )?;
+    // Working trees that already are what odx.lock describes need nothing.
+    let (current, planned): (Vec<Planned>, Vec<Planned>) = planned.into_iter().partition(|repo| {
+        !args.fetch_only
+            && repo.pinned
+            && prepared.locked().iter().any(|entry| {
+                entry.name == repo.name
+                    && merger.is_current(
+                        &repo.target_dir,
+                        &prepared.cache.repo_dir(&repo.url),
+                        &entry.result_tree,
+                    )
+            })
+    });
+    let built = build(
+        &prepared,
+        &planned,
+        &options,
+        (!args.fetch_only).then_some(&merger),
+        args.prefer_mirror,
+    );
+    let mut summary = Summary::new(&built, &planned, &prepared.project.root, false);
+    summary.current = current
+        .iter()
+        .map(|repo| {
+            (
+                repo.name.clone(),
+                relative(&repo.target_dir, &prepared.project.root),
+            )
+        })
+        .collect();
+    if !args.fetch_only && !args.locked {
+        let (entries, failures) = lock_entries(&planned, &built, &merger);
+        summary.failures.extend(failures);
+        let lock = next_lock(&prepared, entries, args.repo.as_deref());
+        let previous = prepared.lock.clone().unwrap_or_default();
+        summary.changes = lock_changes(&previous, &lock);
+        if previous != lock {
+            write_lock(ctx, &prepared, &lock)?;
+        }
+    }
+    Ok(summary.report(global.json, args.fetch_only, prepared.project.warnings))
 }
 
-/// The outcome of a run, per repository URL (fetch) and per repository
-/// (build).
+/// `odx lock [--repo NAME] [--check | --update]`.
+pub(crate) fn run_lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
+    lock(args, global, ctx).unwrap_or_else(|report| report)
+}
+
+fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    if args.auto_update {
+        return Err(Report::error(
+            Exit::Usage,
+            "odx lock --auto-update: not implemented yet (roadmap phase 5)".to_owned(),
+        ));
+    }
+    let prepared = prepare(global, ctx)?;
+    let mut planned = plan_config(
+        &prepared.project.config,
+        &prepared.project.root,
+        args.repo.as_deref(),
+    )
+    .map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
+    if !args.update {
+        for repo in &mut planned {
+            pin(repo, prepared.locked());
+        }
+    }
+    // Pinned repositories keep their entries; the others are built in
+    // scratch working trees inside the cache, never in the project.
+    let mut planned: Vec<Planned> = planned.into_iter().filter(|repo| !repo.pinned).collect();
+    for repo in &mut planned {
+        let name: String = repo
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        repo.target_dir = prepared
+            .cache
+            .root()
+            .join("locks")
+            .join(format!("{}-{name}", url_hash(&repo.url)));
+    }
+    let (merger, options) = merger_and_options(&prepared.project.config, ctx, false, true)?;
+    let built = build(&prepared, &planned, &options, Some(&merger), true);
+    let mut summary = Summary::new(&built, &planned, &prepared.project.root, true);
+    let (entries, failures) = lock_entries(&planned, &built, &merger);
+    summary.failures.extend(failures);
+    let lock = next_lock(&prepared, entries, args.repo.as_deref());
+    let previous = prepared.lock.clone().unwrap_or_default();
+    summary.changes = lock_changes(&previous, &lock);
+    let outdated = previous != lock;
+    if args.check {
+        if outdated {
+            summary.failures.push(format!(
+                "{} is not up to date; run `odx lock`",
+                prepared.lock_path.display()
+            ));
+        }
+    } else if outdated {
+        write_lock(ctx, &prepared, &lock)?;
+    }
+    Ok(summary.report(global.json, false, prepared.project.warnings))
+}
+
+fn relative(dir: &Path, root: &Path) -> String {
+    dir.strip_prefix(root)
+        .unwrap_or(dir)
+        .display()
+        .to_string()
+        .replace('\\', "/")
+}
+
+/// The outcome of a run: per repository URL (fetch), per repository
+/// (build or already current), and the changes to `odx.lock`.
 struct Summary {
     fetches: Vec<(String, Result<Vec<Fetched>, String>)>,
     builds: Vec<(String, String, Result<Aggregated, String>)>,
+    current: Vec<(String, String)>,
+    changes: Vec<Change>,
+    failures: Vec<String>,
+    /// Built in scratch working trees (`odx lock`): directories are not
+    /// shown.
+    scratch: bool,
 }
 
 impl Summary {
-    fn new(
-        plans: &[RepoPlan],
-        outcomes: &[Outcome],
-        planned: &[Result<RepoAggregation, odx_aggregate::PlanError>],
-        built: &[Result<Aggregated, MergeError>],
-        root: &Path,
-    ) -> Self {
-        let fetches = plans
+    fn new(built: &Built, planned: &[Planned], root: &Path, scratch: bool) -> Self {
+        let fetches = built
+            .plans
             .iter()
-            .zip(outcomes)
+            .zip(&built.outcomes)
             .map(|(plan, outcome)| {
                 let result = outcome
                     .result
@@ -212,34 +459,54 @@ impl Summary {
             })
             .collect();
         // Fetch failures are reported with the fetches; a loaded
-        // configuration has only valid merges, so `Ok` entries are all that
-        // is built, one result each, in order.
-        let builds = planned
-            .iter()
-            .filter_map(|repo| repo.as_ref().ok())
-            .zip(built)
-            .map(|(repo, result)| {
-                let dir = repo
-                    .aggregation
-                    .target_dir
-                    .strip_prefix(root)
-                    .unwrap_or(&repo.aggregation.target_dir)
-                    .display()
-                    .to_string()
-                    .replace('\\', "/");
+        // configuration has only valid merges, so what was planned is all
+        // that is built, one result each, in order.
+        let builds = built
+            .pairs(planned)
+            .map(|(repo, aggregation, result)| {
                 let result = match result {
                     Ok(aggregated) => Ok(aggregated.clone()),
                     Err(e) => Err(e.to_string()),
                 };
-                (repo.name.clone(), dir, result)
+                (
+                    repo.name.clone(),
+                    relative(&aggregation.target_dir, root),
+                    result,
+                )
             })
             .collect();
-        Self { fetches, builds }
+        Self {
+            fetches,
+            builds,
+            current: Vec::new(),
+            changes: Vec::new(),
+            failures: Vec::new(),
+            scratch,
+        }
     }
 
     fn failed(&self) -> bool {
-        self.fetches.iter().any(|(_, r)| r.is_err())
+        !self.failures.is_empty()
+            || self.fetches.iter().any(|(_, r)| r.is_err())
             || self.builds.iter().any(|(_, _, r)| r.is_err())
+    }
+
+    fn report(&self, json: bool, fetch_only: bool, warnings: Vec<odx_config::Problem>) -> Report {
+        let mut report = if json {
+            Report {
+                out: format!("{}\n", self.to_json(fetch_only)),
+                ..Report::default()
+            }
+        } else {
+            Report {
+                warnings,
+                ..self.to_text(fetch_only)
+            }
+        };
+        if self.failed() {
+            report.exit = Exit::Failure;
+        }
+        report
     }
 
     fn to_text(&self, fetch_only: bool) -> Report {
@@ -253,6 +520,7 @@ impl Summary {
                     for (via, label) in [
                         (Via::Mirror, "from the mirror"),
                         (Via::Clone, "through the local clone"),
+                        (Via::Cache, "already cached"),
                     ] {
                         let n = count(via);
                         if n > 0 {
@@ -265,8 +533,19 @@ impl Summary {
             }
         }
         if !fetch_only {
+            for (name, dir) in &self.current {
+                let _ = writeln!(report.out, "up to date {name} in {dir} (locked)");
+            }
             for (name, dir, result) in &self.builds {
                 match result {
+                    Ok(built) if self.scratch => {
+                        let _ = writeln!(
+                            report.out,
+                            "resolved {name}: {} ({})",
+                            built.describe(),
+                            short(&built.head)
+                        );
+                    }
                     Ok(built) => {
                         let _ = writeln!(
                             report.out,
@@ -279,6 +558,10 @@ impl Summary {
                 }
             }
         }
+        for change in &self.changes {
+            let _ = writeln!(report.out, "{}", describe_change(change));
+        }
+        failures.extend(self.failures.iter().cloned());
         if !failures.is_empty() {
             report.error = Some(format!(
                 "aggregation failed for\n  {}",
@@ -298,6 +581,7 @@ impl Summary {
                     "refs": fetched.len(),
                     "from_mirror": fetched.iter().filter(|f| f.via == Via::Mirror).count(),
                     "through_clone": fetched.iter().filter(|f| f.via == Via::Clone).count(),
+                    "cached": fetched.iter().filter(|f| f.via == Via::Cache).count(),
                 }),
                 Err(e) => serde_json::json!({ "repositories": names, "error": e }),
             })
@@ -312,21 +596,60 @@ impl Summary {
                 .map(|(name, dir, result)| match result {
                     Ok(built) => serde_json::json!({
                         "name": name,
-                        "target_dir": dir,
+                        "target_dir": (!self.scratch).then_some(dir),
                         "head": built.head,
                         "tree": built.tree,
                         "merges": built.steps.iter().map(|(label, outcome)| match outcome {
-                            StepOutcome::Merged => serde_json::json!({ "label": label, "status": "merged" }),
-                            StepOutcome::UpToDate => serde_json::json!({ "label": label, "status": "up-to-date" }),
                             StepOutcome::Skipped { files } => serde_json::json!({ "label": label, "status": "skipped", "files": files }),
+                            other => serde_json::json!({ "label": label, "status": other.status() }),
                         }).collect::<Vec<_>>(),
                     }),
-                    Err(e) => serde_json::json!({ "name": name, "target_dir": dir, "error": e }),
+                    Err(e) => serde_json::json!({ "name": name, "target_dir": (!self.scratch).then_some(dir), "error": e }),
                 })
                 .collect();
             value.insert("built".to_owned(), serde_json::Value::Array(builds));
+            let current: Vec<serde_json::Value> = self
+                .current
+                .iter()
+                .map(|(name, dir)| serde_json::json!({ "name": name, "target_dir": dir }))
+                .collect();
+            value.insert("current".to_owned(), serde_json::Value::Array(current));
         }
+        let changes: Vec<serde_json::Value> = self
+            .changes
+            .iter()
+            .map(|change| {
+                serde_json::json!({
+                    "repository": change.repository,
+                    "item": change.item,
+                    "change": change.kind.as_str(),
+                    "old": change.old,
+                    "new": change.new,
+                })
+            })
+            .collect();
+        value.insert("lock".to_owned(), serde_json::Value::Array(changes));
+        let failures = &self.failures;
+        value.insert("errors".to_owned(), serde_json::json!(failures));
         serde_json::Value::Object(value)
+    }
+}
+
+/// `locked pos #1 at 1a2b3c4d5e6f`, `updated pos #1: a -> b (rebased (same patch))`.
+fn describe_change(change: &Change) -> String {
+    let what = if change.item.is_empty() {
+        change.repository.clone()
+    } else {
+        format!("{} {}", change.repository, change.item)
+    };
+    let old = change.old.as_deref().map(short).unwrap_or_default();
+    let new = change.new.as_deref().map(short).unwrap_or_default();
+    match change.kind {
+        ChangeKind::Added => format!("locked {what} at {new}"),
+        ChangeKind::Removed => format!("unlocked {what} (was {old})"),
+        ChangeKind::Rebased | ChangeKind::Changed => {
+            format!("updated {what}: {old} -> {new} ({})", change.kind.as_str())
+        }
     }
 }
 
@@ -341,6 +664,44 @@ mod tests {
 
     fn cache_dir_of(config: &OdxConfig, root: &Path, env: &dyn Env) -> PathBuf {
         cache_dir(config, &UserConfig::default(), root, env)
+    }
+
+    #[test]
+    fn lock_entries_report_git_failures() {
+        let config = config(
+            "[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"u\"\nmerges = [{ pr = 1 }]\n",
+        );
+        let planned = plan_config(&config, Path::new("/p"), None).unwrap();
+        let aggregation = Aggregation {
+            cache_repo: PathBuf::from("/nonexistent/odx/cache.git"),
+            target_dir: PathBuf::from("/p/vendor/pos"),
+            base: "0".repeat(40),
+            steps: vec![odx_git::Step {
+                label: "#1".into(),
+                sha: "1".repeat(40),
+                skip_on_conflict: false,
+            }],
+            strategy: odx_git::Strategy::Rebase,
+            mergiraf: None,
+            keep_conflicts: false,
+            force: false,
+        };
+        let built = Built {
+            plans: Vec::new(),
+            outcomes: Vec::new(),
+            aggregations: vec![Ok(RepoAggregation {
+                name: "pos".into(),
+                aggregation,
+            })],
+            results: vec![Ok(Aggregated {
+                head: "2".repeat(40),
+                tree: "3".repeat(40),
+                steps: vec![("#1".into(), StepOutcome::Merged)],
+            })],
+        };
+        let (entries, failures) = lock_entries(&planned, &built, &Merger::new(Arc::new(OsRunner)));
+        assert_eq!(entries, []);
+        assert!(failures[0].starts_with("pos: "), "{failures:?}");
     }
 
     #[test]

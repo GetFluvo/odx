@@ -1,25 +1,28 @@
 //! Aggregation, locking, vaulting, the force-push guard rail, auto-update and verification for odx.
 //!
-//! [`fetch_plans`] turns `[tool.odx]` into one fetch plan per repository
-//! URL for the git cache; [`aggregations`] turns the fetched commits into
-//! one working-tree build per repository. [`yaml_fetch_plans`] and
-//! [`yaml_aggregations`] do the same for a git-aggregator `repos.yaml`, and
-//! [`run_pipeline`] runs both stages.
+//! [`plan_config`] (for `[tool.odx]`) and [`plan_yaml`] (for a
+//! git-aggregator `repos.yaml`) describe what to build; [`pin`] replaces the
+//! sources by the commits of `odx.lock`. [`fetch_plans`] turns the plans
+//! into one fetch per repository URL, [`aggregations`] turns the fetched
+//! commits into working-tree builds, and [`run_pipeline`] runs both stages.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod aggregation;
+mod locking;
 mod pipeline;
+mod plan;
 mod repos_yaml;
 
 pub use aggregation::{BuildOptions, RepoAggregation, aggregations};
+pub use locking::{Change, ChangeKind, lock_changes, lock_entry, source_label, update_lock};
 pub use pipeline::{local_clones, mergiraf_program, run_pipeline};
-pub use repos_yaml::{yaml_aggregations, yaml_fetch_plans, yaml_source};
+pub use plan::{Planned, PlannedSource, PlannedStep, pin, plan_config};
+pub use repos_yaml::{plan_yaml, yaml_source};
 
-use odx_config::OdxConfig;
-use odx_config::schema::{ForgeKind, MergeSource, MergeStrategy};
+use odx_config::schema::{ForgeKind, MergeStrategy};
 use odx_core::repo_key;
-use odx_git::{FetchPlan, Forge, Source, Strategy};
+use odx_git::{FetchPlan, Forge, Strategy};
 
 /// Errors from planning.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -30,6 +33,14 @@ pub enum PlanError {
     /// A repository's sources were not (all) fetched.
     #[error("{0}: not fetched")]
     NotFetched(String),
+    /// The lock entry of a built repository could not be computed.
+    #[error("{repository}: {message}")]
+    Lock {
+        /// The repository.
+        repository: String,
+        /// What failed.
+        message: String,
+    },
     /// A merge entry is invalid (configurations are validated when loaded,
     /// so this only happens for configurations built in code).
     #[error("{repository}: {message}")]
@@ -75,89 +86,58 @@ const fn forge(kind: ForgeKind) -> Forge {
 
 /// One fetch plan per repository URL.
 ///
-/// Each plan has the base branch and every merge source. Repositories that
-/// share a URL (in any spelling) share one plan, so each URL is fetched
-/// once. With `prefer_mirror`, the configured mirror is tried first for
-/// locked commits.
+/// Each plan has the base and every merge source of the repositories that
+/// share the URL (in any spelling), so each URL is fetched once. `mirror`
+/// is tried first for full commit ids.
 ///
 /// ```
-/// use odx_aggregate::fetch_plans;
+/// use odx_aggregate::{fetch_plans, plan_config};
 /// use odx_config::parse_pyproject;
 /// use std::path::Path;
 ///
 /// let text = "[tool.odx]\nodoo_version = \"17.0\"\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"https://github.com/OCA/pos.git\"\nmerges = [{ pr = 1 }]\n";
 /// let config = parse_pyproject(text, Path::new("p.toml")).unwrap().unwrap().config;
-/// let plans = fetch_plans(&config, None, false).unwrap();
+/// let plans = fetch_plans(&plan_config(&config, Path::new("."), None).unwrap(), None);
 /// assert_eq!(plans[0].names, ["pos"]);
 /// assert_eq!(plans[0].plan.sources.len(), 2);
 /// ```
-///
-/// # Errors
-///
-/// [`PlanError::UnknownRepository`] when `only` names no repository,
-/// [`PlanError::InvalidMerge`] for an invalid merge entry.
-pub fn fetch_plans(
-    config: &OdxConfig,
-    only: Option<&str>,
-    prefer_mirror: bool,
-) -> Result<Vec<RepoPlan>, PlanError> {
-    let mirror = config
-        .mirror
-        .as_ref()
-        .filter(|_| prefer_mirror)
-        .map(|m| m.url.clone());
+pub fn fetch_plans(planned: &[Planned], mirror: Option<&str>) -> Vec<RepoPlan> {
     let mut plans: Vec<RepoPlan> = Vec::new();
-    for repo in &config.repositories {
-        let name = repo.name.clone().unwrap_or_else(|| repo.url.clone());
-        if only.is_some_and(|only| only != name) {
-            continue;
-        }
-        let base = repo.base.as_deref().unwrap_or(&config.odoo_version);
-        let mut sources = vec![(None, Source::Branch(base.to_owned()))];
-        for merge in &repo.merges {
-            let source = merge.source().map_err(|message| PlanError::InvalidMerge {
-                repository: name.clone(),
-                message,
-            })?;
-            sources.push(match source {
-                MergeSource::Pr(pr) => (None, Source::Pr(pr)),
-                MergeSource::Sha(sha) => (None, Source::Commit(sha.to_owned())),
-                MergeSource::Branch { branch, remote } => {
-                    (remote.map(str::to_owned), Source::Branch(branch.to_owned()))
-                }
-            });
-        }
+    for repo in planned {
+        let sources = std::iter::once(&repo.base)
+            .chain(repo.steps.iter().map(|step| &step.from))
+            .map(|wanted| (wanted.remote.clone(), wanted.source.clone()));
         let key = repo_key(&repo.url);
-        if let Some(existing) = plans.iter_mut().find(|p| repo_key(&p.plan.url) == key) {
-            existing.names.push(name);
-            for source in sources {
-                if !existing.plan.sources.contains(&source) {
-                    existing.plan.sources.push(source);
-                }
-            }
-        } else {
+        if !plans.iter().any(|p| repo_key(&p.plan.url) == key) {
             plans.push(RepoPlan {
-                names: vec![name],
+                names: Vec::new(),
                 plan: FetchPlan {
                     url: repo.url.clone(),
-                    forge: repo.forge.map_or_else(|| Forge::detect(&repo.url), forge),
-                    sources,
-                    mirror: mirror.clone(),
+                    forge: repo.forge,
+                    sources: Vec::new(),
+                    mirror: mirror.map(str::to_owned),
                     clone: None,
                 },
             });
         }
+        for entry in plans.iter_mut().filter(|p| repo_key(&p.plan.url) == key) {
+            entry.names.push(repo.name.clone());
+            for source in sources.clone() {
+                if !entry.plan.sources.contains(&source) {
+                    entry.plan.sources.push(source);
+                }
+            }
+        }
     }
-    match only {
-        Some(only) if plans.is_empty() => Err(PlanError::UnknownRepository(only.to_owned())),
-        _ => Ok(plans),
-    }
+    plans
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use odx_config::parse_pyproject;
+    use odx_config::lock::{LockSource, LockedMerge, LockedRepository, MergeStatus};
+    use odx_config::{OdxConfig, parse_pyproject};
+    use odx_git::Source;
     use std::path::Path;
 
     fn config(toml: &str) -> OdxConfig {
@@ -169,9 +149,6 @@ mod tests {
     }
 
     const REPOS: &str = r#"
-[tool.odx.mirror]
-url = "https://forge.example/vault.git"
-
 [[tool.odx.repositories]]
 name = "pos"
 url = "https://github.com/OCA/pos.git"
@@ -192,9 +169,16 @@ url = "https://gitlab.example.com/odoo/web.git"
 forge = "gitea"
 "#;
 
+    fn planned(toml: &str, only: Option<&str>) -> Vec<Planned> {
+        plan_config(&config(toml), Path::new("/p"), only).unwrap()
+    }
+
     #[test]
     fn one_plan_per_url_with_every_source() {
-        let plans = fetch_plans(&config(REPOS), None, true).unwrap();
+        let plans = fetch_plans(
+            &planned(REPOS, None),
+            Some("https://forge.example/vault.git"),
+        );
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[0].names, ["pos", "pos-again"]);
         assert_eq!(
@@ -221,35 +205,107 @@ forge = "gitea"
     }
 
     #[test]
-    fn filters_and_mirror_preference() {
-        let config = config(REPOS);
-        let plans = fetch_plans(&config, Some("pos-again"), false).unwrap();
+    fn filters_and_forges() {
+        let plans = fetch_plans(&planned(REPOS, Some("pos-again")), None);
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].plan.mirror, None);
         assert_eq!(
-            fetch_plans(&config, Some("nope"), false),
+            plan_config(&config(REPOS), Path::new("/p"), Some("nope")),
             Err(PlanError::UnknownRepository("nope".into()))
         );
         assert_eq!(
             PlanError::UnknownRepository("nope".into()).to_string(),
             "no repository named \"nope\" in [tool.odx]"
         );
-        let forges = fetch_plans(&self::config("[[tool.odx.repositories]]\nurl = \"u\"\nforge = \"github\"\n[[tool.odx.repositories]]\nurl = \"v\"\nforge = \"gitlab\"\n"), None, false).unwrap();
+        let forges = planned(
+            "[[tool.odx.repositories]]\nurl = \"u\"\nforge = \"github\"\n[[tool.odx.repositories]]\nurl = \"v\"\nforge = \"gitlab\"\n",
+            None,
+        );
         assert_eq!(
-            (forges[0].plan.forge, forges[1].plan.forge),
+            (forges[0].forge, forges[1].forge),
             (Forge::Github, Forge::Gitlab)
         );
     }
 
+    fn sha(c: char) -> String {
+        c.to_string().repeat(40)
+    }
+
+    fn locked(name: &str, url: &str, base: &str, sources: &[LockSource]) -> LockedRepository {
+        LockedRepository {
+            name: name.to_owned(),
+            url: url.to_owned(),
+            base: base.to_owned(),
+            base_sha: sha('b'),
+            result_tree: sha('t'),
+            merges: sources
+                .iter()
+                .map(|source| LockedMerge {
+                    source: source.clone(),
+                    sha: sha('m'),
+                    tree: sha('t'),
+                    patch_id: sha('p'),
+                    mirror_ref: None,
+                    status: MergeStatus::Merged,
+                    upstream_head: None,
+                    upstream_head_ci: None,
+                    upstream_head_classification: None,
+                    pinned_since: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn skipped(mut entry: LockedRepository) -> LockedRepository {
+        entry.merges[1].status = MergeStatus::Skipped;
+        entry
+    }
+
     #[test]
-    fn invalid_merges_built_in_code_are_reported() {
-        let mut config =
-            config("[[tool.odx.repositories]]\nname = \"x\"\nurl = \"u\"\nmerges = [{ pr = 1 }]\n");
-        config.repositories[0].merges[0].sha = Some("abc1234".into());
-        let err = fetch_plans(&config, None, false).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "x: set only one of `pr`, `sha` or `branch`"
-        );
+    fn pins_only_entries_locked_from_the_same_configuration() {
+        let all = planned(REPOS, None);
+        let again = &all[1];
+        let sources: Vec<LockSource> = again.steps.iter().map(|s| s.lock.clone()).collect();
+        let url = "https://github.com/OCA/pos.git";
+        let mut repo = again.clone();
+        assert!(pin(
+            &mut repo,
+            &[locked("pos-again", url, "17.0", &sources)]
+        ));
+        assert!(repo.pinned);
+        assert_eq!(repo.base.source, Source::Commit(sha('b')));
+        assert_eq!(repo.steps[1].from.source, Source::Commit(sha('m')));
+        assert_eq!(repo.steps[1].label, "#2");
+        // A merge that was skipped stays pinned while it may be skipped.
+        let mut skipping = again.clone();
+        skipping.steps[1].skip_on_conflict = true;
+        assert!(pin(
+            &mut skipping,
+            &[skipped(locked("pos-again", url, "17.0", &sources))]
+        ));
+        for stale in [
+            locked("other", url, "17.0", &sources),
+            locked("pos-again", "https://x/y.git", "17.0", &sources),
+            locked("pos-again", url, "16.0", &sources),
+            locked("pos-again", url, "17.0", &sources[..1]),
+            locked(
+                "pos-again",
+                url,
+                "17.0",
+                &[sources[1].clone(), sources[0].clone()],
+            ),
+            skipped(locked("pos-again", url, "17.0", &sources)),
+        ] {
+            let mut repo = again.clone();
+            assert!(!pin(&mut repo, &[stale]));
+            assert!(!repo.pinned);
+            assert_eq!(&repo, again);
+        }
+    }
+
+    #[test]
+    fn strategies() {
+        assert_eq!(strategy(MergeStrategy::Rebase), Strategy::Rebase);
+        assert_eq!(strategy(MergeStrategy::Merge), Strategy::Merge);
     }
 }
