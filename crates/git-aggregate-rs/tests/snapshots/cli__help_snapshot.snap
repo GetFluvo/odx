@@ -1,0 +1,76 @@
+---
+source: crates/git-aggregate-rs/tests/cli.rs
+expression: "String::from_utf8(output.stdout).unwrap()"
+---
+Aggregate git branches and pull requests from repos.yaml (gitaggregate drop-in)
+
+Usage: git-aggregate-rs [OPTIONS] [ACTION]
+
+Arguments:
+  [ACTION]
+          Action to run
+
+          Possible values:
+          - aggregate:       Fetch and merge the configured branches and pull requests
+          - show-closed-prs: List pull requests in the configuration that are closed or merged
+          - show-all-prs:    List every pull request in the configuration with its state
+          
+          [default: aggregate]
+
+Options:
+  -c, --config <FILE>
+          Path to the repositories file
+          
+          [default: repos.yaml]
+
+  -j, --jobs <N>
+          Number of repositories to process in parallel
+          
+          [default: 1]
+
+  -d, --dirmatch <GLOB>
+          Only process target directories matching this glob
+
+  -p, --push
+          Push each aggregated target branch to its remote
+
+      --expand-env
+          Expand `$VAR` and `${VAR}` in the repositories file
+
+  -e, --env-file <FILE>
+          Load environment variables from FILE before expanding
+
+  -f, --force
+          Discard local changes in the target directories
+
+      --log-level <LOG_LEVEL>
+          Logging verbosity
+
+          Possible values:
+          - debug:   Everything, including fetch and merge details
+          - info:    Progress per repository
+          - warning: Warnings and errors
+          - error:   Errors only
+          
+          [default: info]
+
+      --no-color
+          Disable colored output (also honors `NO_COLOR`)
+
+      --allow-shell
+          Allow `shell_command_after` entries to run (off by default)
+
+      --lock <FILE>
+          Write a reproducible lockfile with the resolved commits
+
+      --mergiraf
+          Use mergiraf for syntax-aware conflict resolution
+
+      --json
+          Machine-readable output on stdout
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

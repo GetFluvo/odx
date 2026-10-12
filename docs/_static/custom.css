@@ -1,0 +1,47 @@
+/* odx brand on top of the shibuya theme.
+   Palette (see docs/_static/logo.svg): orange #ef662f, mint #6fd3b0,
+   purple #7e5a8c, dark #18181f. */
+
+/* Header: larger logo with the project name next to it. Shibuya fixes the
+   logo at 28px and hides the name when a logo is set. */
+:root {
+  --sy-s-navbar-height: 64px;
+}
+.sy-head-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.sy-head-brand img {
+  height: 44px;
+  width: auto;
+}
+.sy-head-brand img + strong {
+  display: inline;
+  font-size: 1.2rem;
+  letter-spacing: -0.01em;
+}
+
+/* Accent: the exact brand orange instead of Radix "orange". Specificity
+   html[...] beats shibuya's [data-accent-color=orange]. */
+html[data-accent-color] {
+  --accent-9: #ef662f;
+  --accent-10: #e0571f;
+  --accent-11: #b8441a;
+  --accent-a10: #d9531c;
+  --accent-a11: #b8441a;
+  /* #ef662f on white is below WCAG AA for body text; links use a darker step. */
+  --sy-c-link: #c2481c;
+  --sy-c-link-hover: #9c3a15;
+}
+html.dark[data-accent-color] {
+  --accent-9: #ef662f;
+  --accent-10: #f47a45;
+  --accent-11: #ff9b6b;
+  --accent-a10: #f8915a;
+  --accent-a11: #ffa77c;
+  --sy-c-link: #f8915a;
+  --sy-c-link-hover: #ffb48f;
+  --sy-c-background: #18181f;
+  --sy-c-background-dropback: #18181fcc;
+}

@@ -1,0 +1,28 @@
+[package]
+name = "git-aggregate-rs"
+description = "Drop-in replacement for git-aggregator's gitaggregate, written in Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["odoo", "oca", "git", "git-aggregator", "cli"]
+categories.workspace = true
+
+[[bin]]
+name = "git-aggregate-rs"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+odx-core.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+insta.workspace = true
+
+[lints]
+workspace = true

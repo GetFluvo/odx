@@ -1,0 +1,97 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Run the gitaggregate-compatible drop-in (same as `git-aggregate-rs`)
+
+Usage: odx git-aggregate [OPTIONS] [ACTION]
+
+Arguments:
+  [ACTION]
+          Action to run
+
+          Possible values:
+          - aggregate:       Fetch and merge the configured branches and pull requests
+          - show-closed-prs: List pull requests in the configuration that are closed or merged
+          - show-all-prs:    List every pull request in the configuration with its state
+          
+          [default: aggregate]
+
+Options:
+  -c, --config <FILE>
+          Path to the repositories file
+          
+          [default: repos.yaml]
+
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -j, --jobs <N>
+          Number of repositories to process in parallel
+          
+          [default: 1]
+
+  -d, --dirmatch <GLOB>
+          Only process target directories matching this glob
+
+      --offline
+          Serve forge and index data from the cache only
+
+  -p, --push
+          Push each aggregated target branch to its remote
+
+      --expand-env
+          Expand `$VAR` and `${VAR}` in the repositories file
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+  -e, --env-file <FILE>
+          Load environment variables from FILE before expanding
+
+      --no-refresh
+          Use cached data even when stale
+
+  -f, --force
+          Discard local changes in the target directories
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --log-level <LOG_LEVEL>
+          Logging verbosity
+
+          Possible values:
+          - debug:   Everything, including fetch and merge details
+          - info:    Progress per repository
+          - warning: Warnings and errors
+          - error:   Errors only
+          
+          [default: info]
+
+      --no-color
+          Disable colored output (also honors `NO_COLOR`)
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+      --allow-shell
+          Allow `shell_command_after` entries to run (off by default)
+
+  -q, --quiet
+          Errors only
+
+      --lock <FILE>
+          Write a reproducible lockfile with the resolved commits
+
+      --mergiraf
+          Use mergiraf for syntax-aware conflict resolution
+
+      --json
+          Machine-readable output on stdout
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

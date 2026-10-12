@@ -1,0 +1,16 @@
+[package]
+name = "odx-analyze"
+description = "Odoo manifest analysis for odx: check-deps, stats, sniff, status, suggest and upgrade readiness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true

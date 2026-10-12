@@ -1,0 +1,120 @@
+# ─────────────────────────────────────────────────────────────
+# odx
+# ─────────────────────────────────────────────────────────────
+# Internal design notes (not published).
+/.docs/
+
+# Local odx state produced while dogfooding on sample projects.
+.odx/
+/vendor/
+/unmerged/
+
+# ─────────────────────────────────────────────────────────────
+# Rust
+# ─────────────────────────────────────────────────────────────
+# Cargo.lock IS committed: odx ships a binary, builds must be reproducible.
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Sphinx output
+/docs/_build/
+
+# Coverage (cargo-llvm-cov / grcov / tarpaulin)
+*.profraw
+*.profdata
+lcov.info
+coverage/
+coverage.xml
+cobertura.xml
+tarpaulin-report.*
+htmlcov/
+
+# Benchmarks / profiling
+/criterion/
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Snapshot tests: pending (unreviewed) insta snapshots
+*.snap.new
+*.pending-snap
+
+# Fuzzing
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+
+# mutation testing
+/mutants.out*/
+
+# ─────────────────────────────────────────────────────────────
+# Python packaging (maturin binary wheel)
+# ─────────────────────────────────────────────────────────────
+# uv.lock IS committed for reproducible tooling environments.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+wheels/
+*.whl
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.nox/
+.tox/
+.coverage
+.coverage.*
+
+# ─────────────────────────────────────────────────────────────
+# Editor extensions (VS Code / Zed) build output
+# ─────────────────────────────────────────────────────────────
+node_modules/
+*.vsix
+out/
+*.wasm
+
+# ─────────────────────────────────────────────────────────────
+# Secrets & local configuration
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.netrc
+
+# ─────────────────────────────────────────────────────────────
+# Editors & OS
+# ─────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.zed/
+.fleet/
+.project
+.pydevproject
+.settings/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+*.log
+.DS_Store
+Thumbs.db
+.direnv/
+.cache/
+
+# Local tool/agent state (keep agent-specific entries in .git/info/exclude)
+.crush/
+.aider*

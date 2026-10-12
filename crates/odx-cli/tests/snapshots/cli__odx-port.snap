@@ -1,0 +1,50 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Port PRs or missing commits to another series; maintainer sweeps; blacklists
+
+Usage: odx port [OPTIONS] <COMMAND>
+
+Commands:
+  pr     Port one pull request to another series
+  addon  Port an addon's missing commits from another series
+  sweep  Sweep every addon of a repository against older series (maintainer mode)
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

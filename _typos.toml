@@ -1,0 +1,6 @@
+[files]
+extend-exclude = ["*.svg", "*.png", "*.jpg", "Cargo.lock", "uv.lock", "**/snapshots/*.snap"]
+
+[default.extend-words]
+# Odoo / OCA vocabulary.
+odoo = "odoo"
