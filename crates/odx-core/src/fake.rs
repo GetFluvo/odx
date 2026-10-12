@@ -89,6 +89,7 @@ impl Env for MapEnv {
 pub struct MemoryFs {
     files: Mutex<BTreeMap<PathBuf, Vec<u8>>>,
     failures: Mutex<VecDeque<io::ErrorKind>>,
+    failing_paths: Mutex<BTreeMap<PathBuf, io::ErrorKind>>,
 }
 
 impl MemoryFs {
@@ -99,7 +100,15 @@ impl MemoryFs {
         lock(&self.failures).push_back(kind);
     }
 
-    fn injected_failure(&self) -> io::Result<()> {
+    /// Make every `read` and `write` of `path` fail with `kind`.
+    pub fn fail_on(&self, path: impl Into<PathBuf>, kind: io::ErrorKind) {
+        lock(&self.failing_paths).insert(path.into(), kind);
+    }
+
+    fn injected_failure(&self, path: &Path) -> io::Result<()> {
+        if let Some(kind) = lock(&self.failing_paths).get(path) {
+            return Err(io::Error::from(*kind));
+        }
         lock(&self.failures)
             .pop_front()
             .map_or(Ok(()), |kind| Err(io::Error::from(kind)))
@@ -108,7 +117,7 @@ impl MemoryFs {
 
 impl FileSystem for MemoryFs {
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        self.injected_failure()?;
+        self.injected_failure(path)?;
         lock(&self.files)
             .get(path)
             .cloned()
@@ -116,7 +125,7 @@ impl FileSystem for MemoryFs {
     }
 
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
-        self.injected_failure()?;
+        self.injected_failure(path)?;
         lock(&self.files).insert(path.to_path_buf(), contents.to_vec());
         Ok(())
     }
@@ -197,6 +206,21 @@ mod tests {
         );
         fs.write(path, b"x").unwrap();
         assert!(fs.exists(path));
+    }
+
+    #[test]
+    fn memory_fs_fails_on_a_path_until_the_end() {
+        let fs = MemoryFs::default();
+        fs.fail_on("out.yaml", io::ErrorKind::ReadOnlyFilesystem);
+        for _ in 0..2 {
+            let err = fs.write(Path::new("out.yaml"), b"x").unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::ReadOnlyFilesystem);
+        }
+        assert_eq!(
+            fs.read(Path::new("out.yaml")).unwrap_err().kind(),
+            io::ErrorKind::ReadOnlyFilesystem
+        );
+        fs.write(Path::new("other.yaml"), b"x").unwrap();
     }
 
     #[test]

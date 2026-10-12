@@ -4,7 +4,7 @@ use std::time::SystemTime;
 ///
 /// Used for cache staleness, verdict expiry and lockfile timestamps, so
 /// tests can control time.
-pub trait Clock: Send + Sync {
+pub trait Clock: std::fmt::Debug + Send + Sync {
     /// The current wall-clock time.
     fn now(&self) -> SystemTime;
 }

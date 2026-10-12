@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 
 /// Minimal file system access used by the odx library crates.
-pub trait FileSystem: Send + Sync {
+pub trait FileSystem: std::fmt::Debug + Send + Sync {
     /// Read the whole file at `path`.
     ///
     /// # Errors

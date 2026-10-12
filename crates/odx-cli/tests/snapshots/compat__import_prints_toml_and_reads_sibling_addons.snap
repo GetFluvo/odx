@@ -1,0 +1,14 @@
+---
+source: crates/odx-cli/tests/compat.rs
+expression: out
+---
+[[tool.odx.repositories]]
+name = "pos"
+url = "https://github.com/OCA/pos.git"
+target_dir = "pos"
+base = "17.0"
+target_branch = "17.0-odx"
+addons = ["pos_*"]
+merges = [
+    { pr = 1 },
+]

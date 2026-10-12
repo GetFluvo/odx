@@ -1,0 +1,234 @@
+//! `odx import` and `odx export` against an in-memory file system.
+
+#![expect(clippy::unwrap_used, reason = "test helpers should fail loudly")]
+
+use std::io::ErrorKind;
+use std::path::Path;
+
+use odx_core::fake::MemoryFs;
+use odx_core::{Exit, FileSystem};
+
+fn run(fs: &MemoryFs, args: &[&str]) -> (Exit, String, String) {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut command_line = vec!["odx"];
+    command_line.extend_from_slice(args);
+    let exit = odx_cli::run_in(command_line, fs, Path::new("/w"), &mut out, &mut err);
+    (
+        exit,
+        String::from_utf8(out).unwrap(),
+        String::from_utf8(err).unwrap(),
+    )
+}
+
+/// `/w/<name>` as odx displays it on this platform.
+fn w(name: &str) -> String {
+    Path::new("/w").join(name).display().to_string()
+}
+
+fn fs_with(files: &[(&str, &str)]) -> MemoryFs {
+    let fs = MemoryFs::default();
+    for (path, text) in files {
+        fs.write(Path::new(path), text.as_bytes()).unwrap();
+    }
+    fs
+}
+
+const REPOS: &str = "./pos:\n  remotes:\n    oca: https://github.com/OCA/pos.git\n  merges:\n    - oca 17.0\n    - oca refs/pull/1/head\n  target: oca 17.0-odx\n";
+const PYPROJECT: &str = "[tool.odx]\nodoo_version = \"17.0\"\n\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"https://github.com/OCA/pos.git\"\naddons = [\"pos_*\"]\nmerges = [{ pr = 1 }]\n";
+
+#[test]
+fn import_prints_toml_and_reads_sibling_addons() {
+    let fs = fs_with(&[
+        ("/w/repos.yaml", REPOS),
+        (
+            "/w/addons.yaml",
+            "pos: [pos_*]\n---\nONLY: {X: [y]}\nweb: [a]\n",
+        ),
+    ]);
+    let (exit, out, err) = run(&fs, &["import"]);
+    assert_eq!(exit, Exit::Success);
+    insta::assert_snapshot!(out);
+    assert_eq!(
+        err,
+        "warning: document 2: has an ONLY condition; skipped (depends on the container environment)\n"
+    );
+}
+
+#[test]
+fn import_without_addons_and_with_explicit_paths() {
+    let fs = fs_with(&[("/w/sub/r.yaml", REPOS), ("/w/a.yaml", "ghost: [x]\n")]);
+    let (exit, out, err) = run(&fs, &["-C", "sub", "import", "r.yaml"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    assert!(out.contains("merges = [\n    { pr = 1 },\n]"));
+    let (exit, _, err) = run(&fs, &["import", "sub/r.yaml", "a.yaml"]);
+    assert_eq!(exit, Exit::Success);
+    assert_eq!(
+        err,
+        "warning: addons.yaml: ghost: no repository with this name in repos.yaml\n"
+    );
+}
+
+#[test]
+fn import_errors() {
+    let fs = fs_with(&[
+        ("/w/repos.yaml", REPOS),
+        ("/w/bad.yaml", "./x:\n  merges: []\n"),
+        ("/w/badaddons.yaml", "web: [\n"),
+    ]);
+    let (exit, _, err) = run(&fs, &["import", "--write"]);
+    assert_eq!(
+        (exit, err.as_str()),
+        (
+            Exit::Usage,
+            "odx import --write: not implemented yet (roadmap phase 1)\n"
+        )
+    );
+    let (exit, _, err) = run(&fs, &["import", "missing.yaml"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.starts_with(&format!("error: {}: ", w("missing.yaml"))),
+        "{err}"
+    );
+    let (exit, _, err) = run(&fs, &["import", "bad.yaml"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(
+        err.starts_with(&format!("error: {}: invalid repos.yaml:", w("bad.yaml"))),
+        "{err}"
+    );
+    let (exit, _, err) = run(&fs, &["import", "repos.yaml", "nope.yaml"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.starts_with(&format!("error: {}: ", w("nope.yaml"))),
+        "{err}"
+    );
+    let (exit, _, err) = run(&fs, &["import", "repos.yaml", "badaddons.yaml"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(
+        err.starts_with(&format!("error: {}: ", w("badaddons.yaml"))),
+        "{err}"
+    );
+}
+
+#[test]
+fn export_writes_both_files() {
+    let fs = fs_with(&[("/w/pyproject.toml", PYPROJECT)]);
+    let (exit, out, err) = run(&fs, &["export"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    assert_eq!(
+        out,
+        format!("wrote {}\nwrote {}\n", w("repos.yaml"), w("addons.yaml"))
+    );
+    let repos = String::from_utf8(fs.read(Path::new("/w/repos.yaml")).unwrap()).unwrap();
+    insta::assert_snapshot!(repos);
+    assert!(fs.exists(Path::new("/w/addons.yaml")));
+}
+
+#[test]
+fn export_without_addons_writes_only_repos_yaml() {
+    let text = "[tool.odx]\nodoo_version = \"17.0\"\n[[tool.odx.repositories]]\nurl = \"https://github.com/OCA/web.git\"\n";
+    let fs = fs_with(&[("/w/pyproject.toml", text)]);
+    let (exit, out, _) = run(&fs, &["export"]);
+    assert_eq!(exit, Exit::Success);
+    assert_eq!(out, format!("wrote {}\n", w("repos.yaml")));
+    assert!(!fs.exists(Path::new("/w/addons.yaml")));
+}
+
+#[test]
+fn export_to_stdout_and_warnings() {
+    let fs = fs_with(&[("/w/pyproject.toml", PYPROJECT)]);
+    let (exit, out, _) = run(&fs, &["export", "--stdout"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(out.contains("---\n# Generated by `odx export`"), "{out}");
+
+    let gitlab = "[tool.odx]\nodoo_version = \"17.0\"\n[tool.odx.mirror]\nurl = \"https://gitlab.example.com/v.git\"\nref_style = \"refs\"\n[tool.odx.groups]\noca = \"m\"\n[tool.odx.packages]\n\"odoo-addon-x\" = { repo = \"OCA/x\", pr = 1 }\n";
+    let fs = fs_with(&[("/w/pyproject.toml", gitlab)]);
+    let (exit, out, err) = run(&fs, &["export", "--stdout"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(!out.contains("---"));
+    assert_eq!(
+        err,
+        "warning: tool.odx.mirror.ref_style: GitLab allows deleting custom refs; using protected tags instead\nwarning: tool.odx.packages: packages are not exported yet\n"
+    );
+}
+
+#[test]
+fn export_errors() {
+    let fs = MemoryFs::default();
+    let (exit, _, err) = run(&fs, &["export"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(
+        err.starts_with("error: no pyproject.toml with a [tool.odx] table"),
+        "{err}"
+    );
+
+    let (exit, _, err) = run(&fs, &["--config", "repos.yaml", "export"]);
+    assert_eq!(exit, Exit::Usage);
+    assert_eq!(
+        err,
+        format!(
+            "error: {}: export needs a pyproject.toml with [tool.odx]\n",
+            w("repos.yaml")
+        )
+    );
+
+    let fs = fs_with(&[("/w/pyproject.toml", PYPROJECT)]);
+    fs.fail_next(ErrorKind::PermissionDenied);
+    let (exit, _, err) = run(&fs, &["export"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.starts_with(&format!("error: {}: ", w("pyproject.toml"))),
+        "{err}"
+    );
+
+    fs.fail_on("/w/repos.yaml", ErrorKind::ReadOnlyFilesystem);
+    let (exit, out, err) = run(&fs, &["export"]);
+    assert_eq!((exit, out.as_str()), (Exit::Failure, ""));
+    assert!(
+        err.starts_with(&format!("error: {}: ", w("repos.yaml"))),
+        "{err}"
+    );
+}
+
+#[test]
+fn real_file_system_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pyproject.toml"), PYPROJECT).unwrap();
+    let mut out = Vec::new();
+    let exit = odx_cli::run_in(
+        ["odx", "export"],
+        &odx_cli::system::OsFs,
+        dir.path(),
+        &mut out,
+        &mut Vec::new(),
+    );
+    assert_eq!(exit, Exit::Success);
+    let mut out = Vec::new();
+    let exit = odx_cli::run_in(
+        ["odx", "import"],
+        &odx_cli::system::OsFs,
+        dir.path(),
+        &mut out,
+        &mut Vec::new(),
+    );
+    assert_eq!(exit, Exit::Success);
+    assert!(
+        String::from_utf8(out)
+            .unwrap()
+            .contains("addons = [\"pos_*\"]")
+    );
+}
+
+#[test]
+fn binary_uses_the_working_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("repos.yaml"), REPOS).unwrap();
+    let output = assert_cmd::Command::cargo_bin("odx")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("import")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("name = \"pos\""));
+}

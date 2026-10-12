@@ -85,7 +85,7 @@ impl Output {
 }
 
 /// Runs external programs such as `git`, `uv` and `mergiraf`.
-pub trait ProcessRunner: Send + Sync {
+pub trait ProcessRunner: std::fmt::Debug + Send + Sync {
     /// Run `invocation` to completion and capture its output.
     ///
     /// A non-zero exit status is not an error; inspect [`Output::success`].
