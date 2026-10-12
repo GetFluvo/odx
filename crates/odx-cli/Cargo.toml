@@ -20,11 +20,14 @@ path = "src/main.rs"
 clap.workspace = true
 clap_complete.workspace = true
 git-aggregate-rs.workspace = true
+odx-config.workspace = true
 odx-core.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
 insta.workspace = true
+odx-core = { workspace = true, features = ["fakes"] }
+tempfile.workspace = true
 
 [lints]
 workspace = true

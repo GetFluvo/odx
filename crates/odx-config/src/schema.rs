@@ -283,7 +283,7 @@ pub enum ForgeKind {
 #[serde(deny_unknown_fields)]
 pub struct Merge {
     /// Pull request number.
-    pub pr: Option<u64>,
+    pub pr: Option<u32>,
     /// Commit SHA.
     pub sha: Option<String>,
     /// Branch name.
@@ -302,7 +302,7 @@ pub struct Merge {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeSource<'a> {
     /// A pull request.
-    Pr(u64),
+    Pr(u32),
     /// A commit.
     Sha(&'a str),
     /// A branch, optionally on another remote.
@@ -350,7 +350,7 @@ pub struct Package {
     /// Repository URL.
     pub url: Option<String>,
     /// Pull request number.
-    pub pr: Option<u64>,
+    pub pr: Option<u32>,
     /// Branch.
     pub branch: Option<String>,
     /// Tag.
@@ -741,7 +741,7 @@ mod tests {
     use super::*;
 
     fn merge(
-        pr: Option<u64>,
+        pr: Option<u32>,
         sha: Option<&str>,
         branch: Option<&str>,
         remote: Option<&str>,

@@ -4,13 +4,16 @@ expression: cmd.render_long_help().to_string()
 ---
 Convert repos.yaml (and addons.yaml) into [tool.odx]
 
-Usage: odx import [OPTIONS] [FILE]
+Usage: odx import [OPTIONS] [REPOS] [ADDONS]
 
 Arguments:
-  [FILE]
+  [REPOS]
           The repos.yaml to convert
           
           [default: repos.yaml]
+
+  [ADDONS]
+          The addons.yaml to read; defaults to addons.yaml next to the repos file
 
 Options:
   -C, --project-dir <DIR>

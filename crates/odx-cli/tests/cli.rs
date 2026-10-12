@@ -28,8 +28,6 @@ const STUBS: &[(&[&str], u8)] = &[
     (&["dev"], 6),
     (&["add", "OCA/contract#1476"], 1),
     (&["drop", "OCA/contract#1476"], 1),
-    (&["import"], 1),
-    (&["export"], 1),
     (&["dashboard"], 7),
     (&["status"], 7),
     (&["track"], 7),
@@ -87,6 +85,8 @@ fn early_dispatched_commands_have_names_and_phases() {
     for (args, name, phase) in [
         (&["odx", "completions", "bash"][..], "completions", 0),
         (&["odx", "git-aggregate"][..], "git-aggregate", 3),
+        (&["odx", "import"][..], "import", 1),
+        (&["odx", "export"][..], "export", 1),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));

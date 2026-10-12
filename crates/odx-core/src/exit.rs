@@ -13,9 +13,10 @@
 /// assert_eq!(Exit::Failure.code(), 1);
 /// assert_eq!(Exit::Usage.code(), 2);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Exit {
     /// The command succeeded.
+    #[default]
     Success,
     /// An operational failure, such as a merge conflict or a network error.
     Failure,
@@ -45,5 +46,6 @@ mod tests {
             .map(Exit::code)
             .collect();
         assert_eq!(codes, [0, 1, 2]);
+        assert_eq!(Exit::default(), Exit::Success);
     }
 }

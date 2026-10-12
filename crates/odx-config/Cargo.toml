@@ -15,8 +15,10 @@ categories.workspace = true
 [dependencies]
 odx-core.workspace = true
 serde.workspace = true
+serde-saphyr.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 
 [dev-dependencies]
 odx-core = { workspace = true, features = ["fakes"] }

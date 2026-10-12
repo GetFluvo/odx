@@ -104,7 +104,7 @@ pub enum Command {
     /// Convert repos.yaml (and addons.yaml) into [tool.odx].
     Import(ImportArgs),
     /// Write repos.yaml / addons.yaml from [tool.odx].
-    Export,
+    Export(ExportArgs),
     /// Run the gitaggregate-compatible drop-in (same as `git-aggregate-rs`).
     GitAggregate(git_aggregate_rs::Cli),
 
@@ -243,10 +243,26 @@ pub struct SpecArgs {
 pub struct ImportArgs {
     /// The repos.yaml to convert.
     #[arg(default_value = "repos.yaml")]
-    pub file: PathBuf,
+    pub repos: PathBuf,
+    /// The addons.yaml to read; defaults to addons.yaml next to the repos file.
+    pub addons: Option<PathBuf>,
     /// Write the result into pyproject.toml instead of printing it.
     #[arg(long)]
     pub write: bool,
+}
+
+/// Arguments of `odx export`.
+#[derive(Debug, Args)]
+pub struct ExportArgs {
+    /// The repos.yaml to write, relative to the project root.
+    #[arg(default_value = "repos.yaml")]
+    pub repos: PathBuf,
+    /// The addons.yaml to write, relative to the project root.
+    #[arg(default_value = "addons.yaml")]
+    pub addons: PathBuf,
+    /// Print repos.yaml (and addons.yaml) instead of writing files.
+    #[arg(long)]
+    pub stdout: bool,
 }
 
 /// Output formats of `odx dashboard`.
@@ -535,7 +551,7 @@ impl Command {
             Self::Add(_) => "add",
             Self::Drop(_) => "drop",
             Self::Import(_) => "import",
-            Self::Export => "export",
+            Self::Export(_) => "export",
             Self::GitAggregate(_) => "git-aggregate",
             Self::Dashboard(_) => "dashboard",
             Self::Status => "status",
@@ -563,7 +579,7 @@ impl Command {
     pub const fn phase(&self) -> u8 {
         match self {
             Self::Completions(_) => 0,
-            Self::Add(_) | Self::Drop(_) | Self::Import(_) | Self::Export => 1,
+            Self::Add(_) | Self::Drop(_) | Self::Import(_) | Self::Export(_) => 1,
             Self::Aggregate(_) | Self::GitAggregate(_) => 3,
             Self::Lock(_) | Self::Verify(_) => 4,
             Self::Vendor(_) | Self::Build(_) | Self::Stats | Self::Sniff => 5,

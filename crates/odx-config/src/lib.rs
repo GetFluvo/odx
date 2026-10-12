@@ -6,6 +6,7 @@
 //! are errors with line and column; consistency problems are collected and
 //! reported together.
 
+pub mod compat;
 mod duration;
 mod error;
 mod load;

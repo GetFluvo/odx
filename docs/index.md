@@ -21,6 +21,7 @@ maxdepth: 2
 
 installation
 cli
+compatibility
 development
 License <license>
 Changelog <https://github.com/getfluvo/odx/releases>

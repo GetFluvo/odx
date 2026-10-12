@@ -4,11 +4,25 @@ expression: cmd.render_long_help().to_string()
 ---
 Write repos.yaml / addons.yaml from [tool.odx]
 
-Usage: odx export [OPTIONS]
+Usage: odx export [OPTIONS] [REPOS] [ADDONS]
+
+Arguments:
+  [REPOS]
+          The repos.yaml to write, relative to the project root
+          
+          [default: repos.yaml]
+
+  [ADDONS]
+          The addons.yaml to write, relative to the project root
+          
+          [default: addons.yaml]
 
 Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
+
+      --stdout
+          Print repos.yaml (and addons.yaml) instead of writing files
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
