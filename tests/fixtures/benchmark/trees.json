@@ -1,0 +1,14 @@
+{
+  "account-financial-tools": "a6292f7c14cd405a8b7eb1a4db20dc536579e416",
+  "hr": "93e78c7a00a31cf314c63c7d6ab82605ba7a4bcb",
+  "partner-contact": "d17fa46072a2bd6363fd9582d1f9b5b98104a802",
+  "pos": "23ccee415fc558c1aefef182d19eba2539151b05",
+  "project": "074d35bd3e70dd514a56d9d3dd9a1fa30f2f77a0",
+  "purchase-workflow": "b1e062e977416b87cfdbfdddc0e635ed807cede8",
+  "queue": "0be04fb728d8b2458d5acabd7d22a4f81a3a5256",
+  "reporting-engine": "e7615a7c44a010782bd82db6e7d900e99e64cb96",
+  "sale-workflow": "aa6c61a2be313af3d38f864b1c564c625561e54d",
+  "server-tools": "2b7180c4fd3c5eeebb09c3d852f518f9f9eec924",
+  "stock-logistics-workflow": "07416d251f5c0fe92f4159201c2a4fbf96ecc2f4",
+  "web": "cef00274d000ef55621a3cabb4f84521047ae0a5"
+}

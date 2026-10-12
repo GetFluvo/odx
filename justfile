@@ -81,5 +81,10 @@ package:
     uvx maturin build --release
     uvx maturin build --release -m crates/git-aggregate-rs/Cargo.toml
 
+# Benchmark against git-aggregator (args: e.g. --seed ~/git/OCA, --mode github).
+bench *args:
+    cargo build --release -p git-aggregate-rs
+    python3 scripts/benchmark.py {{args}}
+
 # Every gate, in CI order (except commits, which needs a tag).
 all: fmt-check clippy test doc docs cov deny machete msrv typos zizmor package

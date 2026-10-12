@@ -22,6 +22,7 @@ maxdepth: 2
 installation
 cli
 compatibility
+benchmarks
 files
 development
 License <license>
