@@ -7,12 +7,14 @@
 //! reported together.
 
 pub mod compat;
+pub mod deps;
 mod duration;
+pub mod edit;
 mod error;
 mod load;
 pub mod schema;
 
 pub use duration::{Span, SpanError};
 pub use error::{ConfigError, Problem};
-pub use load::{Project, Source, discover, parse_pyproject};
+pub use load::{Project, Source, discover, find_pyproject, parse_pyproject};
 pub use schema::{MergeSource, OdxConfig};

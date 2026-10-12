@@ -161,7 +161,8 @@ impl Import {
     }
 }
 
-fn repository_table(repo: &Repository) -> Table {
+/// A `[[tool.odx.repositories]]` table for `repo`, merges one per line.
+pub(crate) fn repository_table(repo: &Repository) -> Table {
     let mut table = Table::new();
     let mut set = |key: &str, value: Option<Value>| {
         if let Some(value) = value {

@@ -29,8 +29,10 @@ prints the equivalent `[[tool.odx.repositories]]` tables:
 | addons.yaml documents with `ONLY` | skipped (warning) |
 
 Everything that cannot be represented is reported as a warning on standard
-error. Writing the result into `pyproject.toml` (`--write`) is part of a
-following release.
+error. `odx import --write` adds the repositories to `pyproject.toml` instead
+of printing them, skipping URLs that are already configured; when the file
+has no `[tool.odx]` table yet, it is created with `--odoo-version` or the
+first base branch as the series.
 
 ## Export
 

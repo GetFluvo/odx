@@ -25,6 +25,9 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
+      --odoo-version <SERIES>
+          Odoo series for a new [tool.odx] table; defaults to the first base branch
+
   -j, --jobs <N>
           Override the number of parallel jobs
 

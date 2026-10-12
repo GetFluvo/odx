@@ -98,9 +98,9 @@ pub enum Command {
     /// Prepare a local development workspace, or develop one package.
     Dev(DevArgs),
     /// Add a repository, merge or package to pyproject.toml.
-    Add(SpecArgs),
+    Add(AddArgs),
     /// Remove a merge or package from pyproject.toml and odx.lock.
-    Drop(SpecArgs),
+    Drop(DropArgs),
     /// Convert repos.yaml (and addons.yaml) into [tool.odx].
     Import(ImportArgs),
     /// Write repos.yaml / addons.yaml from [tool.odx].
@@ -231,11 +231,36 @@ pub struct DevArgs {
     pub restore: bool,
 }
 
-/// A repository, merge or package specification for `add` and `drop`.
+/// Arguments of `odx add`.
 #[derive(Debug, Args)]
-pub struct SpecArgs {
-    /// For example `OCA/sale-workflow#1234` or `odoo-addon-contract`.
+pub struct AddArgs {
+    /// `owner/repo#PR`, `owner/repo@REF`, a pull request URL, or `URL#PR` / `URL@REF`.
     pub spec: String,
+    /// Add as package DIST instead of as a merge.
+    #[arg(long, value_name = "DIST")]
+    pub package: Option<String>,
+    /// Subdirectory of the addon in the repository (packages).
+    #[arg(long, value_name = "DIR", requires = "package")]
+    pub subdirectory: Option<String>,
+    /// Dependency group of the package.
+    #[arg(long, value_name = "GROUP", requires = "package")]
+    pub group: Option<String>,
+    /// Odoo series for a new [tool.odx] table.
+    #[arg(long, value_name = "SERIES")]
+    pub odoo_version: Option<String>,
+}
+
+/// Arguments of `odx drop`.
+#[derive(Debug, Args)]
+pub struct DropArgs {
+    /// The merge (`owner/repo#PR`, ...) or, with `--package`, the distribution name.
+    pub spec: String,
+    /// Drop package SPEC instead of a merge.
+    #[arg(long)]
+    pub package: bool,
+    /// Why the merge or package is dropped.
+    #[arg(long, value_name = "TEXT")]
+    pub reason: Option<String>,
 }
 
 /// Arguments of `odx import`.
@@ -249,6 +274,9 @@ pub struct ImportArgs {
     /// Write the result into pyproject.toml instead of printing it.
     #[arg(long)]
     pub write: bool,
+    /// Odoo series for a new [tool.odx] table; defaults to the first base branch.
+    #[arg(long, value_name = "SERIES", requires = "write")]
+    pub odoo_version: Option<String>,
 }
 
 /// Arguments of `odx export`.

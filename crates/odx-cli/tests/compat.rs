@@ -76,14 +76,6 @@ fn import_errors() {
         ("/w/bad.yaml", "./x:\n  merges: []\n"),
         ("/w/badaddons.yaml", "web: [\n"),
     ]);
-    let (exit, _, err) = run(&fs, &["import", "--write"]);
-    assert_eq!(
-        (exit, err.as_str()),
-        (
-            Exit::Usage,
-            "odx import --write: not implemented yet (roadmap phase 1)\n"
-        )
-    );
     let (exit, _, err) = run(&fs, &["import", "missing.yaml"]);
     assert_eq!(exit, Exit::Failure);
     assert!(

@@ -14,6 +14,7 @@ mod repos;
 pub use addons::AddonsFile;
 pub use env::{expand_env, parse_env_file};
 pub use export::{Export, export};
+pub(crate) use import::repository_table;
 pub use import::{Import, import};
 pub use repos::{MergeSpec, RepoSpec, ReposFile, TargetSpec};
 

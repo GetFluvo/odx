@@ -8,14 +8,20 @@ Usage: odx drop [OPTIONS] <SPEC>
 
 Arguments:
   <SPEC>
-          For example `OCA/sale-workflow#1234` or `odoo-addon-contract`
+          The merge (`owner/repo#PR`, ...) or, with `--package`, the distribution name
 
 Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --package
+          Drop package SPEC instead of a merge
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --reason <TEXT>
+          Why the merge or package is dropped
 
   -j, --jobs <N>
           Override the number of parallel jobs
