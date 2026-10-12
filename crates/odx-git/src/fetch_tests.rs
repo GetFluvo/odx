@@ -100,6 +100,7 @@ fn fetches_branches_pull_requests_and_commits() {
             (None, Source::Commit(up.merge_request.clone())),
         ],
         mirror: None,
+        clone: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     let shas: Vec<&str> = fetched.iter().map(|f| f.sha.as_str()).collect();
@@ -138,6 +139,7 @@ fn gitlab_and_gitea_layouts() {
         forge: Forge::Gitlab,
         sources: vec![(None, Source::Pr(2))],
         mirror: None,
+        clone: None,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitlab, WAIT).unwrap()[0].sha,
@@ -148,6 +150,7 @@ fn gitlab_and_gitea_layouts() {
         forge: Forge::Gitea,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        clone: None,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitea, WAIT).unwrap()[0].sha,
@@ -197,6 +200,7 @@ fn one_fetch_per_remote_url() {
             (Some(fork_url.clone()), Source::Pr(1)),
         ],
         mirror: None,
+        clone: None,
     };
     let backend = Counting {
         inner: system(),
@@ -222,6 +226,7 @@ fn errors() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(99))],
         mirror: None,
+        clone: None,
     };
     let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("git fetch failed: "), "{err}");
@@ -279,6 +284,7 @@ fn unresolved_sources_are_errors() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        clone: None,
     };
     let err = fetch(&cache, &Hollow, &plan, Duration::ZERO).unwrap_err();
     assert_eq!(
@@ -297,6 +303,7 @@ fn url_file_write_errors_are_reported() {
         forge: Forge::Github,
         sources: vec![],
         mirror: None,
+        clone: None,
     };
     fs::create_dir_all(cache.url_file(&plan.url)).unwrap();
     assert!(matches!(
@@ -333,6 +340,7 @@ fn resolve_failures_propagate() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        clone: None,
     };
     let err = fetch(&Cache::new(tmp.path()), &Broken, &plan, Duration::ZERO).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git"), "{err}");
@@ -371,6 +379,7 @@ fn locked_commits_come_from_the_mirror_first() {
         forge: Forge::Github,
         sources: vec![(None, Source::Commit(up.pull.clone()))],
         mirror: Some(file_url(&mirror)),
+        clone: None,
     };
     let backend = Counting {
         inner: system(),
@@ -398,6 +407,7 @@ fn commits_the_mirror_lacks_come_from_upstream() {
             (None, Source::Branch("17.0".into())),
         ],
         mirror: Some(file_url(&mirror)),
+        clone: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     assert_eq!(fetched[0].via, Via::Upstream);
@@ -414,4 +424,254 @@ fn commits_the_mirror_lacks_come_from_upstream() {
     };
     fetch(&cache, &backend, &branches_only, WAIT).unwrap();
     assert_eq!(*backend.urls.lock().unwrap(), [file_url(&up.dir)]);
+}
+
+/// Objects stored in the repository itself (not borrowed through alternates).
+fn own_objects(dir: &Path) -> usize {
+    let out = git(dir, &["count-objects", "-v"]);
+    out.lines()
+        .filter_map(|line| line.split_once(": "))
+        .filter(|(key, _)| *key == "count" || *key == "in-pack")
+        .map(|(_, value)| value.parse::<usize>().unwrap())
+        .sum()
+}
+
+fn clone_of(root: &Path, up: &Upstream, update: bool) -> LocalClone {
+    let clones = root.join("clones");
+    fs::create_dir_all(&clones).unwrap();
+    git(&clones, &["clone", "--quiet", &file_url(&up.dir), "pos"]);
+    LocalClone {
+        git_dir: clones.join("pos").join(".git"),
+        remote: "origin".into(),
+        update,
+    }
+}
+
+fn pos_plan(up: &Upstream, clone: Option<LocalClone>) -> FetchPlan {
+    FetchPlan {
+        url: file_url(&up.dir),
+        forge: Forge::Github,
+        sources: vec![
+            (None, Source::Branch("17.0".into())),
+            (None, Source::Branch("17.0-fix".into())),
+            (None, Source::Pr(1)),
+        ],
+        mirror: None,
+        clone,
+    }
+}
+
+#[test]
+fn reference_mode_borrows_objects_from_a_local_clone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, false);
+    let with_clone = Cache::new(tmp.path().join("with"));
+    let without = Cache::new(tmp.path().join("without"));
+    let borrowed = fetch(
+        &with_clone,
+        &system(),
+        &pos_plan(&up, Some(clone.clone())),
+        WAIT,
+    )
+    .unwrap();
+    let alone = fetch(&without, &system(), &pos_plan(&up, None), WAIT).unwrap();
+    assert_eq!(borrowed, alone);
+    let dir = with_clone.repo_dir(&file_url(&up.dir));
+    let alternates = fs::read_to_string(dir.join("objects/info/alternates")).unwrap();
+    assert_eq!(
+        alternates,
+        format!(
+            "{}\n",
+            fs::canonicalize(clone.git_dir.join("objects"))
+                .unwrap()
+                .display()
+        )
+    );
+    assert!(own_objects(&dir) < own_objects(&without.repo_dir(&file_url(&up.dir))));
+    // Unchanged on the next run.
+    fetch(&with_clone, &system(), &pos_plan(&up, Some(clone)), WAIT).unwrap();
+}
+
+#[test]
+fn update_mode_keeps_the_clone_current_without_touching_its_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, true);
+    let work = clone.git_dir.parent().unwrap().to_path_buf();
+    fs::write(up.dir.join("new.txt"), "new").unwrap();
+    git(&up.dir, &["add", "new.txt"]);
+    git(&up.dir, &["commit", "--quiet", "-m", "new"]);
+    let new_base = git(&up.dir, &["rev-parse", "HEAD"]);
+
+    let cache = Cache::new(tmp.path().join("cache"));
+    let fetched = fetch(&cache, &system(), &pos_plan(&up, Some(clone)), WAIT).unwrap();
+    assert_eq!(
+        (fetched[0].sha.as_str(), fetched[0].via),
+        (new_base.as_str(), Via::Clone)
+    );
+    assert_eq!(fetched[1].via, Via::Clone);
+    assert_eq!(fetched[2].via, Via::Upstream);
+    assert_eq!(
+        git(&work, &["rev-parse", "refs/remotes/origin/17.0"]),
+        new_base
+    );
+    assert_eq!(
+        git(&work, &["rev-parse", "17.0"]),
+        up.base,
+        "local branches are never moved"
+    );
+    assert_eq!(
+        git(&work, &["status", "--porcelain"]),
+        "",
+        "the working tree is untouched"
+    );
+}
+
+#[test]
+fn update_mode_without_base_branches_fetches_upstream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, true);
+    let plan = FetchPlan {
+        sources: vec![(None, Source::Pr(1))],
+        ..pos_plan(&up, Some(clone))
+    };
+    let fetched = fetch(
+        &Cache::new(tmp.path().join("cache")),
+        &system(),
+        &plan,
+        WAIT,
+    )
+    .unwrap();
+    assert_eq!(fetched[0].via, Via::Upstream);
+}
+
+#[test]
+fn a_vanished_clone_is_reported_instead_of_corrupting_the_cache() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, false);
+    let cache = Cache::new(tmp.path().join("cache"));
+    fetch(&cache, &system(), &pos_plan(&up, Some(clone)), WAIT).unwrap();
+    fs::rename(tmp.path().join("clones"), tmp.path().join("moved")).unwrap();
+    let err = fetch(&cache, &system(), &pos_plan(&up, None), WAIT).unwrap_err();
+    assert!(
+        err.to_string().starts_with("git alternates failed: "),
+        "{err}"
+    );
+    assert!(
+        err.to_string().contains("which no longer exists; delete"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_clone_path_that_is_not_a_repository_is_an_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let bogus = LocalClone {
+        git_dir: tmp.path().join("nope"),
+        remote: "origin".into(),
+        update: false,
+    };
+    let err = fetch(
+        &Cache::new(tmp.path().join("cache")),
+        &system(),
+        &pos_plan(&up, Some(bogus)),
+        WAIT,
+    )
+    .unwrap_err();
+    assert!(err.to_string().starts_with("cannot run git"), "{err}");
+}
+
+/// Delegates to the system backend but fails fetches whose URL contains `needle`.
+#[derive(Debug)]
+struct FailOn {
+    needle: String,
+}
+
+impl GitBackend for FailOn {
+    fn init_bare(&self, dir: &Path) -> Result<(), GitError> {
+        system().init_bare(dir)
+    }
+
+    fn fetch(&self, dir: &Path, url: &str, refspecs: &[String]) -> Result<(), GitError> {
+        if url.contains(&self.needle) {
+            return Err(GitError::Failed {
+                command: "fetch".into(),
+                stderr: format!("refused {url}"),
+            });
+        }
+        system().fetch(dir, url, refspecs)
+    }
+
+    fn resolve(&self, dir: &Path, rev: &str) -> Result<Option<String>, GitError> {
+        system().resolve(dir, rev)
+    }
+}
+
+#[test]
+fn update_mode_failures_propagate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, true);
+    // The clone's own fetch fails (its remote name is refused).
+    let refuse_remote = FailOn {
+        needle: "origin".into(),
+    };
+    let err = fetch(
+        &Cache::new(tmp.path().join("a")),
+        &refuse_remote,
+        &pos_plan(&up, Some(clone.clone())),
+        WAIT,
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "git fetch failed: refused origin");
+    // Reading from the clone into the cache fails.
+    let refuse_clone = FailOn {
+        needle: "clones".into(),
+    };
+    let err = fetch(
+        &Cache::new(tmp.path().join("b")),
+        &refuse_clone,
+        &pos_plan(&up, Some(clone)),
+        WAIT,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().starts_with("git fetch failed: refused"),
+        "{err}"
+    );
+}
+
+#[test]
+fn alternates_write_failures_propagate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, false);
+    let plan = pos_plan(&up, Some(clone));
+
+    let cache = Cache::new(tmp.path().join("a"));
+    let dir = cache.repo_dir(&plan.url);
+    system().init_bare(&dir).unwrap();
+    fs::remove_dir_all(dir.join("objects/info")).unwrap();
+    fs::write(dir.join("objects/info"), "blocks the directory").unwrap();
+    assert!(
+        fetch(&cache, &system(), &plan, WAIT)
+            .unwrap_err()
+            .to_string()
+            .starts_with("cannot run git")
+    );
+
+    let cache = Cache::new(tmp.path().join("b"));
+    let dir = cache.repo_dir(&plan.url);
+    system().init_bare(&dir).unwrap();
+    fs::create_dir_all(dir.join("objects/info/alternates")).unwrap();
+    assert!(
+        fetch(&cache, &system(), &plan, WAIT)
+            .unwrap_err()
+            .to_string()
+            .starts_with("cannot run git")
+    );
 }

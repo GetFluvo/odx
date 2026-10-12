@@ -68,3 +68,30 @@ else the platform cache directory (`$XDG_CACHE_HOME/odx` or
 `~/.cache/odx` on Linux, `~/Library/Caches/odx` on macOS,
 `%LOCALAPPDATA%\odx\cache` on Windows). Concurrent odx processes take
 turns per repository through an advisory lock.
+
+## Using your local clones
+
+If you keep clones of the repositories you work on (for example every OCA
+repository under `~/git/OCA`), point odx at them in your user configuration
+(`~/.config/odx/config.toml` on Linux, `~/Library/Application Support/odx/`
+on macOS, `%APPDATA%\\odx\\` on Windows, or `$ODX_CONFIG_DIR`):
+
+```toml
+[clones]
+dirs = ["~/git/OCA", "~/git/company"]
+mode = "reference"     # or "update"
+```
+
+- **reference** (default): the cache borrows objects from the matching clone
+  (git alternates), so repositories you already have cost almost no extra
+  disk. Your clones are never written.
+- **update**: base branches are also fetched into the clone's
+  remote-tracking refs (`origin/17.0`), so one download keeps both current.
+  Local branches and working trees are never touched; update them with
+  `git merge` or `git pull` as usual, which is instant because the objects
+  are already there.
+
+Clones are matched by remote URL in any spelling (https, ssh, scp-style).
+If you delete or prune a clone the cache borrows from, the next fetch of
+that repository stops with a message naming the cache repository to delete;
+it is rebuilt on the following run.

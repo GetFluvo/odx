@@ -43,6 +43,7 @@ fn plan(url: &str) -> FetchPlan {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        clone: None,
     }
 }
 
