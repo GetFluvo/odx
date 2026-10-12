@@ -479,15 +479,10 @@ fn reference_mode_borrows_objects_from_a_local_clone() {
     assert_eq!(borrowed, alone);
     let dir = with_clone.repo_dir(&file_url(&up.dir));
     let alternates = fs::read_to_string(dir.join("objects/info/alternates")).unwrap();
-    assert_eq!(
-        alternates,
-        format!(
-            "{}\n",
-            fs::canonicalize(clone.git_dir.join("objects"))
-                .unwrap()
-                .display()
-        )
-    );
+    let canonical = fs::canonicalize(clone.git_dir.join("objects")).unwrap();
+    let canonical = canonical.to_string_lossy();
+    let expected = canonical.strip_prefix(r"\\?\").unwrap_or(&canonical);
+    assert_eq!(alternates, format!("{expected}\n"));
     assert!(own_objects(&dir) < own_objects(&without.repo_dir(&file_url(&up.dir))));
     // Unchanged on the next run.
     fetch(&with_clone, &system(), &pos_plan(&up, Some(clone)), WAIT).unwrap();
