@@ -15,6 +15,7 @@ mod load;
 pub mod lock;
 pub mod mutes;
 pub mod schema;
+pub mod user;
 
 pub use duration::{Span, SpanError};
 pub use error::{ConfigError, Problem};

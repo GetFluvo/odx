@@ -238,3 +238,34 @@ fn warnings_are_shown() {
         "{err}"
     );
 }
+
+#[test]
+fn local_clones_from_the_user_configuration() {
+    let mut project = project("");
+    let tmp = project.root.parent().unwrap().to_path_buf();
+    let clones = tmp.join("OCA");
+    std::fs::create_dir_all(&clones).unwrap();
+    git(&clones, &["clone", "--quiet", &project.upstream, "pos"]);
+    let config_dir = tmp.join("config");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "[clones]\ndirs = [\"{}\"]\nmode = \"update\"\n",
+            clones.display().to_string().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    project.env = project
+        .env
+        .clone()
+        .with("ODX_CONFIG_DIR", config_dir.display().to_string());
+    let (exit, out, err) = run(&project, &["aggregate", "--fetch-only"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    assert_eq!(out, "fetched pos: 2 refs (1 through the local clone)\n");
+
+    std::fs::write(config_dir.join("config.toml"), "[[repositories]]\n").unwrap();
+    let (exit, _, err) = run(&project, &["aggregate", "--fetch-only"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("unknown field `repositories`"), "{err}");
+}

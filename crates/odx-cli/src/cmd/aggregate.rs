@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use odx_aggregate::{RepoPlan, fetch_plans};
+use odx_config::user::{CloneMode, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Source, discover};
 use odx_core::system::OsRunner;
 use odx_core::{Env, Exit};
 use odx_git::{
-    Cache, CancellationToken, FetchPlan, GitBackend, GitError, Limits, Outcome, SystemGit, Via,
-    fetch_all,
+    Cache, CancellationToken, Clones, FetchPlan, GitBackend, GitError, Limits, Outcome, SystemGit,
+    Via, fetch_all,
 };
 
 use super::Report;
@@ -22,22 +23,39 @@ use crate::cli::{AggregateArgs, GlobalArgs};
 /// How long to wait for another odx process's repository lock.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The cache directory: `cache_dir` from the configuration (relative to
-/// the project root, `~/` expanded), else `ODX_CACHE_DIR`, else the
-/// platform cache directory.
-pub(crate) fn cache_dir(config: &OdxConfig, root: &Path, env: &dyn Env) -> PathBuf {
-    let home = || env.var("HOME").or_else(|| env.var("USERPROFILE"));
+/// The cache directory: `cache_dir` from the project configuration
+/// (relative to the project root, `~/` expanded), else `ODX_CACHE_DIR`,
+/// else `[cache].dir` from the user configuration, else the platform cache
+/// directory.
+pub(crate) fn cache_dir(
+    config: &OdxConfig,
+    user: &UserConfig,
+    root: &Path,
+    env: &dyn Env,
+) -> PathBuf {
     if let Some(dir) = &config.cache_dir {
-        let text = dir.to_string_lossy();
-        return match (text.strip_prefix("~/"), home()) {
-            (Some(rest), Some(home)) => Path::new(&home).join(rest),
-            _ => root.join(dir),
-        };
+        return root.join(expand_home(dir, env));
     }
     if let Some(dir) = env.var("ODX_CACHE_DIR") {
         return PathBuf::from(dir);
     }
-    platform_cache_dir(env, home()).unwrap_or_else(|| root.join(".odx").join("cache"))
+    if let Some(dir) = user.cache.as_ref().and_then(|cache| cache.dir.as_ref()) {
+        return expand_home(dir, env);
+    }
+    let home = env.var("HOME").or_else(|| env.var("USERPROFILE"));
+    platform_cache_dir(env, home).unwrap_or_else(|| root.join(".odx").join("cache"))
+}
+
+/// The local clones configured in `[clones]` of the user configuration.
+pub(crate) fn local_clones(user: &UserConfig, env: &dyn Env) -> Clones {
+    user.clones.as_ref().map_or_else(Clones::default, |clones| {
+        let dirs: Vec<PathBuf> = clones
+            .dirs
+            .iter()
+            .map(|dir| expand_home(dir, env))
+            .collect();
+        Clones::scan(&dirs, clones.mode == Some(CloneMode::Update))
+    })
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -128,9 +146,15 @@ fn plan_and_fetch(
         Err(e @ ConfigError::Io { .. }) => return Err(Report::error(Exit::Failure, e.to_string())),
         Err(e) => return Err(Report::error(Exit::Usage, e.to_string())),
     };
-    let plans = fetch_plans(&project.config, args.repo.as_deref(), args.prefer_mirror)
+    let user =
+        load_user_config(ctx.fs, ctx.env).map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
+    let mut plans = fetch_plans(&project.config, args.repo.as_deref(), args.prefer_mirror)
         .map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
-    let cache = Cache::new(cache_dir(&project.config, &project.root, ctx.env));
+    let clones = local_clones(&user, ctx.env);
+    for plan in &mut plans {
+        plan.plan.clone = clones.find(&plan.plan.url).cloned();
+    }
+    let cache = Cache::new(cache_dir(&project.config, &user, &project.root, ctx.env));
     let limits = Limits {
         jobs: global
             .jobs
@@ -169,10 +193,16 @@ fn summarize(
         let names = plan.names.join(", ");
         match &outcome.result {
             Ok(fetched) => {
-                let mirrored = fetched.iter().filter(|f| f.via == Via::Mirror).count();
+                let count = |via| fetched.iter().filter(|f| f.via == via).count();
                 let _ = write!(report.out, "fetched {names}: {} refs", fetched.len());
-                if mirrored > 0 {
-                    let _ = write!(report.out, " ({mirrored} from the mirror)");
+                for (via, label) in [
+                    (Via::Mirror, "from the mirror"),
+                    (Via::Clone, "through the local clone"),
+                ] {
+                    let n = count(via);
+                    if n > 0 {
+                        let _ = write!(report.out, " ({n} {label})");
+                    }
                 }
                 report.out.push('\n');
             }
@@ -191,6 +221,26 @@ mod tests {
     use super::*;
     use odx_core::fake::MapEnv;
 
+    fn cache_dir_of(config: &OdxConfig, root: &Path, env: &dyn Env) -> PathBuf {
+        cache_dir(config, &UserConfig::default(), root, env)
+    }
+
+    #[test]
+    fn user_cache_dir_and_clones() {
+        let user = odx_config::user::parse_user_config(
+            "[cache]\ndir = \"~/c\"\n[clones]\ndirs = [\"~/none\"]\nmode = \"update\"\n",
+            Path::new("config.toml"),
+        )
+        .unwrap();
+        let env = MapEnv::default().with("HOME", "/home/dev");
+        assert_eq!(
+            cache_dir(&config(""), &user, Path::new("/p"), &env),
+            Path::new("/home/dev/c")
+        );
+        assert!(local_clones(&user, &env).is_empty());
+        assert!(local_clones(&UserConfig::default(), &env).is_empty());
+    }
+
     fn config(toml: &str) -> OdxConfig {
         let text = format!("[tool.odx]\nodoo_version = \"17.0\"\n{toml}");
         odx_config::parse_pyproject(&text, Path::new("/p/pyproject.toml"))
@@ -204,26 +254,26 @@ mod tests {
         let root = Path::new("/p");
         let home = MapEnv::default().with("HOME", "/home/dev");
         assert_eq!(
-            cache_dir(&config("cache_dir = \"~/c\""), root, &home),
+            cache_dir_of(&config("cache_dir = \"~/c\""), root, &home),
             Path::new("/home/dev/c")
         );
-        let windows_home = MapEnv::default().with("USERPROFILE", "C:/Users/dev");
+        let windows_home = MapEnv::default().with("USERPROFILE", "/Users/dev");
         assert_eq!(
-            cache_dir(&config("cache_dir = \"~/c\""), root, &windows_home),
-            Path::new("C:/Users/dev").join("c")
+            cache_dir_of(&config("cache_dir = \"~/c\""), root, &windows_home),
+            Path::new("/Users/dev").join("c")
         );
         assert_eq!(
-            cache_dir(&config("cache_dir = \"~/c\""), root, &MapEnv::default()),
+            cache_dir_of(&config("cache_dir = \"~/c\""), root, &MapEnv::default()),
             root.join("~/c")
         );
         assert_eq!(
-            cache_dir(&config("cache_dir = \"cache\""), root, &home),
+            cache_dir_of(&config("cache_dir = \"cache\""), root, &home),
             root.join("cache")
         );
         let env = home.with("ODX_CACHE_DIR", "/tmp/odx");
-        assert_eq!(cache_dir(&config(""), root, &env), Path::new("/tmp/odx"));
+        assert_eq!(cache_dir_of(&config(""), root, &env), Path::new("/tmp/odx"));
         assert_eq!(
-            cache_dir(&config(""), root, &MapEnv::default()),
+            cache_dir_of(&config(""), root, &MapEnv::default()),
             root.join(".odx").join("cache")
         );
     }
@@ -233,10 +283,10 @@ mod tests {
     fn xdg_cache_dir() {
         let root = Path::new("/p");
         let xdg = MapEnv::default().with("XDG_CACHE_HOME", "/x");
-        assert_eq!(cache_dir(&config(""), root, &xdg), Path::new("/x/odx"));
+        assert_eq!(cache_dir_of(&config(""), root, &xdg), Path::new("/x/odx"));
         let home = MapEnv::default().with("HOME", "/home/dev");
         assert_eq!(
-            cache_dir(&config(""), root, &home),
+            cache_dir_of(&config(""), root, &home),
             Path::new("/home/dev/.cache/odx")
         );
     }
@@ -246,7 +296,7 @@ mod tests {
     fn macos_cache_dir() {
         let home = MapEnv::default().with("HOME", "/Users/dev");
         assert_eq!(
-            cache_dir(&config(""), Path::new("/p"), &home),
+            cache_dir_of(&config(""), Path::new("/p"), &home),
             Path::new("/Users/dev/Library/Caches/odx")
         );
     }
@@ -256,7 +306,7 @@ mod tests {
     fn windows_cache_dir() {
         let env = MapEnv::default().with("LOCALAPPDATA", "C:/Users/dev/AppData/Local");
         assert_eq!(
-            cache_dir(&config(""), Path::new("C:/p"), &env),
+            cache_dir_of(&config(""), Path::new("C:/p"), &env),
             Path::new("C:/Users/dev/AppData/Local")
                 .join("odx")
                 .join("cache")

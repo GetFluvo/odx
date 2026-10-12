@@ -112,6 +112,7 @@ pub fn fetch_plans(
                     forge: repo.forge.map_or_else(|| Forge::detect(&repo.url), forge),
                     sources,
                     mirror: mirror.clone(),
+                    clone: None,
                 },
             });
         }

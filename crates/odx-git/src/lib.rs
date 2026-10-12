@@ -12,6 +12,7 @@
 
 mod backend;
 mod cache;
+mod clones;
 mod fetch;
 mod lock;
 mod refs;
@@ -19,6 +20,7 @@ mod run;
 
 pub use backend::{GitBackend, GitError, SystemGit};
 pub use cache::{Cache, url_hash};
+pub use clones::{Clones, LocalClone, remote_urls};
 pub use fetch::{FetchPlan, Fetched, Via, fetch};
 pub use lock::RepoLock;
 pub use refs::{Forge, Source};
