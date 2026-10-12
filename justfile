@@ -67,6 +67,10 @@ msrv:
 typos:
     typos
 
+# Audit workflows and Dependabot config (online audits when GH_TOKEN is set).
+zizmor:
+    uvx zizmor .github
+
 # Conventional commits since the last tag.
 commits:
     cog check --from-latest-tag
@@ -78,4 +82,4 @@ package:
     uvx maturin build --release -m crates/git-aggregate-rs/Cargo.toml
 
 # Every gate, in CI order (except commits, which needs a tag).
-all: fmt-check clippy test doc docs cov deny machete msrv typos package
+all: fmt-check clippy test doc docs cov deny machete msrv typos zizmor package
