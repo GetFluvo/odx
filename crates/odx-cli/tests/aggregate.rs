@@ -469,3 +469,23 @@ fn git_aggregate_builds_repos_yaml_targets() {
         project.pr
     );
 }
+
+#[test]
+fn merges_are_rebased_unless_configured() {
+    let rebased = project("");
+    let (exit, _, err) = run(&rebased, &["aggregate"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let work = rebased.root.join("vendor").join("pos");
+    assert_eq!(git(&work, &["rev-list", "--merges", "HEAD"]), "");
+    assert_eq!(
+        git(&work, &["rev-parse", "HEAD"]),
+        rebased.pr,
+        "fast-forward"
+    );
+
+    let merged = project("merge_strategy = \"merge\"");
+    let (exit, _, err) = run(&merged, &["aggregate"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let work = merged.root.join("vendor").join("pos");
+    assert_eq!(git(&work, &["rev-parse", "HEAD^2"]), merged.pr);
+}

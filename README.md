@@ -124,6 +124,7 @@ git-aggregator's `gitaggregate`: `odx git-aggregate`, or the standalone
 ```toml
 [tool.odx]
 odoo_version = "17.0"
+merge_strategy = "rebase"   # or "merge" for merge commits
 mergiraf = "auto"
 on_head_change = "follow-if-green"
 

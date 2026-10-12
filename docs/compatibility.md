@@ -71,6 +71,7 @@ directories are relative to the current directory, as with `gitaggregate`.
 | `-p, --push` | push the result to `target: <remote> <branch>` |
 | `-j, --jobs <N>` | repositories at once (default: number of CPUs) |
 | `--log-level <LEVEL>` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
+| `--rebase` | rebase the merges instead of creating merge commits |
 | `--allow-shell` | run `shell_command_after` (skipped with a warning otherwise) |
 | `--mergiraf` | resolve conflicts with mergiraf (`ODX_MERGIRAF` names the executable) |
 | `--json` | summary on stdout (schema 1) |
@@ -81,8 +82,10 @@ Differences from `gitaggregate`:
   `git diff` and `git status` work, but the remotes are not configured in
   them and the target branch only exists on the push remote.
 - Directories created by `gitaggregate` are replaced only with `-f`.
-- Every merge is a merge commit, so commit ids differ; the resulting trees
-  are identical, which CI checks against git-aggregator 4.1.
+- Every merge is a merge commit, as with `gitaggregate`, but never a
+  fast-forward, so commit ids differ; `--rebase` rebases the merges instead,
+  for a linear history. Either way the resulting trees are identical, which
+  CI checks against git-aggregator 4.1.
 - With `-e`, an unset variable is left as written with a warning.
 - `show-closed-prs` and `show-all-prs` land in roadmap phase 7.
 

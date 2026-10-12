@@ -3,8 +3,8 @@
 Drop-in replacement for [git-aggregator](https://github.com/acsone/git-aggregator)'s
 `gitaggregate`, written in Rust. It reads the same `repos.yaml` and accepts the
 same flags (`-c`, `-p`, `-d`, `-e`, `--env-file`, `-f`, `-j`, `--log-level`,
-`--no-color`), with opt-in extensions: `--allow-shell`, `--mergiraf` and
-`--json`.
+`--no-color`), with opt-in extensions: `--allow-shell`, `--rebase`, `--mergiraf`
+and `--json`.
 
 ```console
 $ git-aggregate-rs -c repos.yaml
@@ -23,7 +23,9 @@ Differences from `gitaggregate`, all deliberate:
   in them and the target branch is only created when pushing (`-p`).
 - Directories made by `gitaggregate` are replaced only with `-f`.
 - Every merge is a merge commit, so commit ids differ from `gitaggregate`'s;
-  the resulting trees are the same (checked in CI against git-aggregator 4.1).
+  with `--rebase` the merges are rebased for a linear history instead. The
+  resulting trees are the same either way (checked in CI against
+  git-aggregator 4.1).
 - `shell_command_after` runs only with `--allow-shell`; otherwise it is
   skipped with a warning.
 - `-j` defaults to the number of CPUs.

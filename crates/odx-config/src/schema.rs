@@ -24,6 +24,8 @@ pub struct OdxConfig {
     pub jobs: Option<u16>,
     /// Shared cache directory.
     pub cache_dir: Option<PathBuf>,
+    /// How merges are applied on top of the base.
+    pub merge_strategy: Option<MergeStrategy>,
     /// When to use mergiraf for conflict resolution.
     pub mergiraf: Option<MergirafMode>,
     /// Default conflict policy for merges.
@@ -88,6 +90,17 @@ impl OdxConfig {
             .clone()
             .unwrap_or_else(|| PathBuf::from("odx.lock"))
     }
+}
+
+/// How merges are applied on top of the base.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MergeStrategy {
+    /// Replay the commits on top, keeping history linear.
+    #[default]
+    Rebase,
+    /// One merge commit per merge.
+    Merge,
 }
 
 /// When mergiraf resolves conflicts.
@@ -817,6 +830,7 @@ mod tests {
 
     #[test]
     fn enum_defaults() {
+        assert_eq!(MergeStrategy::default(), MergeStrategy::Rebase);
         assert_eq!(MergirafMode::default(), MergirafMode::Auto);
         assert_eq!(OnConflict::default(), OnConflict::Abort);
         assert_eq!(OnHeadChange::default(), OnHeadChange::FollowIfGreen);

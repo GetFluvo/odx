@@ -21,7 +21,7 @@ use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner, repo_key};
 use odx_git::{
     Aggregated, Aggregation, Cache, Fetched, GitBackend, Limits, MergeError, Merger, Outcome,
-    SystemGit,
+    Strategy, SystemGit,
 };
 
 use crate::dirmatch::match_dir;
@@ -237,6 +237,11 @@ fn prepare_and_run(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<Vec<Bu
         lock_timeout: LOCK_TIMEOUT,
     };
     let options = BuildOptions {
+        strategy: if cli.rebase {
+            Strategy::Rebase
+        } else {
+            Strategy::Merge
+        },
         mergiraf,
         keep_conflicts: false,
         force: cli.force,

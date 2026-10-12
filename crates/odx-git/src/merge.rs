@@ -18,6 +18,27 @@ pub struct Step {
     pub skip_on_conflict: bool,
 }
 
+/// How each step is applied on top of the result so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Strategy {
+    /// Replay the step's commits on top (`git rebase`), keeping history
+    /// linear; commits already applied are dropped.
+    #[default]
+    Rebase,
+    /// Create a merge commit (`git merge --no-ff`).
+    Merge,
+}
+
+impl Strategy {
+    /// The git command that applies a step.
+    pub const fn command(self) -> &'static str {
+        match self {
+            Self::Rebase => "rebase",
+            Self::Merge => "merge",
+        }
+    }
+}
+
 /// Everything needed to build one repository's working tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Aggregation {
@@ -29,6 +50,8 @@ pub struct Aggregation {
     pub base: String,
     /// Merges, applied in order.
     pub steps: Vec<Step>,
+    /// How steps are applied.
+    pub strategy: Strategy,
     /// The mergiraf executable to use as merge driver, if any.
     pub mergiraf: Option<OsString>,
     /// Leave a conflicted merge in place instead of aborting it.
@@ -271,6 +294,11 @@ impl Merger {
             if !status.is_empty() && !plan.force {
                 return Err(MergeError::Dirty(target.clone()));
             }
+            // A rebase kept for inspection would block the next one; the
+            // result is irrelevant when none is in progress.
+            let _ = self
+                .runner
+                .run(&self.git(target).args(["rebase", "--quit"]));
             self.run(
                 "reset",
                 &self.git(target).args(["reset", "--hard", "--quiet"]),
@@ -353,10 +381,30 @@ impl Merger {
         for (key, value) in identity {
             invocation = invocation.env(*key, *value);
         }
-        let invocation = invocation
-            .args(["merge", "--no-ff", "--no-edit", "--quiet", "-m"])
-            .arg(format!("Merge {}", step.label))
-            .arg(&step.sha);
+        let command = plan.strategy.command();
+        let invocation = match plan.strategy {
+            Strategy::Merge => invocation
+                .args(["merge", "--no-ff", "--no-edit", "--quiet", "-m"])
+                .arg(format!("Merge {}", step.label))
+                .arg(&step.sha),
+            Strategy::Rebase => {
+                let fork_point = self.stdout(
+                    "merge-base",
+                    &self.git(target).args(["merge-base", "HEAD"]).arg(&step.sha),
+                )?;
+                invocation
+                    .args([
+                        "-c",
+                        "rebase.autoSquash=false",
+                        "-c",
+                        "rebase.updateRefs=false",
+                    ])
+                    .args(["rebase", "--quiet", "--no-autostash", "--onto"])
+                    .arg(&before)
+                    .arg(fork_point)
+                    .arg(&step.sha)
+            }
+        };
         let output = self.runner.run(&invocation).map_err(GitError::Io)?;
         if output.success() {
             let after = self.stdout("rev-parse", &self.git(target).args(["rev-parse", "HEAD"]))?;
@@ -378,13 +426,22 @@ impl Merger {
             .collect();
         if files.is_empty() {
             return Err(MergeError::Git(GitError::Failed {
-                command: "merge".to_owned(),
+                command: command.to_owned(),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             }));
         }
         let keep = plan.keep_conflicts && !step.skip_on_conflict;
         if !keep {
-            self.run("merge", &self.git(target).args(["merge", "--abort"]))?;
+            self.run(command, &self.git(target).args([command, "--abort"]))?;
+            // An aborted rebase returns to the step's commit, not to the
+            // result so far.
+            self.run(
+                "checkout",
+                &self
+                    .git(target)
+                    .args(["checkout", "--detach", "--force", "--quiet"])
+                    .arg(&before),
+            )?;
         }
         if step.skip_on_conflict {
             Ok(StepOutcome::Skipped { files })

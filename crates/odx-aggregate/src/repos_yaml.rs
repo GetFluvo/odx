@@ -141,6 +141,7 @@ pub fn yaml_aggregations(
                     target_dir: root.join(&repo.dir),
                     base,
                     steps,
+                    strategy: options.strategy,
                     mergiraf: options.mergiraf.clone(),
                     keep_conflicts: options.keep_conflicts,
                     force: options.force,
@@ -154,7 +155,7 @@ pub fn yaml_aggregations(
 mod tests {
     use super::*;
     use odx_config::compat::parse_repos;
-    use odx_git::Via;
+    use odx_git::{Strategy, Via};
 
     const YAML: &str = "\
 ./pos:
@@ -242,6 +243,7 @@ mod tests {
         let fetched = vec![("https://github.com/OCA/pos.git".to_owned(), commits)];
         let cache = Cache::new("/cache");
         let options = BuildOptions {
+            strategy: Strategy::Rebase,
             mergiraf: Some("mergiraf".into()),
             keep_conflicts: true,
             force: true,
@@ -275,6 +277,7 @@ mod tests {
             ]
         );
         assert!(pos.aggregation.force && pos.aggregation.keep_conflicts);
+        assert_eq!(pos.aggregation.strategy, Strategy::Rebase);
         // 16.0 was not fetched, and web not at all.
         assert_eq!(built[1], Err(PlanError::NotFetched("./pos-copy".into())));
         assert_eq!(built[2], Err(PlanError::NotFetched("./old".into())));

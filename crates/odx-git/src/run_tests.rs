@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
-use crate::{Forge, Source};
+use crate::{Forge, Source, Strategy};
 
 /// A backend that sleeps in `fetch` and records the peak concurrency.
 #[derive(Debug, Default)]
@@ -207,6 +207,7 @@ async fn aggregations_run_and_can_be_cancelled() {
         target_dir: tmp.path().join("work"),
         base: "0".repeat(40),
         steps: Vec::new(),
+        strategy: Strategy::default(),
         mergiraf: None,
         keep_conflicts: false,
         force: false,
@@ -245,6 +246,7 @@ async fn a_panicking_merge_becomes_an_error() {
         target_dir: tmp.path().join("work"),
         base: "0".repeat(40),
         steps: Vec::new(),
+        strategy: Strategy::default(),
         mergiraf: None,
         keep_conflicts: false,
         force: false,

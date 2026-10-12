@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use odx_core::system::OsRunner;
-use odx_git::{Aggregation, Merger, Step, StepOutcome};
+use odx_git::{Aggregation, Merger, Step, StepOutcome, Strategy};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -75,24 +75,29 @@ fn mergiraf_resolves_additions_at_the_same_place() {
         sha: git(&cache, &["rev-parse", name]),
         skip_on_conflict: false,
     };
-    let plan = Aggregation {
-        cache_repo: cache.clone(),
-        target_dir: tmp.path().join("work"),
-        base: git(&cache, &["rev-parse", "base"]),
-        steps: vec![step("c"), step("d")],
-        mergiraf: Some("mergiraf".into()),
-        keep_conflicts: false,
-        force: false,
-    };
-    let result = Merger::new(Arc::new(OsRunner))
-        .aggregate(&plan)
-        .expect("mergiraf resolves the conflict");
-    assert_eq!(result.steps[1].1, StepOutcome::Merged);
-    let code = fs::read_to_string(plan.target_dir.join("code.py"))
-        .expect("read")
-        .replace("\r\n", "\n");
-    assert!(
-        code.contains("def c(self):") && code.contains("def d(self):") && !code.contains("<<<<<<<"),
-        "{code}"
-    );
+    for strategy in [Strategy::Rebase, Strategy::Merge] {
+        let plan = Aggregation {
+            cache_repo: cache.clone(),
+            target_dir: tmp.path().join(format!("work-{}", strategy.command())),
+            base: git(&cache, &["rev-parse", "base"]),
+            steps: vec![step("c"), step("d")],
+            strategy,
+            mergiraf: Some("mergiraf".into()),
+            keep_conflicts: false,
+            force: false,
+        };
+        let result = Merger::new(Arc::new(OsRunner))
+            .aggregate(&plan)
+            .expect("mergiraf resolves the conflict");
+        assert_eq!(result.steps[1].1, StepOutcome::Merged);
+        let code = fs::read_to_string(plan.target_dir.join("code.py"))
+            .expect("read")
+            .replace("\r\n", "\n");
+        assert!(
+            code.contains("def c(self):")
+                && code.contains("def d(self):")
+                && !code.contains("<<<<<<<"),
+            "{strategy:?}: {code}"
+        );
+    }
 }
