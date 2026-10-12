@@ -95,3 +95,34 @@ Clones are matched by remote URL in any spelling (https, ssh, scp-style).
 If you delete or prune a clone the cache borrows from, the next fetch of
 that repository stops with a message naming the cache repository to delete;
 it is rebuilt on the following run.
+
+## Building the working trees
+
+```console
+$ odx aggregate                    # fetch, then merge every repository
+$ odx aggregate --repo pos         # one repository
+$ odx --json aggregate             # machine-readable result (schema 1)
+$ odx aggregate --keep-conflicts   # leave a conflicted merge in place to inspect
+$ odx aggregate --force            # discard local changes in the working trees
+```
+
+Each repository is checked out from the cache at its base branch into
+`target_dir` (default `vendor/<name>`, or `[tool.odx.layout].aggregate_dir`)
+and its merges are applied in order with `git merge --no-ff`. The working
+tree is a detached checkout of the shared cache, so several projects can use
+the same cache without their branch names getting in each other's way.
+
+A conflict aborts the merge, names the files and ends the command with exit
+code 1; with `on_conflict = "skip"` (per merge or for the whole project) the
+merge is skipped and reported instead. A working tree with local changes, or
+a directory odx did not create, is only reset or replaced with `--force`.
+
+With `mergiraf = "auto"` (the default) [mergiraf](https://mergiraf.org) is
+used as merge driver when it is installed; `"always"` requires it and
+`"never"` turns it off. mergiraf resolves, for example, two pull requests
+that each add a method to the same Odoo model.
+
+```text
+fetched pos: 3 refs
+built pos in vendor/pos: 1 merged, 1 skipped: #456 conflicts in views.xml (1a2b3c4d5e6f)
+```

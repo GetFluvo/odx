@@ -1,0 +1,5 @@
+---
+source: crates/odx-cli/tests/aggregate.rs
+expression: redact(&out)
+---
+{"built":[{"head":"<sha>","merges":[{"label":"#1","status":"merged"}],"name":"pos","target_dir":"vendor/pos","tree":"<sha>"}],"fetched":[{"from_mirror":0,"refs":2,"repositories":"pos","through_clone":0}],"schema":1}

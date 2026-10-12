@@ -26,5 +26,5 @@ pub use fetch::{FetchPlan, Fetched, Via, fetch};
 pub use lock::RepoLock;
 pub use merge::{Aggregated, Aggregation, MergeError, Merger, Step, StepOutcome};
 pub use refs::{Forge, Source};
-pub use run::{Limits, Outcome, fetch_all};
+pub use run::{Limits, Outcome, aggregate_all, fetch_all};
 pub use tokio_util::sync::CancellationToken;
