@@ -1,0 +1,4 @@
+# From the root of OCA/account-financial-tools.
+[tool.black]
+line-length=119
+skip-string-normalization=false

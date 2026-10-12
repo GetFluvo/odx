@@ -1,0 +1,23 @@
+# Shaped after the uvault reference documentation (https://github.com/petrus-v/uvault).
+[project]
+name = "client-project"
+version = "17.0.1.0.0"
+dependencies = [
+    "odoo-addon-my-package",
+]
+
+[tool.uvault]
+tag_prefix = "apycod"                   # (Optional) Prefix for generated tags.
+dev_directory = ".src/"
+
+[[tool.uvault.vcs_vaults]]
+provider = "github.com"
+owner = "petrus-v"
+fetch_ssh = true
+default = true
+
+[tool.uvault.sources]
+my-package = { git = "https://github.com/OCA/repository", rev = "refs/pull/100/head", subdirectory = "my_package" }
+
+[tool.uv.sources]
+odoo-addon-my-package = { git = "https://github.com/petrus-v/vault.git", tag = "apycod-my-package-abcdef1", subdirectory = "my_package" }

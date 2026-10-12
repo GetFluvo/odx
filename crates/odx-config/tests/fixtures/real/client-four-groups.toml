@@ -1,0 +1,49 @@
+# A typical package-based client project: four dependency groups, direct
+# references for unmerged pull requests, uv sources, comments and uneven
+# formatting that edits must leave alone.
+[build-system]
+requires = ["hatchling", "hatch-odoo"]
+build-backend = "hatchling.build"
+
+[project]
+name    = "client-addons"   # odd alignment on purpose
+version = "18.0.1.0.0"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+oca = [
+    "odoo-addon-web_responsive==18.0.1.0.2",
+    "odoo-addon-server_environment>=18.0.1.0.0",  # pinned by uv.lock
+]
+oca_unmerged = [
+    # Waiting for upstream review.
+    "odoo-addon-pos_vouchers @ git+https://github.com/OCA/pos.git@refs/pull/45/head#subdirectory=pos_vouchers",
+]
+private = ["odoo-addon-client_reports"]
+third_party = [
+]
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+name = "private"
+url = "https://packages.example.com/simple/"
+
+[tool.uv.sources]
+odoo = { git = "https://github.com/OCA/OCB.git", branch = "18.0" }
+odoo-addon-client_reports = { index = "private" }
+
+[tool.ruff]
+line-length = 88
+
+[tool.odx]
+odoo_version = "18.0"
+
+[tool.odx.groups]
+oca = "modules/oca"
+oca_unmerged = "modules/oca_unmerged"
+private = "modules/private"
+third_party = "modules/third_party"
+default = "oca"
+project_addons = ["modules/custom"]
