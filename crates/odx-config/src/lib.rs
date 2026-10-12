@@ -1,4 +1,17 @@
 //! Configuration for odx: `[tool.odx]`, dependency groups, uv sources, `odx.lock`, mutes and `repos.yaml`/`addons.yaml` compatibility.
 //!
-//! Part of [odx](https://github.com/getfluvo/odx). This crate is a placeholder
-//! in the workspace skeleton; its implementation lands in roadmap phase 1.
+//! [`discover`] finds the project (`pyproject.toml` with a `[tool.odx]`
+//! table, or an explicit `repos.yaml`), [`parse_pyproject`] reads and
+//! validates the table into [`OdxConfig`]. Unknown keys inside `[tool.odx]`
+//! are errors with line and column; consistency problems are collected and
+//! reported together.
+
+mod duration;
+mod error;
+mod load;
+pub mod schema;
+
+pub use duration::{Span, SpanError};
+pub use error::{ConfigError, Problem};
+pub use load::{Project, Source, discover, parse_pyproject};
+pub use schema::{MergeSource, OdxConfig};

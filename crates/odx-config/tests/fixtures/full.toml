@@ -1,0 +1,185 @@
+[build-system]
+requires = ["hatchling", "hatch-odoo"]
+build-backend = "hatchling.build"
+
+[project]
+name = "project-addons"
+version = "17.0.1.0.0"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+oca = [
+  "odoo-addon-web_responsive==17.0.1.2.0",
+]
+oca_unmerged = [
+  "odoo-addon-pos_vouchers @ git+https://github.com/OCA/pos.git@refs/pull/45/head#subdirectory=pos_vouchers",
+]
+private = []
+third_party = []
+
+[tool.uv.sources]
+odoo = { git = "https://github.com/OCA/OCB.git", branch = "17.0" }
+
+[tool.odx]
+odoo_version = "17.0"
+project_id = "a1b2c3d4e5f6"       # neutral id used in the verdict repository; default: hash of the remote URL
+jobs = 8
+cache_dir = "~/.cache/odx"
+mergiraf = "auto"
+on_conflict = "abort"
+on_head_change = "follow-if-green"
+lockfile = "odx.lock"
+
+[tool.odx.mirror]
+url = "https://forge.example.com/odoo/vault.git"   # must be a PRIVATE repository
+ref_prefix = "refs/odx"
+ref_style = "tags"             # "refs" | "tags"; tags required for packages; forced on GitLab
+push_on_lock = true
+auto_create = false
+
+[tool.odx.http]
+per_host_concurrency = 6
+cache_ttl = "24h"
+offline = false
+
+[tool.odx.cache]
+# Staleness thresholds; stale sections are refreshed before a command answers.
+ttl = { refs = "15m", pr_state = "30m", index = "24h", wheels = "7d", suggest = "6h", drift = "1h" }
+warm_worktrees = false
+prefetch_wheels = true
+
+[tool.odx.dashboard]
+sections = ["pinned", "droppable", "new-upstream", "forward-port", "auto-update", "drift"]
+environment_pairs = [["test", "prod"]]
+show_backports = false
+
+[tool.odx.groups]
+# dependency group -> directory the group's addons are vendored into
+oca = "modules/oca"
+oca_unmerged = "modules/oca_unmerged"
+private = "modules/private"
+third_party = "modules/third_party"
+default = "oca"                # group that `add` and `check-deps --fix` use for index packages
+project_addons = ["modules/custom"]   # committed project addons
+
+[[tool.odx.repositories]]
+name = "pos"
+url = "https://github.com/OCA/pos.git"
+target_dir = "vendor/pos"
+base = "17.0"
+target_branch = "17.0-odx"
+addons = ["pos_discount", "pos_*"]
+merges = [
+  { pr = 123, track_upstream = true },
+  { pr = 456, on_conflict = "skip", on_head_change = "pin" },
+  { sha = "a1b2c3d4e5f67890123456789012345678901234" },
+  { remote = "https://github.com/acme/pos.git", branch = "17.0-fix-rounding" },
+]
+
+[tool.odx.packages]
+# Packages that are not expressed as direct references in a group.
+"odoo-addon-private-reports" = { url = "https://forge.example.com/odoo/private-reports.git", branch = "17.0", subdirectory = "private_reports", group = "private" }
+
+[tool.odx.vendor]
+bump_on_content_change = true
+exclude = ["static/description/index.html"]
+manifest = ".odx/vendor.lock"
+
+[tool.odx.lock.auto_update]
+policy = "last-segment"
+allow = ["odoo-addon-*"]
+deny = []
+content_check = true
+allowed_paths = ["i18n/*.po", "i18n/*.pot", "README.rst", "readme/**", "static/description/**"]
+
+[tool.odx.upgrade]
+target_odoo_version = "18.0"
+check_pypi = true
+github_orgs = ["OCA", "odoo"]
+
+[tool.odx.index]
+ttl = "7d"
+orgs = ["OCA"]                 # organizations whose repositories are indexed
+sources = ["overrides", "cache", "package-index", "forge", "oca-repo-list", "openupgrade"]
+
+[tool.odx.index.overrides]
+# addon -> series -> "owner/repo"
+base_tier_validation = { "18.0" = "OCA/server-ux", "19.0" = "OCA/tier-validation" }
+
+[tool.odx.index.renames]
+# series in which the rename took effect -> old = new
+"18.0" = { "account_old_name" = "account_new_name" }
+
+[tool.odx.port]
+blacklist = "auto"             # "auto" | "oca-port" | "mutes" | "both"
+default_from = ["16.0", "17.0", "18.0"]
+repo_wide_threshold = 5
+migration_commit_patterns = ["^\\[MIG\\]", "^\\[ADD\\].*\\bmigration\\b"]
+migrate = "odoo-lint"          # "odoo-lint" | "odoo-module-migrator" | "none"
+
+[tool.odx.port.rewrites]
+"static/src/js/" = "static/src/"
+
+[tool.odx.suggest]
+series = ["16.0", "18.0"]
+mutes_file = ".odx/mutes.toml"
+
+[tool.odx.features.pos-loyalty]
+description = "Point of sale loyalty program and its reports"
+modules = ["pos_loyalty", "pos_loyalty_reports"]
+
+[tool.odx.layout]
+project_addons = ["modules/custom"]
+aggregate_dir = "vendor"
+requirements = "dist/requirements.txt"
+vendor_manifest = ".odx/vendor.lock"
+# groups = { ... }   # alias of [tool.odx.groups]
+
+[tool.odx.platform]
+profile = "generic-wheels"        # "generic-wheels" | "vendored-source" | "odoo-sh" | "custom"
+provided = "odoo-standard"        # named provided-package set per series, or a constraints file path
+provided_extra = ["werkzeug==3.0.*"]
+provided_remove = []
+index = "private"
+
+[tool.odx.environments]
+preset = "major-branches"         # "major-branches" | "series-branches" | "main-production" | "odoo-sh" | "explicit"
+series = "17.0"
+branch_specific = [".template-answers.yml", "modules/custom/*_sandbox/**"]
+[tool.odx.environments.env.test]
+branch = "{major}-test"
+role = "test"
+[tool.odx.environments.env.prod]
+branch = "{major}-prod"
+role = "prod"
+# promotion = [["test", "uat"], ["test", "prod"], ["uat", "prod"], ["prod", "test"]]   # preset default
+
+[tool.odx.promote]
+allow_downgrade = false
+with_code = false
+with_odoo = true                  # promote the Odoo core rev with the pins (default on)
+search_synonyms = { invoicing = ["invoice", "billing", "account_move"] }   # extends the shipped list
+
+[tool.odx.bot]
+environment = "test"
+dashboard = true
+group_prs = true
+max_prs_per_run = 10
+labels = ["odx"]
+mute_expiry = "180d"
+auto = ["drop-override", "repin", "auto-update"]
+promote_label = "promote"
+
+[tool.odx.dev]
+venv = ".venv"
+addons_path_file = ".odx/addons-path"
+odoo_conf = "odoo.conf"
+editable = true
+dev_dir = ".src"
+
+[tool.odx.lint]
+paths = ["modules/custom"]
+only_changed = false
+
+[tool.odx.sniff]
+fail_on_new = false

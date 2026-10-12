@@ -18,14 +18,19 @@ categories = ["command-line-utilities", "development-tools"]
 # Internal crates.
 odx-core = { path = "crates/odx-core", version = "0.0.1" }
 git-aggregate-rs = { path = "crates/git-aggregate-rs", version = "0.0.1" }
+odx-config = { path = "crates/odx-config", version = "0.0.1" }
 
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "1"
 
 # Test-only.
 assert_cmd = "2"
 insta = "1"
+proptest = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -76,6 +81,7 @@ allow_attributes_without_reason = "deny"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_const_for_fn = "allow"
+redundant_pub_crate = "allow"     # nursery; conflicts with rustc unreachable_pub
 multiple_crate_versions = "allow" # controlled by cargo-deny instead
 
 [profile.release]
