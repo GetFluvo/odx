@@ -85,6 +85,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "git-aggregate"][..], "git-aggregate", 3),
         (&["odx", "import"][..], "import", 1),
         (&["odx", "export"][..], "export", 1),
+        (&["odx", "aggregate", "--fetch-only"][..], "aggregate", 3),
         (&["odx", "add", "OCA/pos#1"][..], "add", 1),
         (&["odx", "drop", "OCA/pos#1"][..], "drop", 1),
     ] {

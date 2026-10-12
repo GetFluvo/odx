@@ -16,11 +16,17 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
-      --keep-conflicts
-          Keep conflicted working trees for inspection instead of aborting
+      --repo <NAME>
+          Only this repository (its `name`, or its URL when unnamed)
 
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --prefer-mirror
+          Fetch locked commits from the configured mirror first
+
+      --keep-conflicts
+          Keep conflicted working trees for inspection instead of aborting
 
       --offline
           Serve forge and index data from the cache only

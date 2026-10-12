@@ -22,6 +22,9 @@ pub enum GitError {
     /// Another process holds the repository lock.
     #[error("{0} is locked by another odx process")]
     Locked(String),
+    /// The operation was cancelled before it started.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// The git operations odx needs from a backend.

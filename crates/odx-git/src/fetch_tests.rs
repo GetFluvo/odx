@@ -96,13 +96,22 @@ fn fetches_branches_pull_requests_and_commits() {
             (None, Source::Branch("17.0".into())),
             (None, Source::Pr(1)),
             (None, Source::Commit(up.feature[..10].to_owned())),
+            (None, Source::Commit(up.base[..8].to_owned())),
+            (None, Source::Commit(up.merge_request.clone())),
         ],
+        mirror: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     let shas: Vec<&str> = fetched.iter().map(|f| f.sha.as_str()).collect();
     assert_eq!(
         shas,
-        [up.base.as_str(), up.pull.as_str(), up.feature.as_str()]
+        [
+            up.base.as_str(),
+            up.pull.as_str(),
+            up.feature.as_str(),
+            up.base.as_str(),
+            up.merge_request.as_str()
+        ]
     );
     assert_eq!(
         fs::read_to_string(cache.url_file(&url)).unwrap(),
@@ -128,6 +137,7 @@ fn gitlab_and_gitea_layouts() {
         url: url.clone(),
         forge: Forge::Gitlab,
         sources: vec![(None, Source::Pr(2))],
+        mirror: None,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitlab, WAIT).unwrap()[0].sha,
@@ -137,6 +147,7 @@ fn gitlab_and_gitea_layouts() {
         url,
         forge: Forge::Gitea,
         sources: vec![(None, Source::Pr(1))],
+        mirror: None,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitea, WAIT).unwrap()[0].sha,
@@ -185,6 +196,7 @@ fn one_fetch_per_remote_url() {
             (None, Source::Pr(1)),
             (Some(fork_url.clone()), Source::Pr(1)),
         ],
+        mirror: None,
     };
     let backend = Counting {
         inner: system(),
@@ -209,6 +221,7 @@ fn errors() {
         url: file_url(&up.dir),
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(99))],
+        mirror: None,
     };
     let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("git fetch failed: "), "{err}");
@@ -265,6 +278,7 @@ fn unresolved_sources_are_errors() {
         url: "https://x/y.git".into(),
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
+        mirror: None,
     };
     let err = fetch(&cache, &Hollow, &plan, Duration::ZERO).unwrap_err();
     assert_eq!(
@@ -282,6 +296,7 @@ fn url_file_write_errors_are_reported() {
         url: "https://x/y.git".into(),
         forge: Forge::Github,
         sources: vec![],
+        mirror: None,
     };
     fs::create_dir_all(cache.url_file(&plan.url)).unwrap();
     assert!(matches!(
@@ -317,9 +332,86 @@ fn resolve_failures_propagate() {
         url: "https://x/y.git".into(),
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
+        mirror: None,
     };
     let err = fetch(&Cache::new(tmp.path()), &Broken, &plan, Duration::ZERO).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git"), "{err}");
     let no_git = SystemGit::with_program(Arc::new(OsRunner), "odx-surely-missing-git");
     assert!(no_git.resolve(tmp.path(), "HEAD").is_err());
+}
+
+/// A bare clone of `up` that only has the base branch and one vaulted commit.
+fn mirror_of(root: &Path, up: &Upstream) -> PathBuf {
+    let mirror = root.join("mirror.git");
+    git(
+        root,
+        &["init", "--quiet", "--bare", mirror.to_str().unwrap()],
+    );
+    git(
+        &up.dir,
+        &[
+            "push",
+            "--quiet",
+            mirror.to_str().unwrap(),
+            &format!("{}:refs/odx/{}", up.pull, up.pull),
+        ],
+    );
+    mirror
+}
+
+#[test]
+fn locked_commits_come_from_the_mirror_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let mirror = mirror_of(tmp.path(), &up);
+    let cache = Cache::new(tmp.path().join("cache"));
+    // The upstream URL is unreachable: only the mirror can provide the commit.
+    let plan = FetchPlan {
+        url: file_url(&tmp.path().join("gone")),
+        forge: Forge::Github,
+        sources: vec![(None, Source::Commit(up.pull.clone()))],
+        mirror: Some(file_url(&mirror)),
+    };
+    let backend = Counting {
+        inner: system(),
+        urls: Mutex::new(Vec::new()),
+    };
+    let fetched = fetch(&cache, &backend, &plan, WAIT).unwrap();
+    assert_eq!(
+        (fetched[0].sha.as_str(), fetched[0].via),
+        (up.pull.as_str(), Via::Mirror)
+    );
+    assert_eq!(*backend.urls.lock().unwrap(), [file_url(&mirror)]);
+}
+
+#[test]
+fn commits_the_mirror_lacks_come_from_upstream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let mirror = mirror_of(tmp.path(), &up);
+    let cache = Cache::new(tmp.path().join("cache"));
+    let plan = FetchPlan {
+        url: file_url(&up.dir),
+        forge: Forge::Github,
+        sources: vec![
+            (None, Source::Commit(up.merge_request.clone())),
+            (None, Source::Branch("17.0".into())),
+        ],
+        mirror: Some(file_url(&mirror)),
+    };
+    let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
+    assert_eq!(fetched[0].via, Via::Upstream);
+    assert_eq!(fetched[0].sha, up.merge_request);
+
+    // A mirror with nothing to offer for branches is not contacted.
+    let branches_only = FetchPlan {
+        sources: vec![(None, Source::Branch("17.0".into()))],
+        ..plan
+    };
+    let backend = Counting {
+        inner: system(),
+        urls: Mutex::new(Vec::new()),
+    };
+    fetch(&cache, &backend, &branches_only, WAIT).unwrap();
+    assert_eq!(*backend.urls.lock().unwrap(), [file_url(&up.dir)]);
 }

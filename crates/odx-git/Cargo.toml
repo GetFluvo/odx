@@ -13,8 +13,11 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 odx-core.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 odx-core = { workspace = true, features = ["fakes", "system"] }

@@ -20,8 +20,11 @@ path = "src/main.rs"
 clap.workspace = true
 clap_complete.workspace = true
 git-aggregate-rs.workspace = true
+odx-aggregate.workspace = true
 odx-config.workspace = true
 odx-core = { workspace = true, features = ["system"] }
+odx-git.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

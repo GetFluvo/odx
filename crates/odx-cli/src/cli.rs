@@ -169,6 +169,12 @@ pub struct AggregateArgs {
     /// Only fill the cache; do not touch working trees.
     #[arg(long)]
     pub fetch_only: bool,
+    /// Only this repository (its `name`, or its URL when unnamed).
+    #[arg(long, value_name = "NAME")]
+    pub repo: Option<String>,
+    /// Fetch locked commits from the configured mirror first.
+    #[arg(long)]
+    pub prefer_mirror: bool,
     /// Keep conflicted working trees for inspection instead of aborting.
     #[arg(long)]
     pub keep_conflicts: bool,
