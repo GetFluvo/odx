@@ -1,0 +1,90 @@
+# Benchmark fixture: 12 OCA repositories on 17.0, each at a pinned base
+# commit, with 25 pull requests that were merged upstream later (so their
+# refs never move). ORIGIN is https://github.com, or a local mirror; run
+# with --expand-env. See docs/benchmarks.md.
+
+./server-tools:
+  remotes:
+    oca: ${ORIGIN}/OCA/server-tools.git
+  merges:
+    - oca 8dab99a1ed5701e7d9c2d540616e0a5fded0ab15
+    - oca refs/pull/3071/head
+    - oca refs/pull/3237/head
+    - oca refs/pull/3180/head
+./web:
+  remotes:
+    oca: ${ORIGIN}/OCA/web.git
+  merges:
+    - oca 457b9ed1b74f8ab444b31aebaca045416342b490
+    - oca refs/pull/3080/head
+    - oca refs/pull/3124/head
+./sale-workflow:
+  remotes:
+    oca: ${ORIGIN}/OCA/sale-workflow.git
+  merges:
+    - oca 507af412b221c6cc33383e4ca63b5e0040d862c9
+    - oca refs/pull/3604/head
+    - oca refs/pull/3640/head
+./account-financial-tools:
+  remotes:
+    oca: ${ORIGIN}/OCA/account-financial-tools.git
+  merges:
+    - oca 0cf341dcf0b037e4eff9ba34036511e687bb1ced
+    - oca refs/pull/2047/head
+    - oca refs/pull/2065/head
+./partner-contact:
+  remotes:
+    oca: ${ORIGIN}/OCA/partner-contact.git
+  merges:
+    - oca 40d38e03d06d830b405953c165098336a1c459a4
+    - oca refs/pull/1950/head
+    - oca refs/pull/1732/head
+./stock-logistics-workflow:
+  remotes:
+    oca: ${ORIGIN}/OCA/stock-logistics-workflow.git
+  merges:
+    - oca 4c12d5fe2d8286265793c56c7f85bea289727465
+    - oca refs/pull/1881/head
+    - oca refs/pull/1889/head
+./pos:
+  remotes:
+    oca: ${ORIGIN}/OCA/pos.git
+  merges:
+    - oca dfa4435ade024e6d940f3dd3bcc078733a637312
+    - oca refs/pull/1365/head
+    - oca refs/pull/1309/head
+./project:
+  remotes:
+    oca: ${ORIGIN}/OCA/project.git
+  merges:
+    - oca e6f461ada23091c366745dbf93f111dfc9fbb609
+    - oca refs/pull/1424/head
+    - oca refs/pull/1426/head
+./hr:
+  remotes:
+    oca: ${ORIGIN}/OCA/hr.git
+  merges:
+    - oca 35885fdc4d82a0432096cda6d55e45890590b97a
+    - oca refs/pull/1406/head
+    - oca refs/pull/1452/head
+./purchase-workflow:
+  remotes:
+    oca: ${ORIGIN}/OCA/purchase-workflow.git
+  merges:
+    - oca cd330c76103f05f92305244c86887a3ce6b22348
+    - oca refs/pull/2598/head
+    - oca refs/pull/2608/head
+./reporting-engine:
+  remotes:
+    oca: ${ORIGIN}/OCA/reporting-engine.git
+  merges:
+    - oca 7181858bb6988e621b0063e03fca66d5936f02ce
+    - oca refs/pull/980/head
+    - oca refs/pull/984/head
+./queue:
+  remotes:
+    oca: ${ORIGIN}/OCA/queue.git
+  merges:
+    - oca 45ac80ab4e33bd87491661e0cfb762e4fdb1a451
+    - oca refs/pull/748/head
+    - oca refs/pull/681/head
