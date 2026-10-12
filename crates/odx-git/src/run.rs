@@ -8,7 +8,10 @@ use odx_core::repo_key;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
-use crate::{Cache, FetchPlan, Fetched, GitBackend, GitError, fetch};
+use crate::{
+    Aggregated, Aggregation, Cache, FetchPlan, Fetched, GitBackend, GitError, MergeError, Merger,
+    fetch,
+};
 
 /// Concurrency and waiting limits for [`fetch_all`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +83,43 @@ pub async fn fetch_all(
             Outcome { url, result }
         });
     }
+    join_all(tasks).await
+}
+
+/// Build every working tree, at most `jobs` at a time, and return one
+/// result per aggregation in the order given.
+///
+/// Merges within a repository stay sequential (they share one working
+/// tree); repositories are independent. Cancelling `cancel` stops
+/// aggregations that have not started; running ones finish so no working
+/// tree is left mid-merge.
+pub async fn aggregate_all(
+    merger: &Arc<Merger>,
+    aggregations: Vec<Aggregation>,
+    jobs: usize,
+    cancel: &CancellationToken,
+) -> Vec<Result<Aggregated, MergeError>> {
+    let jobs = Arc::new(Semaphore::new(jobs.max(1)));
+    let tasks = aggregations.into_iter().map(|aggregation| {
+        let jobs = Arc::clone(&jobs);
+        let merger = Arc::clone(merger);
+        async move {
+            let permit = tokio::select! {
+                biased;
+                () = cancel.cancelled() => None,
+                permit = jobs.acquire_owned() => Some(permit),
+            };
+            match permit {
+                Some(permit) => tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    merger.aggregate(&aggregation)
+                })
+                .await
+                .unwrap_or_else(|e| Err(MergeError::Git(GitError::Io(io::Error::other(e))))),
+                None => Err(MergeError::Git(GitError::Cancelled)),
+            }
+        }
+    });
     join_all(tasks).await
 }
 

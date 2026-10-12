@@ -1,7 +1,12 @@
 //! Aggregation, locking, vaulting, the force-push guard rail, auto-update and verification for odx.
 //!
-//! Phase 2 provides [`fetch_plans`]: turning `[tool.odx]` into one fetch
-//! plan per repository URL for the git cache.
+//! [`fetch_plans`] turns `[tool.odx]` into one fetch plan per repository
+//! URL for the git cache; [`aggregations`] turns the fetched commits into
+//! one working-tree build per repository.
+
+mod aggregation;
+
+pub use aggregation::{BuildOptions, RepoAggregation, aggregations};
 
 use odx_config::OdxConfig;
 use odx_config::schema::{ForgeKind, MergeSource};
@@ -14,6 +19,9 @@ pub enum PlanError {
     /// `--repo` named no configured repository.
     #[error("no repository named {0:?} in [tool.odx]")]
     UnknownRepository(String),
+    /// A repository's sources were not (all) fetched.
+    #[error("{0}: not fetched")]
+    NotFetched(String),
     /// A merge entry is invalid (configurations are validated when loaded,
     /// so this only happens for configurations built in code).
     #[error("{repository}: {message}")]

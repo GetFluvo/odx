@@ -165,6 +165,10 @@ pub enum Command {
 
 /// Arguments of `odx aggregate`.
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are independent switches"
+)]
 pub struct AggregateArgs {
     /// Only fill the cache; do not touch working trees.
     #[arg(long)]
@@ -178,6 +182,9 @@ pub struct AggregateArgs {
     /// Keep conflicted working trees for inspection instead of aborting.
     #[arg(long)]
     pub keep_conflicts: bool,
+    /// Discard local changes in working trees and replace directories odx does not manage.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Arguments of `odx lock`.

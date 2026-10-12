@@ -168,7 +168,7 @@ fn failures_and_usage_errors() {
     assert_eq!(exit, Exit::Failure);
     assert_eq!(out, "fetched pos: 2 refs\n");
     assert!(
-        err.starts_with("error: fetching failed for\n  gone: git fetch failed: "),
+        err.starts_with("error: aggregation failed for\n  gone: git fetch failed: "),
         "{err}"
     );
 
@@ -186,7 +186,7 @@ fn failures_and_usage_errors() {
         &["--config", "repos.yaml", "aggregate", "--fetch-only"],
     );
     assert_eq!(exit, Exit::Usage);
-    assert!(err.contains("arrives with the drop-in engine"), "{err}");
+    assert!(err.contains("use git-aggregate-rs"), "{err}");
 }
 
 #[test]
@@ -268,4 +268,180 @@ fn local_clones_from_the_user_configuration() {
     let (exit, _, err) = run(&project, &["aggregate", "--fetch-only"]);
     assert_eq!(exit, Exit::Usage);
     assert!(err.contains("unknown field `repositories`"), "{err}");
+}
+
+/// Add pull request `n` to the upstream behind `project`, changing `b.txt`.
+fn add_pr(project: &Project, n: u32, content: &str) {
+    let dir = PathBuf::from(project.upstream.trim_start_matches("file://"));
+    let dir = if cfg!(windows) {
+        PathBuf::from(dir.to_string_lossy().trim_start_matches('/'))
+    } else {
+        dir
+    };
+    git(&dir, &["checkout", "--quiet", "--detach", "17.0"]);
+    std::fs::write(dir.join("b.txt"), content).unwrap();
+    git(&dir, &["add", "b.txt"]);
+    git(&dir, &["commit", "--quiet", "-m", content]);
+    let sha = git(&dir, &["rev-parse", "HEAD"]);
+    git(&dir, &["update-ref", &format!("refs/pull/{n}/head"), &sha]);
+    git(&dir, &["checkout", "--quiet", "17.0"]);
+}
+
+/// Replace commit ids (7 to 40 hex characters) so snapshots are stable.
+fn redact(text: &str) -> String {
+    text.split_inclusive(|c: char| !c.is_ascii_hexdigit())
+        .map(|piece| {
+            let hex = piece.trim_end_matches(|c: char| !c.is_ascii_hexdigit());
+            if hex.len() >= 7 && hex.chars().any(|c| c.is_ascii_digit()) {
+                piece.replacen(hex, "<sha>", 1)
+            } else {
+                piece.to_owned()
+            }
+        })
+        .collect()
+}
+
+fn write_config(project: &Project, extra: &str, merges: &str) {
+    let text = format!(
+        "[tool.odx]\nodoo_version = \"17.0\"\n{extra}\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{}\"\nmerges = [{merges}]\n",
+        project.upstream
+    );
+    std::fs::write(project.root.join("pyproject.toml"), text).unwrap();
+}
+
+#[test]
+fn aggregate_builds_the_working_tree() {
+    let project = project("mergiraf = \"never\"");
+    let (exit, out, err) = run(&project, &["aggregate"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    insta::assert_snapshot!(redact(&out));
+    assert!(project.root.join("vendor/pos/b.txt").exists());
+    let (exit, out, _) = run(&project, &["--json", "aggregate"]);
+    assert_eq!(exit, Exit::Success);
+    insta::assert_snapshot!(redact(&out));
+}
+
+#[test]
+fn conflicts_stop_or_are_skipped() {
+    let project = project("");
+    add_pr(&project, 2, "conflicting");
+    write_config(&project, "mergiraf = \"never\"", "{ pr = 1 }, { pr = 2 }");
+    let (exit, out, err) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(out, "fetched pos: 3 refs\n");
+    assert_eq!(
+        err,
+        "error: aggregation failed for\n  pos: #2 conflicts in b.txt\n"
+    );
+
+    write_config(
+        &project,
+        "mergiraf = \"never\"",
+        "{ pr = 1 }, { pr = 2, on_conflict = \"skip\" }",
+    );
+    let (exit, out, _) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Success);
+    assert_eq!(
+        redact(&out),
+        "fetched pos: 3 refs\nbuilt pos in vendor/pos: 1 merged, 1 skipped: #2 conflicts in b.txt (<sha>)\n"
+    );
+    let (_, json, _) = run(&project, &["--json", "aggregate"]);
+    assert!(
+        json.contains("\"status\":\"skipped\",\"files\":[\"b.txt\"]")
+            || json.contains("\"files\":[\"b.txt\"],\"label\":\"#2\",\"status\":\"skipped\""),
+        "{json}"
+    );
+
+    write_config(&project, "mergiraf = \"never\"", "{ pr = 1 }, { pr = 2 }");
+    let (exit, _, err) = run(&project, &["aggregate", "--keep-conflicts"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("(left in place)"), "{err}");
+    let (exit, _, err) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("has local changes"), "{err}");
+    write_config(&project, "mergiraf = \"never\"", "{ pr = 1 }");
+    let (exit, _, _) = run(&project, &["aggregate", "--force"]);
+    assert_eq!(exit, Exit::Success);
+}
+
+#[test]
+fn mergiraf_modes() {
+    let mut project = project("mergiraf = \"always\"");
+    project.env = project
+        .env
+        .clone()
+        .with("ODX_MERGIRAF", "odx-surely-missing-mergiraf");
+    let (exit, _, err) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Usage);
+    assert_eq!(
+        err,
+        "error: mergiraf = \"always\" is configured, but odx-surely-missing-mergiraf cannot be run\n"
+    );
+    write_config(&project, "mergiraf = \"auto\"", "{ pr = 1 }");
+    assert_eq!(run(&project, &["aggregate"]).0, Exit::Success);
+    project.env = project.env.clone().with("ODX_MERGIRAF", "git");
+    write_config(&project, "mergiraf = \"always\"", "{ pr = 1 }");
+    assert_eq!(run(&project, &["aggregate"]).0, Exit::Success);
+    write_config(&project, "mergiraf = \"auto\"", "{ pr = 1 }");
+    assert_eq!(run(&project, &["aggregate"]).0, Exit::Success);
+}
+
+#[test]
+fn fetch_failures_skip_the_build() {
+    let project = project(
+        "mergiraf = \"never\"\n[[tool.odx.repositories]]\nname = \"gone\"\nurl = \"file:///nonexistent/odx/gone\"\n",
+    );
+    let (exit, out, err) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(out.contains("built pos"), "{out}");
+    assert!(
+        err.starts_with("error: aggregation failed for\n  gone: git fetch failed"),
+        "{err}"
+    );
+    let (_, json, _) = run(&project, &["--json", "aggregate", "--fetch-only"]);
+    assert!(
+        json.contains("\"error\"") && !json.contains("\"built\""),
+        "{json}"
+    );
+}
+
+#[test]
+fn up_to_date_merges_base_only_repositories_and_json_errors() {
+    let project = project("");
+    let dir = PathBuf::from(project.upstream.trim_start_matches("file://"));
+    let dir = if cfg!(windows) {
+        PathBuf::from(dir.to_string_lossy().trim_start_matches('/'))
+    } else {
+        dir
+    };
+    let base = git(&dir, &["rev-parse", "17.0"]);
+    write_config(
+        &project,
+        "mergiraf = \"never\"",
+        &format!("{{ sha = \"{base}\" }}"),
+    );
+    let (exit, out, _) = run(&project, &["aggregate"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(
+        out.contains("built pos in vendor/pos: 1 up to date ("),
+        "{out}"
+    );
+    let (_, json, _) = run(&project, &["--json", "aggregate"]);
+    assert!(json.contains("\"status\":\"up-to-date\""), "{json}");
+
+    write_config(&project, "mergiraf = \"never\"", "");
+    let (_, out, _) = run(&project, &["aggregate"]);
+    assert!(
+        out.contains("built pos in vendor/pos: base only ("),
+        "{out}"
+    );
+
+    add_pr(&project, 2, "conflicting");
+    write_config(&project, "mergiraf = \"never\"", "{ pr = 1 }, { pr = 2 }");
+    let (exit, json, _) = run(&project, &["--json", "aggregate", "--force"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        json.contains("\"error\":\"#2 conflicts in b.txt\""),
+        "{json}"
+    );
 }

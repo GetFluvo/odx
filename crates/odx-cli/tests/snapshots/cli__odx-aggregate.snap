@@ -31,6 +31,9 @@ Options:
       --offline
           Serve forge and index data from the cache only
 
+      --force
+          Discard local changes in working trees and replace directories odx does not manage
+
       --fresh
           Ignore cached data; refresh everything before answering
 

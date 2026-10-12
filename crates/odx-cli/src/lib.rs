@@ -103,8 +103,8 @@ fn execute(
             Ok(Exit::Success)
         }
         Command::GitAggregate(args) => git_aggregate_rs::execute(args, "odx git-aggregate", err),
-        Command::Aggregate(args) if args.fetch_only => {
-            cmd::aggregate::run_fetch_only(args, &cli.global, ctx).emit(out, err)
+        Command::Aggregate(args) => {
+            cmd::aggregate::run_aggregate(args, &cli.global, ctx).emit(out, err)
         }
         Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),
         Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),

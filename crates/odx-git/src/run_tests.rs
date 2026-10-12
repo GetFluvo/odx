@@ -197,3 +197,64 @@ fn hosts() {
     assert_eq!(host("git@github.com:OCA/pos.git"), "github.com");
     assert_eq!(host("https://GitLab.example.com/x/y"), "gitlab.example.com");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn aggregations_run_and_can_be_cancelled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let merger = Arc::new(Merger::new(Arc::new(odx_core::system::OsRunner)));
+    let missing = Aggregation {
+        cache_repo: tmp.path().join("no-cache"),
+        target_dir: tmp.path().join("work"),
+        base: "0".repeat(40),
+        steps: Vec::new(),
+        mergiraf: None,
+        keep_conflicts: false,
+        force: false,
+    };
+    let results = aggregate_all(&merger, vec![missing.clone()], 0, &CancellationToken::new()).await;
+    assert!(
+        results[0]
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .starts_with("git worktree failed")
+    );
+
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let results = aggregate_all(&merger, vec![missing], 1, &cancel).await;
+    assert_eq!(results[0].as_ref().unwrap_err().to_string(), "cancelled");
+}
+
+/// A process runner that panics, as a stand-in for a bug in git handling.
+#[derive(Debug)]
+struct PanickingRunner;
+
+impl odx_core::ProcessRunner for PanickingRunner {
+    fn run(&self, _: &odx_core::Invocation) -> io::Result<odx_core::Output> {
+        panic!("runner bug");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_merge_becomes_an_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let merger = Arc::new(Merger::new(Arc::new(PanickingRunner)));
+    let aggregation = Aggregation {
+        cache_repo: tmp.path().join("cache"),
+        target_dir: tmp.path().join("work"),
+        base: "0".repeat(40),
+        steps: Vec::new(),
+        mergiraf: None,
+        keep_conflicts: false,
+        force: false,
+    };
+    let results = aggregate_all(&merger, vec![aggregation], 1, &CancellationToken::new()).await;
+    assert!(
+        results[0]
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .contains("runner bug")
+    );
+}
