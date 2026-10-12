@@ -166,3 +166,32 @@ resolved pos: 2 merged (1a2b3c4d5e6f)
 updated pos #123: 1a2b3c4d5e6f -> 6f5e4d3c2b1a (rebased (same patch))
 locked pos #456 at 0a1b2c3d4e5f
 ```
+
+## The vault
+
+```toml
+[tool.odx.mirror]
+url = "ssh://git@forge.example.com/odoo/vault.git"   # private
+```
+
+With a mirror configured, `odx lock` pushes every locked commit (the base and
+each merge) to it under a ref named after the commit and nothing else,
+`refs/odx/<commit>` (`ref_prefix` changes the prefix; `ref_style = "tags"`
+uses `refs/tags/odx/<commit>`). The refs never move and say nothing about
+the project; `mirror_ref` in `odx.lock` records them. When a pull request
+author force-pushes and the forge collects the old commit, `odx aggregate`
+fetches it from the vault instead. In CI (`CI` set) and with
+`--prefer-mirror`, locked commits come from the vault first.
+
+Before the first push of a run, odx asks the forge's API who can read the
+vault and refuses a public one unless `allow_public = true`. GitLab protects
+tags, not custom refs, so GitLab vaults always use tags. The check needs a
+token for private repositories: `ODX_TOKEN_<HOST>` (the host in upper case,
+other characters as `_`), or `GITHUB_TOKEN`/`GH_TOKEN` (or `gh auth token`),
+`GITLAB_TOKEN`, `GITEA_TOKEN`/`FORGEJO_TOKEN`. A vault given as a local path
+or `file://` URL is not checked. `odx lock --no-push`, or `push_on_lock =
+false`, locks without vaulting.
+
+```text
+vaulted pos: 3 commits
+```

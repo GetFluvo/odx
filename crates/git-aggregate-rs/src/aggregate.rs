@@ -226,7 +226,7 @@ fn prepare_and_run(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<Vec<Bu
     );
     let clones = local_clones(&user, ctx.env);
     let to_build = plan_yaml(&selected, &ctx.dir);
-    let mut plans = fetch_plans(&to_build, None);
+    let mut plans = fetch_plans(&to_build, None, None);
     for plan in &mut plans {
         plan.plan.clone = clones.find(&plan.plan.url).cloned();
     }

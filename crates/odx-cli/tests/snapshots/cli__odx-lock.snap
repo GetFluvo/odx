@@ -25,11 +25,14 @@ Options:
       --update
           Re-resolve every entry instead of keeping existing pins
 
-      --auto-update
-          Apply the configured lock auto-update policy to PyPI packages
+      --no-push
+          Do not push locked commits to the configured vault
 
       --offline
           Serve forge and index data from the cache only
+
+      --auto-update
+          Apply the configured lock auto-update policy to PyPI packages
 
       --fresh
           Ignore cached data; refresh everything before answering

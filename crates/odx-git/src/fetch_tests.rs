@@ -100,6 +100,7 @@ fn fetches_branches_pull_requests_and_commits() {
             (None, Source::Commit(up.merge_request.clone())),
         ],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
@@ -139,6 +140,7 @@ fn gitlab_and_gitea_layouts() {
         forge: Forge::Gitlab,
         sources: vec![(None, Source::Pr(2))],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     assert_eq!(
@@ -150,6 +152,7 @@ fn gitlab_and_gitea_layouts() {
         forge: Forge::Gitea,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     assert_eq!(
@@ -200,6 +203,7 @@ fn one_fetch_per_remote_url() {
             (Some(fork_url.clone()), Source::Pr(1)),
         ],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     let backend = Counting {
@@ -226,6 +230,7 @@ fn errors() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(99))],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
@@ -284,6 +289,7 @@ fn unresolved_sources_are_errors() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     let err = fetch(&cache, &Hollow, &plan, Duration::ZERO).unwrap_err();
@@ -303,6 +309,7 @@ fn url_file_write_errors_are_reported() {
         forge: Forge::Github,
         sources: vec![],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     fs::create_dir_all(cache.url_file(&plan.url)).unwrap();
@@ -340,6 +347,7 @@ fn resolve_failures_propagate() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(1))],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     let err = fetch(&Cache::new(tmp.path()), &Broken, &plan, Duration::ZERO).unwrap_err();
@@ -379,6 +387,7 @@ fn locked_commits_come_from_the_mirror_first() {
         forge: Forge::Github,
         sources: vec![(None, Source::Commit(up.pull.clone()))],
         mirror: Some(file_url(&mirror)),
+        fallback: None,
         clone: None,
     };
     let backend = Counting {
@@ -404,6 +413,7 @@ fn cached_commits_are_not_fetched_again() {
         forge: Forge::Github,
         sources: vec![(None, Source::Commit(up.pull.clone()))],
         mirror: Some(file_url(&mirror)),
+        fallback: None,
         clone: None,
     };
     fetch(&cache, &system(), &plan, WAIT).unwrap();
@@ -414,6 +424,47 @@ fn cached_commits_are_not_fetched_again() {
     let fetched = fetch(&cache, &backend, &plan, WAIT).unwrap();
     assert_eq!(fetched[0].via, Via::Cache);
     assert!(backend.urls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn commits_gone_upstream_come_from_the_vault() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let mirror = mirror_of(tmp.path(), &up);
+    let cache = Cache::new(tmp.path().join("cache"));
+    // The upstream lost the commit (force-push and gc): its URL fails here.
+    let plan = FetchPlan {
+        url: file_url(&tmp.path().join("gone")),
+        forge: Forge::Github,
+        sources: vec![(None, Source::Commit(up.pull.clone()))],
+        mirror: None,
+        fallback: Some(file_url(&mirror)),
+        clone: None,
+    };
+    let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
+    assert_eq!(
+        (fetched[0].sha.as_str(), fetched[0].via),
+        (up.pull.as_str(), Via::Mirror)
+    );
+
+    // The vault does not have it either: the upstream error is reported.
+    let missing = FetchPlan {
+        sources: vec![(None, Source::Commit(up.merge_request.clone()))],
+        ..plan.clone()
+    };
+    let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
+    assert!(err.to_string().contains("gone"), "{err}");
+    // Other remotes are not looked up in the vault.
+    let fork = FetchPlan {
+        sources: vec![(
+            Some(file_url(&tmp.path().join("gone-fork"))),
+            Source::Commit(up.pull.clone()),
+        )],
+        url: file_url(&up.dir),
+        ..plan
+    };
+    let other = Cache::new(tmp.path().join("other-cache"));
+    assert!(fetch(&other, &system(), &fork, WAIT).is_err());
 }
 
 #[test]
@@ -430,6 +481,7 @@ fn commits_the_mirror_lacks_come_from_upstream() {
             (None, Source::Branch("17.0".into())),
         ],
         mirror: Some(file_url(&mirror)),
+        fallback: None,
         clone: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
@@ -480,6 +532,7 @@ fn pos_plan(up: &Upstream, clone: Option<LocalClone>) -> FetchPlan {
             (None, Source::Pr(1)),
         ],
         mirror: None,
+        fallback: None,
         clone,
     }
 }

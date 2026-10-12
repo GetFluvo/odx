@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn plans_share_a_url_and_keep_other_remotes_apart() {
         let file = parse_repos(YAML).unwrap();
-        let plans = crate::fetch_plans(&plan_yaml(&file.repos, Path::new("/w")), None);
+        let plans = crate::fetch_plans(&plan_yaml(&file.repos, Path::new("/w")), None, None);
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[0].names[..2], ["./pos", "./pos-copy"]);
         assert_eq!(
