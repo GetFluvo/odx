@@ -1,0 +1,39 @@
+# Install: pre-commit install --hook-type pre-commit --hook-type commit-msg
+# The hooks call the justfile so local and CI commands match. CI is authoritative.
+repos:
+  - repo: local
+    hooks:
+      - id: fmt
+        name: cargo fmt
+        entry: just fmt-check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: clippy
+        name: cargo clippy
+        entry: just clippy
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: typos
+        name: typos
+        entry: typos
+        language: system
+        pass_filenames: false
+      - id: deny
+        name: cargo deny
+        entry: just deny
+        language: system
+        files: ^(Cargo\.lock|deny\.toml)$
+        pass_filenames: false
+      - id: docs
+        name: sphinx docs
+        entry: just docs
+        language: system
+        files: ^(docs/|README\.md)
+        pass_filenames: false
+      - id: commit-msg
+        name: conventional commit
+        entry: cog verify --file
+        language: system
+        stages: [commit-msg]

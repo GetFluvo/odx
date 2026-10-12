@@ -1,0 +1,41 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "odx-cli"
+description = "Rust-native workspace manager for Odoo projects"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Strategic Efficiency B.V." }]
+keywords = ["odoo", "oca", "git", "workspace", "cli"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Framework :: Odoo",
+  "Intended Audience :: Developers",
+  "Programming Language :: Rust",
+  "Topic :: Software Development :: Build Tools",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/getfluvo/odx"
+Documentation = "https://odx.readthedocs.io/"
+Issues = "https://github.com/getfluvo/odx/issues"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "crates/odx-cli/Cargo.toml"
+strip = true
+
+[dependency-groups]
+docs = [
+  "sphinx>=8",
+  "shibuya",
+  "myst-parser>=4",
+  "sphinx-copybutton",
+  "sphinx-autobuild",
+]

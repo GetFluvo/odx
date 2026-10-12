@@ -1,0 +1,74 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Record a verdict or mute
+
+Usage: odx verdict add [OPTIONS] --kind <KIND> --reason <REASON> <ID>
+
+Arguments:
+  <ID>
+          Suggestion or change id, as shown by `odx dashboard`
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --kind <KIND>
+          Kind of verdict
+
+          Possible values:
+          - not-applicable:  The change does not apply to the target series
+          - not-needed:      The change is not needed on the target series
+          - superseded:      Superseded by another change
+          - already-present: Already present on the target, possibly by another route
+          - declined:        Declined for this project
+          - not-wanted:      Not wanted in this project
+          - deferred:        Review later; re-checked on expiry and on target code changes
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --reason <REASON>
+          Why; mandatory
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --scope <SCOPE>
+          Scope; the default depends on the kind
+
+          Possible values:
+          - environment:  One environment of this project
+          - project:      Every environment of this project
+          - organisation: Every project of the organisation
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --until <DATE>
+          Expiry date (YYYY-MM-DD) for deferred verdicts
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

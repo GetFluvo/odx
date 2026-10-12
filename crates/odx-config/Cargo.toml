@@ -1,0 +1,16 @@
+[package]
+name = "odx-config"
+description = "Configuration for odx: [tool.odx], dependency groups, uv sources, odx.lock, mutes and repos.yaml/addons.yaml compatibility"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true

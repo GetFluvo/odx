@@ -1,0 +1,10 @@
+# Restriction lints are relaxed inside tests only.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+
+# Proper nouns used in docs that are not code.
+doc-valid-idents = ["..", "PyPI", "GitHub", "GitLab", "OpenUpgrade", "Forgejo", "CycloneDX"]

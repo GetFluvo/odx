@@ -1,0 +1,79 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Rust-native workspace manager for Odoo projects.
+
+Aggregates pull requests, locks and vaults every commit, ports fixes across Odoo series and promotes exact pins between environments, with pyproject.toml [tool.odx] as the single source of truth.
+
+Usage: odx [OPTIONS] <COMMAND>
+
+Commands:
+  aggregate      Fetch and merge the configured PRs and branches
+  lock           Resolve every merge and package to a SHA, vault it, write odx.lock
+  vendor         Install the locked packages into the addon directories; write the platform requirements
+  build          Build (and publish) wheels of aggregated, unmerged and private addons
+  verify         Check that the working tree, lockfiles, vendored content or installed wheels match
+  dev            Prepare a local development workspace, or develop one package
+  add            Add a repository, merge or package to pyproject.toml
+  drop           Remove a merge or package from pyproject.toml and odx.lock
+  import         Convert repos.yaml (and addons.yaml) into [tool.odx]
+  export         Write repos.yaml / addons.yaml from [tool.odx]
+  git-aggregate  Run the gitaggregate-compatible drop-in (same as `git-aggregate-rs`)
+  dashboard      One combined view of pinned PRs, upstream changes, ports, updates and drift
+  status         Aggregation and upstream status per merge and package [alias: track]
+  suggest        Upstream changes on other series that touch your modules
+  verdict        Record, list, revoke and share decisions about upstream changes
+  check-deps     Compare __manifest__.py dependencies with pyproject.toml
+  sniff          List database migration scripts introduced by merges
+  stats          Lines of code per language
+  upgrade        Module availability and code readiness for the next Odoo series
+  port           Port PRs or missing commits to another series; maintainer sweeps; blacklists
+  promote        Copy exact pins (and optionally code) of modules or a feature between environments
+  env            Compare environments
+  bot            Upstream dashboard issue and actionable PRs (nightly CI)
+  sync           Prefetch repositories, PR refs, index metadata and wheels into the cache
+  daemon         Run sync continuously or install it as a user-level scheduled job
+  cache          Inspect and garbage-collect the shared cache
+  lint           Odoo-specific lint checks with project context
+  doctor         Check the local setup: git, mergiraf, uv, tokens, cache, vault protection
+  auth           Store or remove forge tokens in the OS keyring
+  completions    Print shell completions
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

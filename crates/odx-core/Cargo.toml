@@ -1,0 +1,20 @@
+[package]
+name = "odx-core"
+description = "Domain types, exit codes and IO traits shared by the odx crates"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# In-memory implementations of the IO traits for tests in downstream crates.
+fakes = []
+
+[lints]
+workspace = true

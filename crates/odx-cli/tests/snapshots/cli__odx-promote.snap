@@ -1,0 +1,72 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Copy exact pins (and optionally code) of modules or a feature between environments
+
+Usage: odx promote [OPTIONS] [MODULES]...
+
+Arguments:
+  [MODULES]...
+          Modules to promote, with their dependency closure
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --feature <NAME>
+          Promote a feature set from [tool.odx.features]
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --search <TEXT>
+          Find modules by functional description and show candidates
+
+      --from <ENV>
+          Source environment
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --to <ENV>
+          Target environment
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --with-code
+          Also promote code by patch-id
+
+      --no-refresh
+          Use cached data even when stale
+
+      --no-with-odoo
+          Do not promote the Odoo core revision
+
+      --dry-run
+          Show the plan without changing anything
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+      --yes
+          Apply without confirmation
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

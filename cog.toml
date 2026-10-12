@@ -1,0 +1,8 @@
+# Conventional Commits, enforced by `cog check` in CI.
+tag_prefix = "v"
+ignore_merge_commits = true
+branch_whitelist = ["main"]
+
+[commit_types]
+build = { changelog_title = "Build" }
+ci = { changelog_title = "CI" }

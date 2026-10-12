@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "git-aggregate-rs"
+description = "Drop-in replacement for git-aggregator's gitaggregate, written in Rust"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Strategic Efficiency B.V." }]
+keywords = ["odoo", "oca", "git", "git-aggregator"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Programming Language :: Rust",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/getfluvo/odx"
+Issues = "https://github.com/getfluvo/odx/issues"
+
+[tool.maturin]
+bindings = "bin"
+strip = true

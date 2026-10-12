@@ -1,0 +1,30 @@
+[package]
+name = "odx-cli"
+description = "odx: a Rust-native workspace manager for Odoo projects"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "odx"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+clap_complete.workspace = true
+git-aggregate-rs.workspace = true
+odx-core.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+insta.workspace = true
+
+[lints]
+workspace = true

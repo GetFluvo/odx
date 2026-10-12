@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-labelledby="t">
+  <title id="t">odx</title>
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9a76a8"/>
+      <stop offset="0.5" stop-color="#7e5a8c"/>
+      <stop offset="1" stop-color="#5e4368"/>
+    </linearGradient>
+    <radialGradient id="disc" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#2a2933"/>
+      <stop offset="0.7" stop-color="#1c1b23"/>
+      <stop offset="1" stop-color="#18181f"/>
+    </radialGradient>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b4f2dc"/>
+      <stop offset="0.5" stop-color="#6fd3b0"/>
+      <stop offset="1" stop-color="#3fa886"/>
+    </linearGradient>
+    <linearGradient id="tail" gradientUnits="userSpaceOnUse" x1="150" y1="0" x2="222" y2="0">
+      <stop offset="0" stop-color="#6fd3b0"/>
+      <stop offset="1" stop-color="#8fdcc0"/>
+    </linearGradient>
+    <linearGradient id="dee" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dcbcec"/>
+      <stop offset="1" stop-color="#9f72b6"/>
+    </linearGradient>
+    <linearGradient id="ex" gradientUnits="userSpaceOnUse" x1="330" y1="330" x2="442" y2="182">
+      <stop offset="0" stop-color="#c94a1d"/>
+      <stop offset="1" stop-color="#f8915a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="#18181f"/>
+  <g transform="translate(90 96) scale(0.875)">
+  <circle cx="256" cy="256" r="250" fill="#18181f"/>
+  <path d="M219.3,63.5 L227.7,31.8 L284.3,31.8 L292.7,63.5 L339.5,78.7 L364.9,58.0 L410.7,91.3 L398.9,121.8 L427.8,161.6 L460.5,159.8 L478.0,213.7 L450.5,231.4 L450.5,280.6 L478.0,298.3 L460.5,352.2 L427.8,350.4 L398.9,390.2 L410.7,420.7 L364.9,454.0 L339.5,433.3 L292.7,448.5 L284.3,480.2 L227.7,480.2 L219.3,448.5 L172.5,433.3 L147.1,454.0 L101.3,420.7 L113.1,390.2 L84.2,350.4 L51.5,352.2 L34.0,298.3 L61.5,280.6 L61.5,231.4 L34.0,213.7 L51.5,159.8 L84.2,161.6 L113.1,121.8 L101.3,91.3 L147.1,58.0 L172.5,78.7 Z M424.0,256 A168,168 0 1 0 88.0,256 A168,168 0 1 0 424.0,256 Z" fill="url(#ring)" fill-rule="evenodd"/>
+  <circle cx="256" cy="256" r="168" fill="url(#disc)"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#6fd3b0" stroke-width="10"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round"
+     transform="translate(256 256) scale(0.6) translate(-236 -256)">
+    <!-- D: stem + bowl -->
+    <path d="M222,164 H258 A92,92 0 0 1 258,348 H222 Z" stroke="url(#dee)" stroke-width="42"/>
+    <!-- o: a ring whose tail merges into the D stem (branch into main) -->
+    <circle cx="98" cy="256" r="52" stroke="url(#mint)" stroke-width="34"/>
+    <path d="M150,256 H222" stroke="url(#tail)" stroke-width="28"/>
+    <!-- X over the bowl, with a forward arrow leaving the crossing -->
+    <path d="M330,182 L410,330 M330,330 L410,182" stroke="#1f1e27" stroke-width="48"/>
+    <path d="M330,182 L410,330 M330,330 L410,182" stroke="url(#ex)" stroke-width="26"/>
+    <path d="M370,256 H440 M420,234 L442,256 L420,278" stroke="#1f1e27" stroke-width="40"/>
+    <path d="M370,256 H440 M420,234 L442,256 L420,278" stroke="url(#ex)" stroke-width="18"/>
+  </g>
+  </g>
+  <text x="600" y="300" font-family="Inter, 'Noto Sans', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="104" font-weight="800" fill="#f3f4f6">odx</text>
+  <text x="604" y="370" font-family="Inter, 'Noto Sans', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="36" fill="#c9ced6">Rust-native workspace manager</text>
+  <text x="604" y="418" font-family="Inter, 'Noto Sans', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="36" fill="#c9ced6">for Odoo projects</text>
+  <text x="604" y="496" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="34" font-weight="700" fill="#6fd3b0">$ odx aggregate</text>
+</svg>

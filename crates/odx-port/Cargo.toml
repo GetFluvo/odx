@@ -1,0 +1,16 @@
+[package]
+name = "odx-port"
+description = "Porting engine for odx: port PRs and missing commits across Odoo series, maintainer sweeps and oca-port compatible blacklists"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
