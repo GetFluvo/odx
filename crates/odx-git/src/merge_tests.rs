@@ -249,8 +249,11 @@ fn an_empty_directory_becomes_a_worktree() {
     let plan = fx.plan(&[("a", false)]);
     fs::create_dir_all(&plan.target_dir).unwrap();
     merger().aggregate(&plan).unwrap();
+    // Windows runners check out with autocrlf.
     assert_eq!(
-        fs::read_to_string(plan.target_dir.join("text.txt")).unwrap(),
+        fs::read_to_string(plan.target_dir.join("text.txt"))
+            .unwrap()
+            .replace("\r\n", "\n"),
         "one\nA\nthree\n"
     );
 }
