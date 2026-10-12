@@ -94,6 +94,7 @@ fn fetches_over_the_git_protocol() {
         forge: Forge::Github,
         sources: vec![(None, Source::Branch("17.0".into())), (None, Source::Pr(1))],
         mirror: None,
+        fallback: None,
         clone: None,
     };
     let backend = SystemGit::new(Arc::new(OsRunner));

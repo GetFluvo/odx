@@ -88,7 +88,8 @@ const fn forge(kind: ForgeKind) -> Forge {
 ///
 /// Each plan has the base and every merge source of the repositories that
 /// share the URL (in any spelling), so each URL is fetched once. `mirror`
-/// is tried first for full commit ids.
+/// is tried first for full commit ids; `fallback` serves full commit ids the
+/// repository no longer has.
 ///
 /// ```
 /// use odx_aggregate::{fetch_plans, plan_config};
@@ -97,11 +98,15 @@ const fn forge(kind: ForgeKind) -> Forge {
 ///
 /// let text = "[tool.odx]\nodoo_version = \"17.0\"\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"https://github.com/OCA/pos.git\"\nmerges = [{ pr = 1 }]\n";
 /// let config = parse_pyproject(text, Path::new("p.toml")).unwrap().unwrap().config;
-/// let plans = fetch_plans(&plan_config(&config, Path::new("."), None).unwrap(), None);
+/// let plans = fetch_plans(&plan_config(&config, Path::new("."), None).unwrap(), None, None);
 /// assert_eq!(plans[0].names, ["pos"]);
 /// assert_eq!(plans[0].plan.sources.len(), 2);
 /// ```
-pub fn fetch_plans(planned: &[Planned], mirror: Option<&str>) -> Vec<RepoPlan> {
+pub fn fetch_plans(
+    planned: &[Planned],
+    mirror: Option<&str>,
+    fallback: Option<&str>,
+) -> Vec<RepoPlan> {
     let mut plans: Vec<RepoPlan> = Vec::new();
     for repo in planned {
         let sources = std::iter::once(&repo.base)
@@ -116,6 +121,7 @@ pub fn fetch_plans(planned: &[Planned], mirror: Option<&str>) -> Vec<RepoPlan> {
                     forge: repo.forge,
                     sources: Vec::new(),
                     mirror: mirror.map(str::to_owned),
+                    fallback: fallback.map(str::to_owned),
                     clone: None,
                 },
             });
@@ -175,10 +181,8 @@ forge = "gitea"
 
     #[test]
     fn one_plan_per_url_with_every_source() {
-        let plans = fetch_plans(
-            &planned(REPOS, None),
-            Some("https://forge.example/vault.git"),
-        );
+        let vault = Some("https://forge.example/vault.git");
+        let plans = fetch_plans(&planned(REPOS, None), vault, vault);
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[0].names, ["pos", "pos-again"]);
         assert_eq!(
@@ -200,15 +204,22 @@ forge = "gitea"
             plans[0].plan.mirror.as_deref(),
             Some("https://forge.example/vault.git")
         );
+        assert_eq!(plans[0].plan.fallback, plans[0].plan.mirror);
         assert_eq!(plans[1].names, ["https://gitlab.example.com/odoo/web.git"]);
         assert_eq!(plans[1].plan.forge, Forge::Gitea);
     }
 
     #[test]
     fn filters_and_forges() {
-        let plans = fetch_plans(&planned(REPOS, Some("pos-again")), None);
+        let plans = fetch_plans(&planned(REPOS, Some("pos-again")), None, None);
         assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].plan.mirror, None);
+        assert_eq!(
+            (
+                plans[0].plan.mirror.as_ref(),
+                plans[0].plan.fallback.as_ref()
+            ),
+            (None, None)
+        );
         assert_eq!(
             plan_config(&config(REPOS), Path::new("/p"), Some("nope")),
             Err(PlanError::UnknownRepository("nope".into()))

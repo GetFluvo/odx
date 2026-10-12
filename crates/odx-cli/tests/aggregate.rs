@@ -686,3 +686,229 @@ fn unnamed_repositories_are_locked_by_url() {
     assert_eq!(exit, Exit::Usage);
     assert!(err.contains("cannot be run"), "{err}");
 }
+
+/// A bare vault next to the project; returns its path.
+fn vault_dir(project: &Project) -> PathBuf {
+    let vault = project.root.parent().unwrap().join("vault.git");
+    git(
+        project.root.parent().unwrap(),
+        &["init", "--quiet", "--bare", vault.to_str().unwrap()],
+    );
+    vault
+}
+
+fn vault_config(project: &Project, mirror: &str) {
+    write_config(
+        project,
+        &format!("mergiraf = \"never\"\n[tool.odx.mirror]\n{mirror}"),
+        "{ pr = 1 }",
+    );
+}
+
+fn file_url_of(path: &Path) -> String {
+    let text = path.display().to_string().replace('\\', "/");
+    if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    }
+}
+
+#[test]
+fn lock_vaults_commits_and_aggregate_restores_from_the_vault() {
+    let project = project("");
+    let vault = vault_dir(&project);
+    vault_config(&project, &format!("url = \"{}\"\n", file_url_of(&vault)));
+    let (exit, out, err) = run(&project, &["--json", "lock"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.contains("\"vaulted\":[{\"commits\":2,\"repository\":\"pos\"}]"),
+        "{out}"
+    );
+    assert!(read_lock(&project).contains(&format!("mirror_ref = \"refs/odx/{}\"", project.pr)));
+    assert_eq!(
+        git(&vault, &["rev-parse", &format!("refs/odx/{}", project.pr)]),
+        project.pr
+    );
+    // Everything is vaulted: nothing to push.
+    let (exit, out, _) = run(&project, &["lock"]);
+    assert_eq!((exit, out.as_str()), (Exit::Success, ""));
+
+    // The pull request is force-pushed upstream and the old commit collected.
+    add_pr(&project, 1, "rewritten");
+    let up = upstream_dir(&project);
+    git(&up, &["reflog", "expire", "--expire=now", "--all"]);
+    git(&up, &["gc", "--quiet", "--prune=now"]);
+    assert_ne!(
+        Command::new("git")
+            .current_dir(&up)
+            .args(["cat-file", "-e", &project.pr])
+            .status()
+            .unwrap()
+            .code(),
+        Some(0)
+    );
+    std::fs::remove_dir_all(project.root.parent().unwrap().join("cache")).unwrap();
+    let (exit, out, err) = run(&project, &["aggregate", "--locked"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.contains("from the mirror"), "{out}");
+    // In CI the vault is asked first.
+    std::fs::remove_dir_all(project.root.join("vendor")).unwrap();
+    let mut ci = project;
+    ci.env = ci.env.clone().with("CI", "true");
+    let (exit, out, err) = run(&ci, &["aggregate", "--locked"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.contains("already cached"), "{out}");
+    let project = ci;
+    assert_eq!(
+        git(
+            &project.root.join("vendor/pos"),
+            &["log", "-1", "--format=%s"]
+        ),
+        "b"
+    );
+}
+
+#[test]
+fn vault_ref_styles_and_opt_outs() {
+    let project = project("");
+    let vault = vault_dir(&project);
+    let url = file_url_of(&vault);
+    vault_config(
+        &project,
+        &format!("url = \"{url}\"\nref_style = \"tags\"\n"),
+    );
+    assert_eq!(run(&project, &["lock"]).0, Exit::Success);
+    assert!(read_lock(&project).contains("mirror_ref = \"refs/tags/odx/"));
+
+    std::fs::remove_file(project.root.join("odx.lock")).unwrap();
+    vault_config(
+        &project,
+        &format!("url = \"{url}\"\nref_prefix = \"refs/keep/\"\n"),
+    );
+    assert_eq!(run(&project, &["lock"]).0, Exit::Success);
+    assert!(read_lock(&project).contains("mirror_ref = \"refs/keep/"));
+
+    for (mirror, args) in [
+        (format!("url = \"{url}\"\n"), &["lock", "--no-push"][..]),
+        (
+            format!("url = \"{url}\"\npush_on_lock = false\n"),
+            &["lock"][..],
+        ),
+    ] {
+        std::fs::remove_file(project.root.join("odx.lock")).unwrap();
+        vault_config(&project, &mirror);
+        assert_eq!(run(&project, args).0, Exit::Success);
+        assert!(!read_lock(&project).contains("mirror_ref"));
+    }
+
+    std::fs::remove_file(project.root.join("odx.lock")).unwrap();
+    vault_config(&project, "url = \"file:///nonexistent/odx/vault.git\"\n");
+    let (exit, out, err) = run(&project, &["--json", "lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(out.contains("vaulting failed"), "{out} {err}");
+    // The lock is written; the commits are vaulted on the next run.
+    assert!(!read_lock(&project).contains("mirror_ref"));
+}
+
+/// Answer HTTP requests by path prefix until the test ends; returns the
+/// base URL.
+fn forge_server(routes: &'static [(&'static str, u16, &'static str)]) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => request.extend(buffer.iter().take(n)),
+                }
+            }
+            let text = String::from_utf8_lossy(&request);
+            let path = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
+            let (status, body) = routes
+                .iter()
+                .find(|(prefix, _, _)| path.starts_with(prefix))
+                .map_or((404, ""), |(_, status, body)| (*status, *body));
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    base
+}
+
+#[test]
+fn vault_visibility_is_checked_on_the_forge() {
+    let project = project("");
+    let public = forge_server(&[
+        ("/api/v1/version", 200, "{\"version\":\"1\"}"),
+        ("/api/v1/repos/odoo/vault", 200, "{\"private\":false}"),
+    ]);
+    vault_config(&project, &format!("url = \"{public}/odoo/vault.git\"\n"));
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("is public on Gitea/Forgejo; odx vaults commits only in private repositories"),
+        "{err}"
+    );
+    assert!(err.contains("odx lock --no-push"), "{err}");
+
+    // allow_public lets it through; the push itself then fails.
+    vault_config(
+        &project,
+        &format!("url = \"{public}/odoo/vault.git\"\nallow_public = true\n"),
+    );
+    let (exit, out, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("vaulting failed"), "{out} {err}");
+
+    let gitlab = forge_server(&[
+        ("/api/v4/version", 401, "{}"),
+        (
+            "/api/v4/projects/odoo%2Fvault",
+            200,
+            "{\"visibility\":\"private\"}",
+        ),
+    ]);
+    std::fs::remove_file(project.root.join("odx.lock")).unwrap();
+    vault_config(
+        &project,
+        &format!("url = \"{gitlab}/odoo/vault.git\"\nref_style = \"refs\"\n"),
+    );
+    let (_, _, err) = run(&project, &["lock"]);
+    assert!(
+        err.contains("GitLab protects tags, not custom refs"),
+        "{err}"
+    );
+
+    let nothing = forge_server(&[]);
+    vault_config(&project, &format!("url = \"{nothing}/odoo/vault.git\"\n"));
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("does not look like GitHub, GitLab, Gitea or Forgejo"),
+        "{err}"
+    );
+    let missing = forge_server(&[("/api/v1/version", 200, "{}")]);
+    vault_config(&project, &format!("url = \"{missing}/odoo/vault.git\"\n"));
+    let (_, _, err) = run(&project, &["lock"]);
+    assert!(err.contains("cannot see"), "{err}");
+}
+
+#[test]
+fn without_a_cache_directory_the_project_keeps_one() {
+    let mut project = project("mergiraf = \"never\"");
+    project.env = MapEnv::default();
+    assert_eq!(
+        run(&project, &["aggregate", "--fetch-only"]).0,
+        Exit::Success
+    );
+    assert!(project.root.join(".odx").join("cache").is_dir());
+}

@@ -16,6 +16,9 @@ pub struct FetchPlan {
     pub sources: Vec<(Option<String>, Source)>,
     /// A private mirror to try first for full commit ids (`--prefer-mirror`).
     pub mirror: Option<String>,
+    /// A private mirror to fetch full commit ids from when the repository
+    /// no longer has them (force-pushed and collected upstream).
+    pub fallback: Option<String>,
     /// A local clone of the repository to borrow objects from.
     pub clone: Option<LocalClone>,
 }
@@ -76,20 +79,7 @@ pub fn fetch(
     if let Some(clone) = &plan.clone {
         borrow_from(&dir, clone)?;
     }
-    // Commits are immutable: one fetched before needs no network.
-    let cached: Vec<usize> = plan
-        .sources
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, source))| {
-            source.is_full_commit()
-                && matches!(
-                    backend.resolve(&dir, &source.local_ref(plan.forge, None)),
-                    Ok(Some(_))
-                )
-        })
-        .map(|(i, _)| i)
-        .collect();
+    let cached = cached_commits(backend, &dir, plan);
     let mirrored = plan
         .mirror
         .as_deref()
@@ -99,6 +89,7 @@ pub fn fetch(
         Some(clone) if clone.update => fetch_through_clone(backend, &dir, plan, clone)?,
         _ => Vec::new(),
     };
+    let mut vaulted: Vec<usize> = Vec::new();
     let mut remotes: Vec<Option<&str>> = plan.sources.iter().map(|(r, _)| r.as_deref()).collect();
     remotes.sort_unstable();
     remotes.dedup();
@@ -117,8 +108,31 @@ pub fn fetch(
             .collect();
         refspecs.sort();
         refspecs.dedup();
-        if !refspecs.is_empty() {
-            backend.fetch(&dir, remote.unwrap_or(&plan.url), &refspecs)?;
+        if refspecs.is_empty() {
+            continue;
+        }
+        if let Err(upstream) = backend.fetch(&dir, remote.unwrap_or(&plan.url), &refspecs) {
+            // Locked commits that are gone upstream are still in the vault.
+            let rescued = plan
+                .fallback
+                .as_deref()
+                .filter(|_| remote.is_none())
+                .is_some_and(|mirror| backend.fetch(&dir, mirror, &refspecs).is_ok());
+            if !rescued {
+                return Err(upstream);
+            }
+            vaulted.extend(
+                plan.sources
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, (r, _))| {
+                        r.is_none()
+                            && !cached.contains(i)
+                            && !mirrored.contains(i)
+                            && !through_clone.contains(i)
+                    })
+                    .map(|(i, _)| i),
+            );
         }
     }
     plan.sources
@@ -134,7 +148,7 @@ pub fn fetch(
                 })?;
             let via = if cached.contains(&i) {
                 Via::Cache
-            } else if mirrored.contains(&i) {
+            } else if mirrored.contains(&i) || vaulted.contains(&i) {
                 Via::Mirror
             } else if through_clone.contains(&i) {
                 Via::Clone
@@ -148,6 +162,23 @@ pub fn fetch(
                 via,
             })
         })
+        .collect()
+}
+
+/// The indices of full commit ids already in the cache: commits are
+/// immutable, so one fetched before needs no network.
+fn cached_commits(backend: &dyn GitBackend, dir: &Path, plan: &FetchPlan) -> Vec<usize> {
+    plan.sources
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, source))| {
+            source.is_full_commit()
+                && matches!(
+                    backend.resolve(dir, &source.local_ref(plan.forge, None)),
+                    Ok(Some(_))
+                )
+        })
+        .map(|(i, _)| i)
         .collect()
 }
 

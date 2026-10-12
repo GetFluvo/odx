@@ -23,7 +23,7 @@ Options:
           Override the number of parallel jobs
 
       --prefer-mirror
-          Fetch locked commits from the configured mirror first
+          Fetch locked commits from the configured mirror first (default in CI)
 
       --keep-conflicts
           Keep conflicted working trees for inspection instead of aborting

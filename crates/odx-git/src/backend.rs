@@ -97,6 +97,22 @@ impl SystemGit {
     }
 }
 
+impl SystemGit {
+    /// Push `refspecs` from the repository at `dir` to `url`, atomically
+    /// and never forced: a ref that exists with another value is an error.
+    ///
+    /// # Errors
+    ///
+    /// When the remote cannot be reached or refuses a ref.
+    pub fn push(&self, dir: &Path, url: &str, refspecs: &[String]) -> Result<(), GitError> {
+        let invocation = self
+            .git(Some(dir))
+            .args(["push", "--atomic", "--quiet", "--no-verify", url])
+            .args(refspecs);
+        self.run("push", &invocation).map(drop)
+    }
+}
+
 impl GitBackend for SystemGit {
     fn init_bare(&self, dir: &Path) -> Result<(), GitError> {
         let invocation = self

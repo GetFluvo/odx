@@ -176,7 +176,7 @@ pub struct AggregateArgs {
     /// Only this repository (its `name`, or its URL when unnamed).
     #[arg(long, value_name = "NAME")]
     pub repo: Option<String>,
-    /// Fetch locked commits from the configured mirror first.
+    /// Fetch locked commits from the configured mirror first (default in CI).
     #[arg(long)]
     pub prefer_mirror: bool,
     /// Keep conflicted working trees for inspection instead of aborting.
@@ -195,6 +195,10 @@ pub struct AggregateArgs {
 
 /// Arguments of `odx lock`.
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are independent switches"
+)]
 pub struct LockArgs {
     /// Only this repository (its `name`, or its URL when unnamed).
     #[arg(long, value_name = "NAME")]
@@ -205,6 +209,9 @@ pub struct LockArgs {
     /// Re-resolve every entry instead of keeping existing pins.
     #[arg(long)]
     pub update: bool,
+    /// Do not push locked commits to the configured vault.
+    #[arg(long)]
+    pub no_push: bool,
     /// Apply the configured lock auto-update policy to PyPI packages.
     #[arg(long)]
     pub auto_update: bool,

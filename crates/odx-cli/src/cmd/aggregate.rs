@@ -13,13 +13,15 @@ use odx_aggregate::{
     run_pipeline, strategy, update_lock,
 };
 use odx_config::lock::{LockedRepository, Lockfile};
+use odx_config::schema::RefStyle;
 use odx_config::user::{self, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Project, Source, discover};
 use odx_core::system::OsRunner;
 use odx_core::{Env, Exit};
+use odx_forge::{ForgeClient, ForgeKind, RepoUrl, ReqwestHttp, Visibility};
 use odx_git::{
     Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
-    Outcome, StepOutcome, SystemGit, Via, url_hash,
+    Outcome, StepOutcome, SystemGit, VaultRefs, Via, url_hash, vault,
 };
 
 use super::Report;
@@ -105,6 +107,13 @@ fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared, Report> {
     })
 }
 
+/// Whether odx runs in CI (`CI` set and not `false`), where locked commits
+/// come from the vault first.
+fn in_ci(env: &dyn Env) -> bool {
+    env.var("CI")
+        .is_some_and(|value| !value.is_empty() && value != "false" && value != "0")
+}
+
 /// What a fetch-and-build run produced.
 struct Built {
     plans: Vec<RepoPlan>,
@@ -143,14 +152,13 @@ fn build(
     merger: Option<&Arc<Merger>>,
     prefer_mirror: bool,
 ) -> Built {
-    let mirror = prepared
+    let vault = prepared
         .project
         .config
         .mirror
         .as_ref()
-        .filter(|_| prefer_mirror)
         .map(|mirror| mirror.url.as_str());
-    let mut plans = fetch_plans(planned, mirror);
+    let mut plans = fetch_plans(planned, vault.filter(|_| prefer_mirror), vault);
     for plan in &mut plans {
         plan.plan.clone = prepared.clones.find(&plan.plan.url).cloned();
     }
@@ -336,7 +344,7 @@ fn aggregate(
         &planned,
         &options,
         (!args.fetch_only).then_some(&merger),
-        args.prefer_mirror,
+        args.prefer_mirror || in_ci(ctx.env),
     );
     let mut summary = Summary::new(&built, &planned, &prepared.project.root, false);
     summary.current = current
@@ -416,10 +424,128 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
                 prepared.lock_path.display()
             ));
         }
-    } else if outdated {
-        write_lock(ctx, &prepared, &lock)?;
+    } else {
+        let mut lock = lock;
+        let mut warnings = prepared.project.warnings.clone();
+        if !args.no_push {
+            vault_lock(ctx, &prepared, &mut lock, &mut summary, &mut warnings)?;
+        }
+        if previous != lock {
+            write_lock(ctx, &prepared, &lock)?;
+        }
+        return Ok(summary.report(global.json, false, warnings));
     }
     Ok(summary.report(global.json, false, prepared.project.warnings))
+}
+
+/// Push every locked commit that is not vaulted yet to `[tool.odx.mirror]`
+/// and record its ref, after checking that the vault is not public.
+fn vault_lock(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    lock: &mut Lockfile,
+    summary: &mut Summary,
+    warnings: &mut Vec<odx_config::Problem>,
+) -> Result<(), Report> {
+    let Some(mirror) = prepared
+        .project
+        .config
+        .mirror
+        .as_ref()
+        .filter(|mirror| mirror.push_on_lock != Some(false))
+    else {
+        return Ok(());
+    };
+    let unvaulted = |entry: &LockedRepository| entry.merges.iter().any(|m| m.mirror_ref.is_none());
+    if !lock.repositories.iter().any(unvaulted) {
+        return Ok(());
+    }
+    let refs = vault_refs(ctx, mirror, warnings)?;
+    let git = SystemGit::new(Arc::new(OsRunner));
+    for entry in lock
+        .repositories
+        .iter_mut()
+        .filter(|entry| unvaulted(entry))
+    {
+        let shas: Vec<String> = std::iter::once(entry.base_sha.clone())
+            .chain(entry.merges.iter().map(|m| m.sha.clone()))
+            .collect();
+        match vault(
+            &git,
+            &prepared.cache.repo_dir(&entry.url),
+            &mirror.url,
+            &shas,
+            &refs,
+        ) {
+            Ok(names) => {
+                for (merge, name) in entry.merges.iter_mut().zip(names.into_iter().skip(1)) {
+                    merge.mirror_ref = Some(name);
+                }
+                summary.vaulted.push((entry.name.clone(), shas.len()));
+            }
+            Err(e) => summary
+                .failures
+                .push(format!("{}: vaulting failed: {e}", entry.name)),
+        }
+    }
+    Ok(())
+}
+
+/// The refs vaulted commits get, after checking the vault's visibility on
+/// its forge: a public vault is refused unless `allow_public = true`, and
+/// GitLab vaults use tags (GitLab protects tags, not custom refs).
+fn vault_refs(
+    ctx: &Context<'_>,
+    mirror: &odx_config::schema::Mirror,
+    warnings: &mut Vec<odx_config::Problem>,
+) -> Result<VaultRefs, Report> {
+    let refuse = |message: String| {
+        Report::error(
+            Exit::Failure,
+            format!("{message}; run `odx lock --no-push` to lock without vaulting"),
+        )
+    };
+    let gitlab = match RepoUrl::parse(&mirror.url) {
+        Some(repo) => {
+            let (kind, visibility) = ReqwestHttp::new()
+                .and_then(|http| {
+                    let sleep = std::thread::sleep;
+                    let client = ForgeClient::new(&http, ctx.env, &OsRunner, &sleep);
+                    let kind = client.kind(&repo)?;
+                    client
+                        .visibility(&repo, kind)
+                        .map(|visibility| (kind, visibility))
+                })
+                .map_err(|e| refuse(e.to_string()))?;
+            if visibility == Visibility::Public && mirror.allow_public != Some(true) {
+                return Err(refuse(format!(
+                    "{} is public on {}; odx vaults commits only in private repositories (allow_public = true overrides)",
+                    mirror.url,
+                    kind.name()
+                )));
+            }
+            kind == ForgeKind::Gitlab
+        }
+        None => false,
+    };
+    Ok(match (gitlab, mirror.ref_style) {
+        (true, Some(RefStyle::Refs)) => {
+            warnings.push(odx_config::Problem {
+                key: "tool.odx.mirror.ref_style".to_owned(),
+                message:
+                    "GitLab protects tags, not custom refs; vaulting under refs/tags/odx instead"
+                        .to_owned(),
+            });
+            VaultRefs::Tags
+        }
+        (true, _) | (false, Some(RefStyle::Tags)) => VaultRefs::Tags,
+        (false, _) => VaultRefs::Prefix(
+            mirror
+                .ref_prefix
+                .clone()
+                .unwrap_or_else(|| "refs/odx".to_owned()),
+        ),
+    })
 }
 
 fn relative(dir: &Path, root: &Path) -> String {
@@ -437,6 +563,7 @@ struct Summary {
     builds: Vec<(String, String, Result<Aggregated, String>)>,
     current: Vec<(String, String)>,
     changes: Vec<Change>,
+    vaulted: Vec<(String, usize)>,
     failures: Vec<String>,
     /// Built in scratch working trees (`odx lock`): directories are not
     /// shown.
@@ -480,6 +607,7 @@ impl Summary {
             builds,
             current: Vec::new(),
             changes: Vec::new(),
+            vaulted: Vec::new(),
             failures: Vec::new(),
             scratch,
         }
@@ -561,6 +689,9 @@ impl Summary {
         for change in &self.changes {
             let _ = writeln!(report.out, "{}", describe_change(change));
         }
+        for (name, commits) in &self.vaulted {
+            let _ = writeln!(report.out, "vaulted {name}: {commits} commits");
+        }
         failures.extend(self.failures.iter().cloned());
         if !failures.is_empty() {
             report.error = Some(format!(
@@ -629,6 +760,12 @@ impl Summary {
             })
             .collect();
         value.insert("lock".to_owned(), serde_json::Value::Array(changes));
+        let vaulted: Vec<serde_json::Value> = self
+            .vaulted
+            .iter()
+            .map(|(name, commits)| serde_json::json!({ "repository": name, "commits": commits }))
+            .collect();
+        value.insert("vaulted".to_owned(), serde_json::Value::Array(vaulted));
         let failures = &self.failures;
         value.insert("errors".to_owned(), serde_json::json!(failures));
         serde_json::Value::Object(value)
@@ -702,6 +839,20 @@ mod tests {
         let (entries, failures) = lock_entries(&planned, &built, &Merger::new(Arc::new(OsRunner)));
         assert_eq!(entries, []);
         assert!(failures[0].starts_with("pos: "), "{failures:?}");
+    }
+
+    #[test]
+    fn ci_detection() {
+        assert!(!in_ci(&MapEnv::default()));
+        for (value, ci) in [
+            ("true", true),
+            ("1", true),
+            ("", false),
+            ("false", false),
+            ("0", false),
+        ] {
+            assert_eq!(in_ci(&MapEnv::default().with("CI", value)), ci, "{value:?}");
+        }
     }
 
     #[test]

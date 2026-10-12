@@ -18,6 +18,7 @@ mod lock;
 mod merge;
 mod refs;
 mod run;
+mod vault;
 
 pub use backend::{GitBackend, GitError, SystemGit};
 pub use cache::{Cache, url_hash};
@@ -28,3 +29,4 @@ pub use merge::{Aggregated, Aggregation, MergeError, Merger, Step, StepOutcome, 
 pub use refs::{Forge, Source};
 pub use run::{Limits, Outcome, aggregate_all, fetch_all};
 pub use tokio_util::sync::CancellationToken;
+pub use vault::{VaultRefs, vault};

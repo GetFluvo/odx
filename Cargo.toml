@@ -21,10 +21,13 @@ git-aggregate-rs = { path = "crates/git-aggregate-rs", version = "0.0.4" }
 odx-config = { path = "crates/odx-config", version = "0.0.4" }
 odx-git = { path = "crates/odx-git", version = "0.0.4" }
 odx-aggregate = { path = "crates/odx-aggregate", version = "0.0.4" }
+odx-forge = { path = "crates/odx-forge", version = "0.0.4" }
 
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "blocking", "json", "http2", "charset", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
