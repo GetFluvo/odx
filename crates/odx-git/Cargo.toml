@@ -12,5 +12,13 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[dependencies]
+odx-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+odx-core = { workspace = true, features = ["fakes", "system"] }
+tempfile.workspace = true
+
 [lints]
 workspace = true
