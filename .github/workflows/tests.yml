@@ -69,7 +69,8 @@ jobs:
           dir="$RUNNER_TEMP/mergiraf"
           mkdir -p "$dir"
           curl -sSfL -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
-          echo "$sum  $dir/$asset" | shasum -a 256 -c -
+          if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
+          echo "$sum  $dir/$asset" | $check
           case "$asset" in
             *.zip) unzip -q -o "$dir/$asset" -d "$dir" ;;
             *) tar xzf "$dir/$asset" -C "$dir" ;;
@@ -129,7 +130,8 @@ jobs:
           dir="$RUNNER_TEMP/mergiraf"
           mkdir -p "$dir"
           curl -sSfL -o "$dir/$asset" "https://codeberg.org/mergiraf/mergiraf/releases/download/$VERSION/$asset"
-          echo "$sum  $dir/$asset" | shasum -a 256 -c -
+          if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
+          echo "$sum  $dir/$asset" | $check
           case "$asset" in
             *.zip) unzip -q -o "$dir/$asset" -d "$dir" ;;
             *) tar xzf "$dir/$asset" -C "$dir" ;;

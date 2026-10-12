@@ -64,7 +64,9 @@ mod tests {
             format!("{} is locked by another odx process", path.display())
         );
         drop(held);
-        assert!(RepoLock::acquire(&path, Duration::ZERO).is_ok());
+        // Another test's child process may briefly share the descriptor
+        // between fork and exec, so allow a short wait after the release.
+        assert!(RepoLock::acquire(&path, Duration::from_secs(5)).is_ok());
     }
 
     #[test]
