@@ -13,12 +13,20 @@ fn binary_reports_not_implemented_with_usage_exit() {
 }
 
 #[test]
-fn help_snapshot() {
-    let output = Command::cargo_bin("git-aggregate-rs")
+fn binary_prints_help() {
+    Command::cargo_bin("git-aggregate-rs")
         .unwrap()
         .arg("--help")
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    insta::assert_snapshot!(String::from_utf8(output.stdout).unwrap());
+        .assert()
+        .success();
+}
+
+/// Rendered in-process with a fixed program name, so the snapshot does not
+/// depend on the platform's executable suffix.
+#[test]
+fn help_snapshot() {
+    let mut out = Vec::new();
+    let exit = git_aggregate_rs::run(["git-aggregate-rs", "--help"], &mut out, &mut Vec::new());
+    assert_eq!(exit.code(), 0);
+    insta::assert_snapshot!(String::from_utf8(out).unwrap());
 }
