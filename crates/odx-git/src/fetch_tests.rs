@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use odx_core::system::OsRunner;
 
 use super::*;
+
+/// The lock timeout for fetches that do not test locking.
+const WAIT: Duration = Duration::from_secs(5);
 use crate::{RepoLock, SystemGit};
 
 /// Run git in `dir` and return its trimmed standard output.
@@ -95,7 +98,7 @@ fn fetches_branches_pull_requests_and_commits() {
             (None, Source::Commit(up.feature[..10].to_owned())),
         ],
     };
-    let fetched = fetch(&cache, &system(), &plan, Duration::ZERO).unwrap();
+    let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     let shas: Vec<&str> = fetched.iter().map(|f| f.sha.as_str()).collect();
     assert_eq!(
         shas,
@@ -111,7 +114,7 @@ fn fetches_branches_pull_requests_and_commits() {
         &up.dir,
         &["update-ref", "refs/pull/1/head", &up.merge_request],
     );
-    let again = fetch(&cache, &system(), &plan, Duration::ZERO).unwrap();
+    let again = fetch(&cache, &system(), &plan, WAIT).unwrap();
     assert_eq!(again[1].sha, up.merge_request);
 }
 
@@ -127,7 +130,7 @@ fn gitlab_and_gitea_layouts() {
         sources: vec![(None, Source::Pr(2))],
     };
     assert_eq!(
-        fetch(&cache, &system(), &gitlab, Duration::ZERO).unwrap()[0].sha,
+        fetch(&cache, &system(), &gitlab, WAIT).unwrap()[0].sha,
         up.merge_request
     );
     let gitea = FetchPlan {
@@ -136,7 +139,7 @@ fn gitlab_and_gitea_layouts() {
         sources: vec![(None, Source::Pr(1))],
     };
     assert_eq!(
-        fetch(&cache, &system(), &gitea, Duration::ZERO).unwrap()[0].sha,
+        fetch(&cache, &system(), &gitea, WAIT).unwrap()[0].sha,
         up.pull
     );
 }
@@ -187,7 +190,7 @@ fn one_fetch_per_remote_url() {
         inner: system(),
         urls: Mutex::new(Vec::new()),
     };
-    let fetched = fetch(&cache, &backend, &plan, Duration::ZERO).unwrap();
+    let fetched = fetch(&cache, &backend, &plan, WAIT).unwrap();
     assert_eq!(*backend.urls.lock().unwrap(), [plan.url, fork_url]);
     assert_eq!(fetched[1].sha, fork.feature);
     assert_eq!(fetched[3].sha, fork.pull);
@@ -207,7 +210,7 @@ fn errors() {
         forge: Forge::Github,
         sources: vec![(None, Source::Pr(99))],
     };
-    let err = fetch(&cache, &system(), &missing, Duration::ZERO).unwrap_err();
+    let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("git fetch failed: "), "{err}");
 
     let unreachable = FetchPlan {
@@ -215,13 +218,13 @@ fn errors() {
         ..missing.clone()
     };
     assert!(matches!(
-        fetch(&cache, &system(), &unreachable, Duration::ZERO),
+        fetch(&cache, &system(), &unreachable, WAIT),
         Err(GitError::Failed { .. })
     ));
 
     let no_git = SystemGit::with_program(Arc::new(OsRunner), "odx-surely-missing-git");
     let fresh = Cache::new(tmp.path().join("fresh"));
-    let err = fetch(&fresh, &no_git, &missing, Duration::ZERO).unwrap_err();
+    let err = fetch(&fresh, &no_git, &missing, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git: "), "{err}");
 
     let _held = RepoLock::acquire(&cache.lock_file(&missing.url), Duration::ZERO).unwrap();
