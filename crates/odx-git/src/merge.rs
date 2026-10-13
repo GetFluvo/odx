@@ -335,6 +335,20 @@ impl Merger {
         Ok(changes)
     }
 
+    /// A zip archive of commit `rev` in `repo`, limited to `path` when
+    /// given (entries keep their full path).
+    ///
+    /// # Errors
+    ///
+    /// When git fails, for instance when the commit is not in `repo`.
+    pub fn archive(&self, repo: &Path, rev: &str, path: Option<&str>) -> Result<Vec<u8>, GitError> {
+        let invocation = self
+            .git(repo)
+            .args(["archive", "--format=zip", rev, "--"])
+            .args(path);
+        self.run("archive", &invocation).map(|out| out.stdout)
+    }
+
     /// The content of `path` in the tree (or commit) `rev`, if it exists.
     pub fn show(&self, repo: &Path, rev: &str, path: &str) -> Option<String> {
         self.run(

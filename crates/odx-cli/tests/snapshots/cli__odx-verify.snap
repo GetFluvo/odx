@@ -25,6 +25,9 @@ Options:
       --requirements
           Check the platform requirements file against the provided-package set
 
+      --deployed <DIR>
+          Check the addon directories of a deployment checkout against the vendor manifest
+
       --offline
           Serve forge and index data from the cache only
 

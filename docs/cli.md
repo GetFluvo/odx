@@ -322,6 +322,49 @@ the current format after an odx upgrade changed it.
 Credentials written into URLs (`https://user:token@host/…`) are replaced by
 `***` in everything odx prints.
 
+## Vendoring addon directories
+
+```console
+$ odx vendor                          # every [tool.odx.groups] directory from the lockfiles
+$ odx vendor --requirements           # and the platform requirements file
+$ odx verify --vendored               # the directories are what odx vendor wrote
+$ odx verify --deployed ../deploy     # the same, for a deployment repository checkout
+```
+
+For platforms that receive addon directories (`vendored-source`, `odoo-sh`,
+`custom`), `odx vendor` fills the directory of every dependency group with
+the addons of the packages the group declares in `uv.lock`, and of the addon
+packages they depend on:
+
+- a package from an index comes from its wheel: odx downloads the exact
+  file `uv.lock` names, refuses it when its sha256 differs, keeps it in the
+  cache and copies `odoo/addons/<addon>/` out of it (metadata such as
+  `*.dist-info` stays behind);
+- a package from git comes from the commit `odx.lock` locked, out of the
+  cache, so the vault and `odx lock` decide what is vendored;
+- files matching `[tool.odx.vendor] exclude` (default
+  `static/description/index.html`) are left out.
+
+The group directories belong to odx: they are replaced on every run, which
+is why odx refuses a directory outside the project or one holding a
+`pyproject.toml` or `.git`. Vendoring twice from the same lockfiles writes
+byte-identical files.
+
+The platform only updates an addon when its manifest `version` changes. When
+an addon's content changed but its version did not (a pull request head
+that moved), odx bumps the last segment (`17.0.1.2.0` becomes `17.0.1.2.1`)
+and keeps that version for as long as the content stays the same; turn this
+off with `[tool.odx.vendor] bump_on_content_change = false`. What was
+written, with the wheel hash or commit and content hashes, goes to the
+vendor manifest `.odx/vendor.lock` (`[tool.odx.vendor] manifest`); do not
+commit it.
+
+`odx verify --vendored` fails when a vendored addon changed, is missing or
+is not odx's, and when `uv.lock` or `odx.lock` moved on since `odx vendor`.
+`--deployed <dir>` checks the same directories in another checkout, such as
+the deployment repository before a push. The `generic-wheels` profile
+installs wheels instead, so `odx vendor` only writes its requirements there.
+
 ## Platform requirements
 
 ```console
