@@ -153,6 +153,7 @@ fn execute(
         Command::Stats(args) => cmd::stats::run_stats(args, &cli.global, ctx).emit(out, err),
         Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),
         Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),
+        Command::Migrate(args) => cmd::migrate::run_migrate(args, &cli.global, ctx).emit(out, err),
         Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),
         Command::Drop(args) => cmd::edit::run_drop(args, ctx).emit(out, err),
         command => {

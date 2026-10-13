@@ -29,6 +29,7 @@ Commands:
   stats          Lines of code per language
   upgrade        Module availability and code readiness for the next Odoo series
   port           Port PRs or missing commits to another series; maintainer sweeps; blacklists
+  migrate        Migrate addons to another Odoo series, the OCA way: history, pre-commit and odoo-lint fixes
   promote        Copy exact pins (and optionally code) of modules or a feature between environments
   env            Compare environments
   bot            Upstream dashboard issue and actionable PRs (nightly CI)

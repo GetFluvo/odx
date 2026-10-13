@@ -132,6 +132,8 @@ pub enum Command {
     /// Port PRs or missing commits to another series; maintainer sweeps; blacklists.
     #[command(subcommand)]
     Port(PortCommand),
+    /// Migrate addons to another Odoo series, the OCA way: history, pre-commit and odoo-lint fixes.
+    Migrate(MigrateArgs),
     /// Copy exact pins (and optionally code) of modules or a feature between environments.
     Promote(PromoteArgs),
     /// Compare environments.
@@ -627,6 +629,52 @@ pub struct UpgradeArgs {
     pub no_lint: bool,
 }
 
+/// Arguments of `odx migrate`.
+#[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct MigrateArgs {
+    /// What to migrate.
+    #[command(subcommand)]
+    pub command: Option<MigrateCommand>,
+    /// Go on after resolving a conflict in the addon's history.
+    #[arg(long = "continue", conflicts_with = "abort")]
+    pub resume: bool,
+    /// Give up the migration in progress and delete its branch.
+    #[arg(long)]
+    pub abort: bool,
+}
+
+/// `odx migrate` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum MigrateCommand {
+    /// Migrate one addon on the branch `<to>-mig-<addon>`: its history from the source
+    /// series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the
+    /// `[MIG]` commit.
+    Addon(MigrateAddonArgs),
+}
+
+/// Arguments of `odx migrate addon`.
+#[derive(Debug, Args)]
+pub struct MigrateAddonArgs {
+    /// Addon name.
+    pub addon: String,
+    /// Target series.
+    #[arg(long, value_name = "SERIES")]
+    pub to: String,
+    /// Source series [default: the series before --to].
+    #[arg(long, value_name = "SERIES")]
+    pub from: Option<String>,
+    /// The remote both series come from [default: `upstream` when it exists, else `origin`].
+    #[arg(long, value_name = "NAME")]
+    pub remote: Option<String>,
+    /// Leave out the repository's pre-commit fixes.
+    #[arg(long)]
+    pub no_pre_commit: bool,
+    /// Migrate even when an open pull request already migrates the addon.
+    #[arg(long)]
+    pub force: bool,
+}
+
 /// `odx port` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum PortCommand {
@@ -885,6 +933,7 @@ impl Command {
             Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
             Self::Port(_) => "port",
+            Self::Migrate(_) => "migrate",
             Self::Promote(_) => "promote",
             Self::Env(_) => "env",
             Self::Bot(_) => "bot",
@@ -918,7 +967,7 @@ impl Command {
             | Self::Verdict(_)
             | Self::CheckDeps(_)
             | Self::Upgrade(_) => 7,
-            Self::Port(_) => 8,
+            Self::Port(_) | Self::Migrate(_) => 8,
             Self::Lint(_) => 9,
             Self::Promote(_) | Self::Env(_) => 10,
             Self::Bot(_) => 11,

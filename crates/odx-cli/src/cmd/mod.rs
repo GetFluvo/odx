@@ -24,6 +24,7 @@ pub(crate) mod dev;
 pub(crate) mod doctor;
 pub(crate) mod edit;
 pub(crate) mod hooks;
+pub(crate) mod migrate;
 pub(crate) mod sniff;
 pub(crate) mod stats;
 pub(crate) mod status;
