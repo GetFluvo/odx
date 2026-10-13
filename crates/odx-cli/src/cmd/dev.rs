@@ -96,7 +96,9 @@ fn addons_path(prepared: &Prepared, state: &DevelopState) -> Vec<PathBuf> {
     dirs.extend(planned.into_iter().map(|repo| repo.target_dir));
     dirs.extend(config.group_dirs().into_values().map(|dir| root.join(dir)));
     let mut seen = Vec::new();
-    for dir in dirs.into_iter().filter(|dir| dir.is_dir()) {
+    // Rebuilt from its components: one kind of separator per platform.
+    let native = |dir: PathBuf| dir.components().collect::<PathBuf>();
+    for dir in dirs.into_iter().filter(|dir| dir.is_dir()).map(native) {
         if !seen.contains(&dir) {
             seen.push(dir);
         }

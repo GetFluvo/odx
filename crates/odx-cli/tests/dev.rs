@@ -13,6 +13,11 @@ fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
+/// `path` with the platform's separators, as odx writes it.
+fn native(path: &Path) -> String {
+    path.components().collect::<PathBuf>().display().to_string()
+}
+
 struct Project {
     tmp: tempfile::TempDir,
     root: PathBuf,
@@ -75,7 +80,7 @@ impl Project {
     fn path(&self) -> String {
         ["modules/custom", "vendor/pos", "modules/oca"]
             .iter()
-            .map(|dir| self.root.join(dir).display().to_string())
+            .map(|dir| native(&self.root.join(dir)))
             .collect::<Vec<_>>()
             .join(",")
     }
@@ -100,8 +105,8 @@ fn addons_path_and_odoo_conf() {
         "[packages.p]\nkey = \"p\"\npath = \".src/p/addon\"\n",
     );
     let (_, out, _) = project.odx(&["dev", "--print-addons-path"]);
-    let custom = project.root.join("modules/custom").display().to_string();
-    let src = project.root.join(".src/p").display().to_string();
+    let custom = native(&project.root.join("modules/custom"));
+    let src = native(&project.root.join(".src/p"));
     assert!(out.starts_with(&format!("{custom},{src},")), "{out}");
     std::fs::remove_file(project.root.join(".odx/develop.toml")).unwrap();
 
@@ -150,7 +155,7 @@ fn project_addon_directory_that_is_an_addon() {
     // modules/oca is both a project directory and a group: listed once.
     let expected = ["modules/custom", "modules/oca", "vendor/pos"]
         .iter()
-        .map(|dir| project.root.join(dir).display().to_string())
+        .map(|dir| native(&project.root.join(dir)))
         .collect::<Vec<_>>()
         .join(",");
     assert!(
