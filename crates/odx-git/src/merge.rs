@@ -369,6 +369,25 @@ impl Merger {
         .ok()
     }
 
+    /// The addons at the top level of commit `rev` in `repo`: directories
+    /// with a `__manifest__.py`, sorted.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot read `rev`.
+    pub fn addons(&self, repo: &Path, rev: &str) -> Result<Vec<String>, GitError> {
+        let files = self.stdout(
+            "ls-tree",
+            &self.git(repo).args(["ls-tree", "-r", "--name-only", rev]),
+        )?;
+        Ok(files
+            .lines()
+            .filter_map(|file| file.strip_suffix("/__manifest__.py"))
+            .filter(|dir| !dir.contains('/'))
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// Whether commit `ancestor` is reachable from `rev` in `repo`.
     pub fn contains(&self, repo: &Path, rev: &str, ancestor: &str) -> bool {
         self.run(

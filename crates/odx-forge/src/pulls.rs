@@ -30,6 +30,8 @@ impl PrState {
 /// A pull request as the forge reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequest {
+    /// Its number (`iid` on GitLab).
+    pub number: u64,
     /// Its title.
     pub title: String,
     /// Open, merged or closed.
@@ -68,6 +70,10 @@ fn github_like(value: &Value) -> PullRequest {
         .unwrap_or_default();
     labels.sort();
     PullRequest {
+        number: value
+            .get("number")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
         title: text(value, "/title"),
         state,
         head_sha: text(value, "/head/sha"),
@@ -100,6 +106,7 @@ fn gitlab(value: &Value) -> PullRequest {
         .unwrap_or_default();
     labels.sort();
     PullRequest {
+        number: value.get("iid").and_then(Value::as_u64).unwrap_or_default(),
         title: text(value, "/title"),
         state,
         head_sha: text(value, "/sha"),
@@ -140,6 +147,45 @@ impl ForgeClient<'_> {
     }
 }
 
+impl ForgeClient<'_> {
+    /// The open pull requests of `repo` that target branch `base` (the
+    /// first hundred).
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::NotVisible`] when the forge does not show the
+    /// repository, and network, status, JSON and rate-limit errors.
+    pub fn open_pull_requests(
+        &self,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        base: &str,
+    ) -> Result<Vec<PullRequest>, ForgeError> {
+        let api = Self::repo_api(repo, kind);
+        let url = match kind {
+            ForgeKind::Gitlab => {
+                format!("{api}/merge_requests?state=opened&target_branch={base}&per_page=100")
+            }
+            ForgeKind::Github => format!("{api}/pulls?state=open&base={base}&per_page=100"),
+            ForgeKind::Gitea => format!("{api}/pulls?state=open&limit=50"),
+        };
+        let value = self
+            .json(&url, repo, kind)?
+            .ok_or_else(|| ForgeError::NotVisible(format!("{}/{}", repo.host, repo.path)))?;
+        let parse = match kind {
+            ForgeKind::Gitlab => gitlab,
+            ForgeKind::Github | ForgeKind::Gitea => github_like,
+        };
+        Ok(value
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .map(parse)
+            .filter(|pr| pr.base == base)
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,12 +212,13 @@ mod tests {
 
     #[test]
     fn github_pull_requests() {
-        let open = r#"{"title":"[17.0][FIX] pos","state":"open","merged":false,"merged_at":null,
+        let open = r#"{"number":7,"title":"[17.0][FIX] pos","state":"open","merged":false,"merged_at":null,
             "head":{"sha":"abc"},"base":{"ref":"17.0"},"labels":[{"name":"needs review"},{"name":"bug"}]}"#;
         let (pr, urls) = pull("https://github.com/OCA/pos", ForgeKind::Github, 200, open);
         assert_eq!(
             pr.unwrap(),
             PullRequest {
+                number: 7,
                 title: "[17.0][FIX] pos".to_owned(),
                 state: PrState::Open,
                 head_sha: "abc".to_owned(),
@@ -226,6 +273,53 @@ mod tests {
         }
         let (pr, _) = pull("https://gitlab.com/g/r", ForgeKind::Gitlab, 200, "{}");
         assert_eq!(pr.unwrap().labels, Vec::<String>::new());
+    }
+
+    #[test]
+    fn open_pull_requests_per_forge() {
+        let list = |url: &str, kind: ForgeKind, status: u16, body: &str| {
+            let http = Scripted::new(vec![Ok(reply(status, body))]);
+            let env = MapEnv::default();
+            let runner = ScriptedRunner::default();
+            let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
+            let result = client.open_pull_requests(&RepoUrl::parse(url).unwrap(), kind, "19.0");
+            (result, http.urls())
+        };
+        let github = r#"[{"number":3,"title":"[19.0][MIG] pos_x","state":"open","base":{"ref":"19.0"}},
+            {"number":4,"title":"other","state":"open","base":{"ref":"18.0"}}]"#;
+        let (prs, urls) = list("https://github.com/OCA/pos", ForgeKind::Github, 200, github);
+        let prs = prs.unwrap();
+        assert_eq!((prs.len(), prs[0].number), (1, 3));
+        assert_eq!(
+            urls,
+            ["https://api.github.com/repos/OCA/pos/pulls?state=open&base=19.0&per_page=100"]
+        );
+        let (prs, urls) = list("https://codeberg.org/o/r", ForgeKind::Gitea, 200, github);
+        assert_eq!(prs.unwrap().len(), 1);
+        assert_eq!(
+            urls,
+            ["https://codeberg.org/api/v1/repos/o/r/pulls?state=open&limit=50"]
+        );
+        let gitlab =
+            r#"[{"iid":9,"title":"[19.0][MIG] x","state":"opened","target_branch":"19.0"}]"#;
+        let (prs, urls) = list("https://gitlab.com/g/r", ForgeKind::Gitlab, 200, gitlab);
+        assert_eq!(prs.unwrap()[0].number, 9);
+        assert_eq!(
+            urls,
+            [
+                "https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?state=opened&target_branch=19.0&per_page=100"
+            ]
+        );
+        let (prs, _) = list("https://github.com/o/r", ForgeKind::Github, 200, "{}");
+        assert_eq!(prs.unwrap(), Vec::new());
+        let (prs, _) = list("https://github.com/o/r", ForgeKind::Github, 500, "");
+        assert!(prs.is_err());
+        let (prs, _) = list("https://github.com/o/r", ForgeKind::Github, 404, "");
+        assert!(
+            prs.unwrap_err()
+                .to_string()
+                .starts_with("cannot see github.com/o/r")
+        );
     }
 
     #[test]

@@ -904,3 +904,31 @@ fn commits_ancestry_counts_and_modifications() {
     fs::write(work.join("text.txt"), "mine\n").unwrap();
     assert_eq!(m.modified(&work), [" M text.txt"]);
 }
+
+#[test]
+fn addons_are_directories_with_a_manifest() {
+    let fx = fixture();
+    let up = fx.root.join("up");
+    git(&up, &["checkout", "--quiet", "-b", "addons", "base"]);
+    for file in [
+        "pos_a/__manifest__.py",
+        "pos_b/__manifest__.py",
+        "setup/pos_a/__manifest__.py",
+        "docs/index.md",
+    ] {
+        let path = up.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "{}").unwrap();
+    }
+    git(&up, &["add", "-A"]);
+    git(&up, &["commit", "--quiet", "-m", "addons"]);
+    git(
+        &fx.cache,
+        &["fetch", "--quiet", up.to_str().unwrap(), "addons:addons"],
+    );
+    assert_eq!(
+        merger().addons(&fx.cache, "addons").unwrap(),
+        ["pos_a", "pos_b"]
+    );
+    assert!(merger().addons(&fx.cache, "nope").is_err());
+}

@@ -1821,9 +1821,11 @@ dependencies = [
  "odx-dev",
  "odx-forge",
  "odx-git",
+ "odx-index",
  "odx-platform",
  "odx-sync",
  "odx-vendor",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
@@ -1899,6 +1901,15 @@ dependencies = [
 [[package]]
 name = "odx-index"
 version = "0.0.4"
+dependencies = [
+ "odx-analyze",
+ "odx-core",
+ "odx-forge",
+ "odx-git",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "odx-lint"
