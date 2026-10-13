@@ -370,6 +370,44 @@ pub fn read_group(doc: &DocumentMut, name: &str) -> Option<Group> {
     })
 }
 
+/// Every requirement `doc` declares, with its group.
+///
+/// First `[project] dependencies` (without a group), then each group of
+/// `[project.optional-dependencies]` and `[dependency-groups]`, in order.
+/// Strings that are not requirements are skipped.
+pub fn all_requirements(doc: &DocumentMut) -> Vec<(Option<String>, Requirement)> {
+    let strings = |item: &Item| -> Vec<Requirement> {
+        item.as_array()
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(|value| parse_requirement(value.as_str()?).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut found: Vec<(Option<String>, Requirement)> = get_path(doc, &["project", "dependencies"])
+        .map(strings)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|requirement| (None, requirement))
+        .collect();
+    for table in [
+        GroupTable::OptionalDependencies,
+        GroupTable::DependencyGroups,
+    ] {
+        let groups = get_path(doc, table.path()).and_then(Item::as_table_like);
+        for (name, item) in groups.iter().flat_map(|groups| groups.iter()) {
+            found.extend(
+                strings(item)
+                    .into_iter()
+                    .map(|requirement| (Some(name.to_owned()), requirement)),
+            );
+        }
+    }
+    found
+}
+
 /// Append a requirement string to group `name`, keeping the list's layout.
 ///
 /// Returns `false` when the group does not exist.
@@ -551,6 +589,26 @@ pub fn remove_uv_source(doc: &mut DocumentMut, dist: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_requirement_with_its_group() {
+        let doc: DocumentMut = "[project]\ndependencies = [\"odoo-addon-a\", 1]\n[project.optional-dependencies]\noca = [\"odoo-addon-b>=1\"]\nbad = 3\n[dependency-groups]\ndev = [\"pytest\"]\n"
+            .parse()
+            .unwrap();
+        let found: Vec<(Option<String>, String)> = all_requirements(&doc)
+            .into_iter()
+            .map(|(group, requirement)| (group, requirement.name))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (None, "odoo-addon-a".to_owned()),
+                (Some("oca".to_owned()), "odoo-addon-b".to_owned()),
+                (Some("dev".to_owned()), "pytest".to_owned()),
+            ]
+        );
+        assert_eq!(all_requirements(&DocumentMut::new()), Vec::new());
+    }
 
     #[test]
     fn develop_mode_edits_round_trip() {

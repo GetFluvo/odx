@@ -16,6 +16,7 @@ pub(crate) mod aggregate;
 pub(crate) mod auth;
 pub(crate) mod autoupdate;
 pub(crate) mod build;
+pub(crate) mod check_deps;
 pub(crate) mod compat;
 pub(crate) mod daemon;
 pub(crate) mod dev;

@@ -10,11 +10,20 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --fix
+          Add missing addons the package index has to `[tool.odx.groups] default`
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
+      --unused
+          Also report declared addon packages no scanned addon depends on
+
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --licenses
+          Also check licenses along `depends` (AGPL and GPL need compatible dependers)
 
       --offline
           Serve forge and index data from the cache only
