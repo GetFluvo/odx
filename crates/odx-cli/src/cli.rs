@@ -209,6 +209,9 @@ pub struct LockArgs {
     /// Re-resolve every entry instead of keeping existing pins.
     #[arg(long)]
     pub update: bool,
+    /// Adopt this pull request's new head even when its CI is not green (`<repo>#<pr>`).
+    #[arg(long, value_name = "REPO#PR")]
+    pub follow: Vec<String>,
     /// Do not push locked commits to the configured vault.
     #[arg(long)]
     pub no_push: bool,

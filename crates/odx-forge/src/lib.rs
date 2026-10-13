@@ -7,10 +7,16 @@
 //! times; tokens are sent only to their own host and never appear in
 //! errors.
 
+mod cache;
+mod ci;
 mod client;
 mod http;
+#[cfg(test)]
+mod testing;
 mod url;
 
+pub use cache::CachedHttp;
+pub use ci::{CiReport, CiState};
 pub use client::{ForgeClient, ForgeKind, Visibility, token};
 pub use http::{Http, HttpResponse, ReqwestHttp};
 pub use url::RepoUrl;

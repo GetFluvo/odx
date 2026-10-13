@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use odx_config::OdxConfig;
 use odx_config::lock::{LockSource, LockedRepository, MergeStatus};
-use odx_config::schema::{MergeSource, OnConflict, Repository};
+use odx_config::schema::{MergeSource, OnConflict, OnHeadChange, Repository};
 use odx_core::repo_key;
 use odx_git::{Forge, Source};
 
@@ -29,6 +29,8 @@ pub struct PlannedStep {
     pub skip_on_conflict: bool,
     /// The configured source as `odx.lock` records it.
     pub lock: LockSource,
+    /// What `odx lock --update` does when a pull request's head moved.
+    pub on_head_change: OnHeadChange,
 }
 
 /// One repository to build: the configuration in a form that `[tool.odx]`
@@ -132,6 +134,10 @@ pub fn plan_config(
                     .on_conflict
                     .map_or(default_skip, |c| c == OnConflict::Skip),
                 lock: LockSource::of(merge),
+                on_head_change: merge
+                    .on_head_change
+                    .or(config.on_head_change)
+                    .unwrap_or_default(),
             });
         }
         planned.push(Planned {
@@ -161,8 +167,28 @@ pub fn plan_config(
 /// skipped at lock time that may no longer be skipped. Returns whether it
 /// was pinned.
 pub fn pin(planned: &mut Planned, locked: &[LockedRepository]) -> bool {
+    let Some(entry) = locked_entry(planned, locked) else {
+        return false;
+    };
+    planned.base = PlannedSource {
+        remote: None,
+        source: Source::Commit(entry.base_sha.clone()),
+    };
+    for (step, merge) in planned.steps.iter_mut().zip(&entry.merges) {
+        step.from.source = Source::Commit(merge.sha.clone());
+    }
+    planned.pinned = true;
+    true
+}
+
+/// The entry of `locked` that was locked from the configuration of
+/// `planned`, as [`pin`] decides.
+pub fn locked_entry<'a>(
+    planned: &Planned,
+    locked: &'a [LockedRepository],
+) -> Option<&'a LockedRepository> {
     let key = repo_key(&planned.url);
-    let Some(entry) = locked.iter().find(|entry| {
+    locked.iter().find(|entry| {
         repo_key(&entry.url) == key
             && entry.name == planned.name
             && entry.base == planned.base_name
@@ -175,16 +201,5 @@ pub fn pin(planned: &mut Planned, locked: &[LockedRepository]) -> bool {
                     step.lock == merge.source
                         && (merge.status != MergeStatus::Skipped || step.skip_on_conflict)
                 })
-    }) else {
-        return false;
-    };
-    planned.base = PlannedSource {
-        remote: None,
-        source: Source::Commit(entry.base_sha.clone()),
-    };
-    for (step, merge) in planned.steps.iter_mut().zip(&entry.merges) {
-        step.from.source = Source::Commit(merge.sha.clone());
-    }
-    planned.pinned = true;
-    true
+    })
 }

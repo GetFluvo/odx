@@ -984,6 +984,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

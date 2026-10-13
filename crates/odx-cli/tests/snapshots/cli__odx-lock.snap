@@ -25,17 +25,20 @@ Options:
       --update
           Re-resolve every entry instead of keeping existing pins
 
-      --no-push
-          Do not push locked commits to the configured vault
+      --follow <REPO#PR>
+          Adopt this pull request's new head even when its CI is not green (`<repo>#<pr>`)
 
       --offline
           Serve forge and index data from the cache only
 
-      --auto-update
-          Apply the configured lock auto-update policy to PyPI packages
-
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --no-push
+          Do not push locked commits to the configured vault
+
+      --auto-update
+          Apply the configured lock auto-update policy to PyPI packages
 
       --no-refresh
           Use cached data even when stale

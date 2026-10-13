@@ -234,6 +234,54 @@ impl Merger {
             && self.tree(target, "HEAD").is_ok_and(|head| head == tree)
     }
 
+    /// The top-level directories `sha` changes compared with its merge
+    /// base with `base`: the addons a pull request touches.
+    ///
+    /// # Errors
+    ///
+    /// When git fails.
+    pub fn changed_dirs(
+        &self,
+        repo: &Path,
+        base: &str,
+        sha: &str,
+    ) -> Result<Vec<String>, GitError> {
+        let fork_point = self.stdout(
+            "merge-base",
+            &self.git(repo).args(["merge-base", base, sha]),
+        )?;
+        let paths = self.stdout(
+            "diff",
+            &self.git(repo).args([
+                "diff",
+                "--name-only",
+                "--no-renames",
+                fork_point.as_str(),
+                sha,
+            ]),
+        )?;
+        let mut dirs: Vec<String> = paths
+            .lines()
+            .filter_map(|path| path.split_once('/').map(|(dir, _)| dir.to_owned()))
+            .collect();
+        dirs.dedup();
+        Ok(dirs)
+    }
+
+    /// The top-level directories of commit `rev`: the addons of a
+    /// repository.
+    ///
+    /// # Errors
+    ///
+    /// When git fails.
+    pub fn dirs(&self, repo: &Path, rev: &str) -> Result<Vec<String>, GitError> {
+        let listing = self.stdout(
+            "ls-tree",
+            &self.git(repo).args(["ls-tree", "-d", "--name-only", rev]),
+        )?;
+        Ok(listing.lines().map(str::to_owned).collect())
+    }
+
     /// The tree of commit `rev` in `repo`.
     ///
     /// # Errors

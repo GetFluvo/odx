@@ -2,6 +2,7 @@ use std::path::Path;
 
 use odx_config::compat::{MergeSpec, RepoSpec};
 use odx_config::lock::LockSource;
+use odx_config::schema::OnHeadChange;
 use odx_core::repo_key;
 use odx_git::{Forge, Source};
 
@@ -73,6 +74,7 @@ pub fn plan_yaml(repos: &[RepoSpec], root: &Path) -> Vec<Planned> {
                             source: yaml_source(&merge.reference),
                         },
                         skip_on_conflict: false,
+                        on_head_change: OnHeadChange::Follow,
                         lock: LockSource {
                             pr: None,
                             sha: None,
