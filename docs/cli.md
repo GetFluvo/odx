@@ -525,6 +525,21 @@ writes it, and commits only that file on the branch checked out (`[FW]
 entry is on the target branch upstream, `odx port addon` and `odx suggest`
 skip what it names.
 
+
+```console
+$ odx port sweep --to 19.0 --from 16.0,17.0,18.0
+$ odx port sweep --to 19.0 --from 18.0 --addon 'pos_*' --write-blacklist --open-pr
+```
+
+`odx port sweep` is the maintainer's check before a release: every addon on
+the target series against each source series, with what reached the target
+or a newer source series counted as present. It lists the portable pull
+requests (port them with `odx port addon`) and the false positives:
+migration commits, repo-wide changes and translation updates. With
+`--write-blacklist` it blacklists those false positives with their reason,
+one commit per addon on a branch `<to>-sweep` of the target series;
+`--open-pr` pushes it and opens a draft pull request whose description lists
+the entries and their kinds, with a marker a later sweep finds it by.
 ## Migrating an addon
 
 ```console

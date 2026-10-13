@@ -727,6 +727,33 @@ pub struct PortOptions {
     pub push_remote: Option<String>,
 }
 
+/// Arguments of `odx port sweep`.
+#[derive(Debug, Args)]
+pub struct SweepArgs {
+    /// Target series.
+    #[arg(long, value_name = "SERIES")]
+    pub to: String,
+    /// Source series, comma-separated or repeated.
+    #[arg(long, value_name = "SERIES", required = true, value_delimiter = ',')]
+    pub from: Vec<String>,
+    /// The remote the series come from [default: `upstream` when it exists, else `origin`].
+    #[arg(long, value_name = "NAME")]
+    pub remote: Option<String>,
+    /// Only the addons matching this glob.
+    #[arg(long, value_name = "GLOB")]
+    pub addon: Option<String>,
+    /// Blacklist the false positives (oca-port files) in commits on the branch
+    /// `<to>-sweep`.
+    #[arg(long)]
+    pub write_blacklist: bool,
+    /// Then push the branch and open a draft pull request.
+    #[arg(long, requires = "write_blacklist")]
+    pub open_pr: bool,
+    /// With --open-pr: push to this remote instead of the target or your fork.
+    #[arg(long, value_name = "NAME", requires = "open_pr")]
+    pub push_remote: Option<String>,
+}
+
 /// `odx port` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum PortCommand {
@@ -763,18 +790,10 @@ pub enum PortCommand {
         #[arg(long)]
         reason: String,
     },
-    /// Sweep every addon of a repository against older series (maintainer mode).
-    Sweep {
-        /// Target series.
-        #[arg(long, value_name = "SERIES")]
-        to: String,
-        /// Source series; repeatable.
-        #[arg(long, value_name = "SERIES", required = true)]
-        from: Vec<String>,
-        /// Write oca-port blacklist files for the false positives.
-        #[arg(long)]
-        write_blacklist: bool,
-    },
+    /// Check every addon of the target series against older series (maintainer mode):
+    /// portable pull requests and false positives (migration commits, repo-wide changes,
+    /// translations).
+    Sweep(SweepArgs),
 }
 
 /// Arguments of `odx promote`.
