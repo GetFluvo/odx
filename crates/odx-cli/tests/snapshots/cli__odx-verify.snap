@@ -31,6 +31,9 @@ Options:
       --offline
           Serve forge and index data from the cache only
 
+      --allow-shell
+          Run the `custom` profile's verify hook (also allowed by `[trust]` in the user configuration)
+
       --fresh
           Ignore cached data; refresh everything before answering
 

@@ -108,7 +108,8 @@ impl Project {
                  [[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{url}\"\naddons = [\"pos_x\", \"pos_z\", \"notes\"]\nmerges = [{{ pr = 1 }}]\n\n\
                  [[tool.uv.index]]\nname = \"private\"\nurl = \"https://index.example/simple\"\npublish-url = \"https://index.example/upload\"\n\n\
                  [[tool.uv.index]]\nname = \"pypi\"\nurl = \"https://pypi.org/simple\"\n\n\
-                 [[tool.uv.index]]\nname = \"broken\"\nurl = \"https://broken.example/simple\"\n"
+                 [[tool.uv.index]]\nname = \"broken\"\nurl = \"https://broken.example/simple\"\npublish-url = \"https://broken.example/upload\"\n\n\
+                 [[tool.uv.index]]\nname = \"readonly\"\nurl = \"https://readonly.example/simple\"\n"
             ),
         );
         write(&root.join("modules/c/__manifest__.py"), "{}");
@@ -247,6 +248,10 @@ fn wheels_get_content_derived_versions() {
         ),
         ("nope", "no [[tool.uv.index]] named \"nope\""),
         ("broken", "publish failed: upload refused"),
+        (
+            "readonly",
+            "needs a url (to skip files it already has) and a publish-url",
+        ),
     ] {
         let (exit, _, err) =
             project.odx(&["build", "--addon", "pos_x", "--publish", "--index", index]);

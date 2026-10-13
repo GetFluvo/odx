@@ -31,6 +31,7 @@ use odx_vendor::{Options, Vendored};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare, uv_program};
+use super::hooks::{Hook, Ran, run_hook};
 use crate::Context;
 use crate::cli::{GlobalArgs, VendorArgs};
 
@@ -80,6 +81,18 @@ fn vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
             &mut report,
             &mut json,
         )?;
+    }
+    match run_hook(ctx, &prepared, Hook::Prepare, args.allow_shell) {
+        Ran::Nothing => {}
+        Ran::Succeeded => report.out.push_str("ran the custom prepare hook\n"),
+        Ran::NotAllowed(message) => report.warnings.push(Problem {
+            key: "platform.custom.prepare".to_owned(),
+            message,
+        }),
+        Ran::Failed(message) => {
+            report.exit = Exit::Failure;
+            report.error = Some(message);
+        }
     }
     if global.json {
         report.out = format!("{}\n", serde_json::Value::Object(json));

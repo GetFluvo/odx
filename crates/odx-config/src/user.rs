@@ -1,7 +1,7 @@
 //! The user configuration: machine-wide settings that never live in a
 //! project (`~/.config/odx/config.toml` on Linux).
 //!
-//! Only `[cache]` and `[clones]` are interpreted so far; the other
+//! Only `[cache]`, `[clones]` and `[trust]` are interpreted so far; the other
 //! documented tables are accepted and ignored. Project settings
 //! (repositories, packages, environments) are rejected so a project cannot
 //! be reconfigured from here.
@@ -33,8 +33,30 @@ pub struct UserConfig {
     pub workspaces: Option<IgnoredAny>,
     /// The verdict repository (not interpreted yet).
     pub verdicts: Option<IgnoredAny>,
-    /// Trusted projects (not interpreted yet).
-    pub trust: Option<IgnoredAny>,
+    /// Projects whose shell hooks may run without `--allow-shell`.
+    pub trust: Option<Trust>,
+}
+
+/// `[trust]` of the user configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Trust {
+    /// Project roots (`~/` expanded).
+    #[serde(default)]
+    pub projects: Vec<PathBuf>,
+}
+
+/// Whether the project at `root` is listed under `[trust] projects`.
+pub fn trusted(user: &UserConfig, root: &Path, env: &dyn Env) -> bool {
+    let canonical =
+        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let root = canonical(root);
+    user.trust.as_ref().is_some_and(|trust| {
+        trust
+            .projects
+            .iter()
+            .any(|project| canonical(&expand_home(project, env)) == root)
+    })
 }
 
 /// `[cache]` of the user configuration.
@@ -225,6 +247,21 @@ repo = "https://forge.example/verdicts.git"
 [trust]
 projects = ["/home/dev/p"]
 "#;
+
+    #[test]
+    fn trusted_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = MapEnv::default().with("HOME", tmp.path().display().to_string());
+        let user = parse_user_config(
+            "[trust]\nprojects = [\"/nowhere/at/all\", \"~/p\"]\n",
+            Path::new("c"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.path().join("p")).unwrap();
+        assert!(trusted(&user, &tmp.path().join("p"), &env));
+        assert!(!trusted(&user, tmp.path(), &env));
+        assert!(!trusted(&UserConfig::default(), tmp.path(), &env));
+    }
 
     #[test]
     fn documented_file_parses() {

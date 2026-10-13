@@ -241,6 +241,9 @@ pub struct VendorArgs {
     /// Fail when a requirement excludes the version the platform provides.
     #[arg(long)]
     pub strict: bool,
+    /// Run the `custom` profile's prepare hook (also allowed by `[trust]` in the user configuration).
+    #[arg(long)]
+    pub allow_shell: bool,
 }
 
 /// Arguments of `odx build`.
@@ -281,6 +284,9 @@ pub struct VerifyArgs {
     /// Check the addon directories of a deployment checkout against the vendor manifest.
     #[arg(long, value_name = "DIR")]
     pub deployed: Option<PathBuf>,
+    /// Run the `custom` profile's verify hook (also allowed by `[trust]` in the user configuration).
+    #[arg(long)]
+    pub allow_shell: bool,
 }
 
 /// Arguments of `odx stats`.

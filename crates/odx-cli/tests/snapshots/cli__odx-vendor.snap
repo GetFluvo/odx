@@ -19,6 +19,9 @@ Options:
       --strict
           Fail when a requirement excludes the version the platform provides
 
+      --allow-shell
+          Run the `custom` profile's prepare hook (also allowed by `[trust]` in the user configuration)
+
   -j, --jobs <N>
           Override the number of parallel jobs
 
