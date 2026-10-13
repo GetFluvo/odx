@@ -381,6 +381,21 @@ impl Merger {
         Ok(listing.lines().map(str::to_owned).collect())
     }
 
+    /// The object `spec` names in `repo`, such as `<commit>:<path>` for the
+    /// tree of a directory.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot resolve it.
+    pub fn object(&self, repo: &Path, spec: &str) -> Result<String, GitError> {
+        self.stdout(
+            "rev-parse",
+            &self
+                .git(repo)
+                .args(["rev-parse", "--verify", "--quiet", spec]),
+        )
+    }
+
     /// The tree of commit `rev` in `repo`.
     ///
     /// # Errors

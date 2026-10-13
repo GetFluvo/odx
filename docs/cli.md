@@ -379,6 +379,46 @@ through `requirements.txt` at the root. With `profile = "odoo-sh"`:
 - `odx verify --requirements` also refuses lines Odoo.sh cannot install
   (`name @ git+...`, `-e`, other options).
 
+## Building wheels
+
+```console
+$ odx build                              # every locked repository addon and package
+$ odx build --addon 'pos_*' --project    # some addons, plus the project's own
+$ odx build --publish                    # and upload them to the private index
+```
+
+For platforms that install from an index (`generic-wheels`), released OCA
+addons already are wheels; aggregated, unmerged and private addons are not.
+`odx build` makes them from the locked sources:
+
+1. **What:** the selected addons (`addons`) of every repository in
+   `odx.lock`, taken from the locked result; every package in `odx.lock`,
+   from its locked commit; with `--project` the project's own addons, from
+   the committed `HEAD`. An addon that comes from two sources is refused.
+2. **How:** the addon is exported from the git cache into a scratch
+   directory and built with `uv build --wheel` and its own backend (whool
+   when it declares none, as OCA addons do), with
+   `SOURCE_DATE_EPOCH` set and whool's post-version off.
+3. **Version:** the wheel gets `<manifest version>+odx.<tree>`, or
+   `+odx.pr<N>.<tree>` for a package from a pull request, where `<tree>` is
+   the first twelve hex digits of the git tree of the addon directory. The
+   label is derived from the content alone: building the same locked
+   source anywhere gives the same version, and an addon whose files did
+   not change keeps its version when other addons of its repository move.
+   odx rewrites the wheel with fixed timestamps, so the same source gives
+   the same bytes and hash.
+4. **Lock:** every wheel is recorded in `odx.lock` under `[wheels.<dist>]`
+   with its version, sha256, source and tree; `odx verify --installed`
+   reports an installed version that differs.
+5. **Publish:** `--publish` runs `uv publish --index <name>` for the built
+   wheels; the index is `--index`, else `[tool.odx.platform] index`, else
+   `private`, and must be a `[[tool.uv.index]]` of the project. PyPI is
+   refused: it does not accept local versions. The index is recorded in
+   the wheel entries.
+
+The wheels land in `dist/wheels` (`--out-dir`). Pointing a dependency group
+at the published versions is not automated yet.
+
 ## Installed wheels
 
 ```console

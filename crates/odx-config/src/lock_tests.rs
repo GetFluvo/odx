@@ -182,6 +182,24 @@ fn object_ids_are_checked_everywhere() {
         rev: "a".repeat(64),
     });
     assert!(Lockfile::parse(&sha256.render()).is_ok());
+    let mut wheel = sample();
+    wheel.wheels.insert(
+        "odoo-addon-a".to_owned(),
+        LockedWheel {
+            version: "17.0.1.0.0+odx.0123456789ab".to_owned(),
+            sha256: "sha256:00".to_owned(),
+            index: None,
+            source: "project".to_owned(),
+            tree: "nope".to_owned(),
+        },
+    );
+    assert_eq!(
+        Lockfile::parse(&wheel.render()),
+        Err(LockError::BadObjectId {
+            key: "wheels.odoo-addon-a.tree".to_owned(),
+            value: "nope".to_owned()
+        })
+    );
 }
 
 #[test]
@@ -386,16 +404,32 @@ fn lockfile() -> impl Strategy<Value = Lockfile> {
                 mirror_ref,
             },
         );
+    let wheel = (
+        text(),
+        hex(64),
+        proptest::option::of(text()),
+        text(),
+        hex(40),
+    )
+        .prop_map(|(version, sha256, index, source, tree)| LockedWheel {
+            version,
+            sha256,
+            index,
+            source,
+            tree,
+        });
     (
         proptest::option::of((text(), hex(40)).prop_map(|(url, rev)| OdooPin { url, rev })),
         proptest::collection::vec(repo, 0..3),
         proptest::collection::btree_map("[a-z0-9._-]{1,12}", package, 0..3),
+        proptest::collection::btree_map("[a-z0-9._-]{1,12}", wheel, 0..3),
     )
-        .prop_map(|(odoo, repositories, packages)| Lockfile {
+        .prop_map(|(odoo, repositories, packages, wheels)| Lockfile {
             version: LOCK_VERSION,
             odoo,
             repositories,
             packages,
+            wheels,
         })
 }
 

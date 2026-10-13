@@ -10,6 +10,7 @@ pub mod export;
 pub mod installed;
 pub mod provided;
 pub mod requirements;
+pub mod wheel;
 
 use std::path::{Path, PathBuf};
 

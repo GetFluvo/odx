@@ -745,6 +745,11 @@ fn changed_and_present_directories() {
     assert!(m.changed_files(repo, "nope", &head, None).is_err());
     assert_eq!(m.show(repo, &head, "pos_b/y.py").as_deref(), Some("new"));
     assert_eq!(m.show(repo, &base, "pos_b/y.py"), None);
+    assert_eq!(
+        m.object(repo, &format!("{head}:pos_b")).unwrap(),
+        git(repo, &["rev-parse", &format!("{head}:pos_b")])
+    );
+    assert!(m.object(repo, &format!("{head}:nope")).is_err());
     let zip = m.archive(repo, &head, Some("pos_b")).unwrap();
     assert!(zip.starts_with(b"PK"));
     assert!(m.archive(repo, &head, None).unwrap().len() > zip.len());

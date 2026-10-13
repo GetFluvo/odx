@@ -49,7 +49,7 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
         requirements(ctx, &prepared, &mut problems)?;
     }
     if let Some(dir) = &args.installed {
-        installed(ctx, &prepared, dir, &mut problems);
+        installed(ctx, &prepared, dir, &lock, &mut problems);
     }
     if args.vendored || args.deployed.is_some() {
         vendored(
@@ -400,7 +400,13 @@ fn vendored(
 /// Every distribution installed in `dir` that `uv.lock` knows has the
 /// locked version, the locked commit or the files of the locked wheel, and
 /// no file changed since it was installed.
-fn installed(ctx: &Context<'_>, prepared: &Prepared, dir: &Path, problems: &mut Vec<String>) {
+fn installed(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    dir: &Path,
+    lock: &Lockfile,
+    problems: &mut Vec<String>,
+) {
     let target = ctx.dir.join(dir);
     let Some(site) = site_packages(&target) else {
         problems.push(format!("{}: no site-packages found", target.display()));
@@ -421,6 +427,16 @@ fn installed(ctx: &Context<'_>, prepared: &Prepared, dir: &Path, problems: &mut 
     };
     let cache = prepared.cache.root().join("wheels");
     for dist in scan(&site) {
+        let built = lock
+            .wheels
+            .iter()
+            .find(|(name, _)| normalize_name(name) == dist.name);
+        if let Some((_, wheel)) = built.filter(|(_, wheel)| wheel.version != dist.version) {
+            problems.push(format!(
+                "{} {} is installed, odx build made {}",
+                dist.name, dist.version, wheel.version
+            ));
+        }
         let candidates = uv_lock.packages_named(&dist.name);
         if candidates.is_empty() {
             continue;
