@@ -21,8 +21,6 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 /// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
 const STUBS: &[(&[&str], u8)] = &[
     (&["dashboard"], 7),
-    (&["status"], 7),
-    (&["track"], 7),
     (&["suggest"], 7),
     (&["verdict", "list"], 7),
     (&["check-deps"], 7),
@@ -40,11 +38,7 @@ fn stubbed_commands_report_their_phase_with_usage_exit() {
         let mut argv = vec!["odx"];
         argv.extend_from_slice(args);
         let (exit, out, err) = run(&argv);
-        let name = if args[0] == "track" {
-            "status"
-        } else {
-            args[0]
-        };
+        let name = args[0];
         assert_eq!(exit, Exit::Usage, "{argv:?}");
         assert_eq!(out, "", "{argv:?}");
         assert_eq!(
@@ -87,6 +81,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "sync"][..], "sync", 6),
         (&["odx", "cache", "info"][..], "cache", 6),
         (&["odx", "daemon", "status"][..], "daemon", 6),
+        (&["odx", "track"][..], "status", 7),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));
@@ -130,7 +125,7 @@ fn write_failure_maps_to_failure() {
         }
     }
     assert_eq!(
-        odx_cli::run(["odx", "status"], &mut Broken, &mut Broken),
+        odx_cli::run(["odx", "suggest"], &mut Broken, &mut Broken),
         Exit::Failure
     );
 }
@@ -172,8 +167,8 @@ fn binary_exit_codes() {
         .success();
     Command::cargo_bin("odx")
         .unwrap()
-        .arg("status")
+        .arg("suggest")
         .assert()
         .code(2)
-        .stderr("odx status: not implemented yet (roadmap phase 7)\n");
+        .stderr("odx suggest: not implemented yet (roadmap phase 7)\n");
 }

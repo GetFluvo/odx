@@ -10,8 +10,21 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --sort-by <SORT_BY>
+          Order of the pull requests
+
+          Possible values:
+          - name:   By repository or package, then number
+          - status: Merged first, then closed, open and unknown
+          - date:   By merge date, oldest first; unmerged last
+          
+          [default: name]
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --fail-on-merged
+          Exit 1 when a pull request is merged upstream (for CI)
 
   -j, --jobs <N>
           Override the number of parallel jobs
@@ -38,7 +51,7 @@ Options:
           Errors only
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
   -V, --version
           Print version

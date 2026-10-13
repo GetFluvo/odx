@@ -13,6 +13,7 @@ mod cache;
 mod ci;
 mod client;
 mod http;
+mod pulls;
 pub mod secrets;
 #[cfg(test)]
 mod testing;
@@ -22,6 +23,7 @@ pub use cache::CachedHttp;
 pub use ci::{CiReport, CiState};
 pub use client::{ForgeClient, ForgeKind, Visibility, token, token_source};
 pub use http::{Http, HttpResponse, ReqwestHttp};
+pub use pulls::{PrState, PullRequest};
 pub use url::RepoUrl;
 
 /// Errors from forge APIs.

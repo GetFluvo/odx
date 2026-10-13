@@ -246,6 +246,22 @@ impl<'a> ForgeClient<'a> {
         }
     }
 
+    /// The API URL of `repo` itself, under which its pull requests,
+    /// commits and settings live.
+    pub(crate) fn repo_api(repo: &RepoUrl, kind: ForgeKind) -> String {
+        let origin = repo.origin();
+        match (kind, repo.host.as_str()) {
+            (ForgeKind::Github, "github.com") => {
+                format!("https://api.github.com/repos/{}", repo.path)
+            }
+            (ForgeKind::Github, _) => format!("{origin}/api/v3/repos/{}", repo.path),
+            (ForgeKind::Gitlab, _) => {
+                format!("{origin}/api/v4/projects/{}", repo.path.replace('/', "%2F"))
+            }
+            (ForgeKind::Gitea, _) => format!("{origin}/api/v1/repos/{}", repo.path),
+        }
+    }
+
     /// Which forge hosts `repo`: known hosts by name, others by probing
     /// their API (Gitea/Forgejo, then GitLab, then GitHub Enterprise).
     ///
@@ -283,17 +299,7 @@ impl<'a> ForgeClient<'a> {
     /// [`ForgeError::Json`] for an unexpected answer, and network, status
     /// and rate-limit errors.
     pub fn visibility(&self, repo: &RepoUrl, kind: ForgeKind) -> Result<Visibility, ForgeError> {
-        let origin = repo.origin();
-        let url = match (kind, repo.host.as_str()) {
-            (ForgeKind::Github, "github.com") => {
-                format!("https://api.github.com/repos/{}", repo.path)
-            }
-            (ForgeKind::Github, _) => format!("{origin}/api/v3/repos/{}", repo.path),
-            (ForgeKind::Gitlab, _) => {
-                format!("{origin}/api/v4/projects/{}", repo.path.replace('/', "%2F"))
-            }
-            (ForgeKind::Gitea, _) => format!("{origin}/api/v1/repos/{}", repo.path),
-        };
+        let url = Self::repo_api(repo, kind);
         let value = self
             .json(&url, repo, kind)?
             .ok_or_else(|| ForgeError::NotVisible(format!("{}/{}", repo.host, repo.path)))?;

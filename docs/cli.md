@@ -247,6 +247,35 @@ fetched pos: 3 refs
 built pos in vendor/pos: 1 merged, 1 skipped: #456 conflicts in views.xml (1a2b3c4d5e6f)
 ```
 
+## Upstream status
+
+```console
+$ odx status                      # every tracked pull request (alias: odx track)
+$ odx status --sort-by status     # merged first, then closed, open
+$ odx status --fail-on-merged     # exit 1 when an override can go (for CI)
+$ odx --offline status            # what the cache alone tells
+```
+
+`odx status` lists every merge from a pull request (unless
+`track_upstream = false`) and every locked package from one, with its state
+upstream (open, merged, closed), its labels and title, and how its current
+head relates to the locked commit:
+
+- `same`: nothing changed;
+- `rebased-same-patch`: rebased on a newer base without changing the
+  change; `odx lock --update` adopts it;
+- `changed`: new commits (counted once the cache has them);
+- `orphaned`: force-pushed; the locked commit is no longer in the pull
+  request and survives only in the cache and the vault;
+- `not locked`: run `odx lock`.
+
+Each line ends with advice, such as dropping an override whose pull request
+was merged, or a pin the guard rail keeps. Aggregated working trees with
+local changes are listed at the end. The head is compared with the cache
+(`odx sync` keeps it current), so `--offline` still detects force-pushes; a
+pull request the forge cannot show is reported as a warning while the others
+are listed. `--json` gives the same as data.
+
 ## Locking
 
 ```console
