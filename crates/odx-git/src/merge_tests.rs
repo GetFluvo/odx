@@ -209,7 +209,8 @@ fn rebase_conflicts_return_to_the_result_so_far() {
     assert_eq!(err.to_string(), "b conflicts in text.txt");
     let work = &plan.target_dir;
     assert_eq!(git(work, &["status", "--porcelain"]), "");
-    assert_eq!(git(work, &["log", "-1", "--format=%s"]), "a");
+    // The repository was built again with merge commits, which conflict too.
+    assert_eq!(git(work, &["log", "-1", "--format=%s"]), "Merge a");
 
     let skipping = fx.rebase(&[("a", false), ("b", true), ("clean", false)]);
     let result = merger().aggregate(&skipping).unwrap();
@@ -725,4 +726,124 @@ fn changed_and_present_directories() {
             .changed_dirs(repo, &base, &head)
             .is_err()
     );
+}
+
+/// A pull request whose history merges two branches that both changed the
+/// same line: rebasing linearizes the merge and conflicts, a merge commit
+/// applies the resolved result.
+#[test]
+#[expect(clippy::too_many_lines, reason = "one history, every fallback")]
+fn steps_that_cannot_be_rebased_are_merged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = tmp.path().join("up");
+    fs::create_dir_all(&up).unwrap();
+    git(&up, &["init", "--quiet", "--initial-branch=base"]);
+    fs::write(up.join("f.txt"), "one\n").unwrap();
+    git(&up, &["add", "f.txt"]);
+    git(&up, &["commit", "--quiet", "-m", "base"]);
+    let base = git(&up, &["rev-parse", "HEAD"]);
+    git(&up, &["checkout", "--quiet", "-b", "x"]);
+    fs::write(up.join("f.txt"), "x\n").unwrap();
+    git(&up, &["commit", "--quiet", "-am", "x"]);
+    git(&up, &["checkout", "--quiet", "-b", "pr", "base"]);
+    fs::write(up.join("f.txt"), "y\n").unwrap();
+    git(&up, &["commit", "--quiet", "-am", "y"]);
+    let _ = Command::new("git")
+        .current_dir(&up)
+        .args(["merge", "--quiet", "x"])
+        .output();
+    fs::write(up.join("f.txt"), "xy\n").unwrap();
+    git(&up, &["commit", "--quiet", "-am", "resolved"]);
+    git(&up, &["checkout", "--quiet", "-b", "other", "base"]);
+    fs::write(up.join("g.txt"), "g\n").unwrap();
+    git(&up, &["add", "g.txt"]);
+    git(&up, &["commit", "--quiet", "-m", "other"]);
+    let cache = tmp.path().join("cache.git");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            up.to_str().unwrap(),
+            cache.to_str().unwrap(),
+        ],
+    );
+    let step = |name: &str| Step {
+        label: name.to_owned(),
+        sha: git(&cache, &["rev-parse", name]),
+        skip_on_conflict: false,
+    };
+    let plan = Aggregation {
+        cache_repo: cache.clone(),
+        target_dir: tmp.path().join("work"),
+        base,
+        steps: vec![step("other"), step("pr")],
+        strategy: Strategy::Rebase,
+        mergiraf: None,
+        keep_conflicts: false,
+        force: false,
+    };
+    let built = merger().aggregate(&plan).unwrap();
+    assert_eq!(built.steps[0].1, StepOutcome::Merged);
+    assert_eq!(built.steps[1].1, StepOutcome::MergeCommit);
+
+    // After `x` is rebased, `pr` (which contains the original `x`) conflicts
+    // even as a merge: the repository is built again with merge commits.
+    let both = Aggregation {
+        target_dir: tmp.path().join("both"),
+        steps: vec![step("other"), step("x"), step("pr")],
+        ..plan.clone()
+    };
+    let rebuilt = merger().aggregate(&both).unwrap();
+    assert_eq!(
+        rebuilt
+            .steps
+            .iter()
+            .map(|(_, o)| o.clone())
+            .collect::<Vec<_>>(),
+        [
+            StepOutcome::MergeCommit,
+            StepOutcome::MergeCommit,
+            StepOutcome::MergeCommit
+        ]
+    );
+    assert_eq!(
+        fs::read_to_string(both.target_dir.join("f.txt"))
+            .unwrap()
+            .trim(),
+        "xy"
+    );
+    // Kept conflicts are for inspection: no second build.
+    let kept = Aggregation {
+        target_dir: tmp.path().join("kept"),
+        keep_conflicts: true,
+        ..both
+    };
+    assert!(merger().aggregate(&kept).is_err());
+    assert_eq!(StepOutcome::MergeCommit.status(), "merge-commit");
+    assert_eq!(
+        fs::read_to_string(plan.target_dir.join("f.txt"))
+            .unwrap()
+            .trim(),
+        "xy"
+    );
+    assert_eq!(
+        built.describe(),
+        "1 merged, 1 merged with a merge commit (could not be rebased): pr"
+    );
+
+    // A failing abort while falling back is reported.
+    let fresh = Aggregation {
+        target_dir: tmp.path().join("work2"),
+        ..plan
+    };
+    let err = FailOn::merger("--abort", 1).aggregate(&fresh).unwrap_err();
+    assert!(err.to_string().contains("injected failure"), "{err}");
+    let fresh = Aggregation {
+        target_dir: tmp.path().join("work3"),
+        ..fresh
+    };
+    let err = FailOn::merger("--no-ff", 1).aggregate(&fresh).unwrap_err();
+    assert!(err.to_string().contains("injected failure"), "{err}");
 }

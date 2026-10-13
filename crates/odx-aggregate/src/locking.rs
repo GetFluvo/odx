@@ -31,7 +31,9 @@ pub fn lock_entry(
                 mirror_ref: None,
                 status: match outcome {
                     StepOutcome::Skipped { .. } => MergeStatus::Skipped,
-                    StepOutcome::Merged | StepOutcome::UpToDate => MergeStatus::Merged,
+                    StepOutcome::Merged | StepOutcome::MergeCommit | StepOutcome::UpToDate => {
+                        MergeStatus::Merged
+                    }
                 },
                 upstream_head: None,
                 upstream_head_ci: None,
