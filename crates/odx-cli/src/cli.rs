@@ -122,7 +122,7 @@ pub enum Command {
     /// Compare __manifest__.py dependencies with pyproject.toml.
     CheckDeps,
     /// List database migration scripts introduced by merges.
-    Sniff,
+    Sniff(SniffArgs),
     /// Lines of code per language.
     Stats(StatsArgs),
     /// Module availability and code readiness for the next Odoo series.
@@ -274,6 +274,18 @@ pub struct StatsArgs {
     /// One row per addon instead of per language.
     #[arg(long)]
     pub per_addon: bool,
+}
+
+/// Arguments of `odx sniff`.
+#[derive(Debug, Args)]
+pub struct SniffArgs {
+    /// Compare with odx.lock as committed at this git revision instead of
+    /// each repository's base.
+    #[arg(long, value_name = "REV")]
+    pub since: Option<String>,
+    /// Fail when migration scripts are found (like `[tool.odx.sniff] fail_on_new`).
+    #[arg(long)]
+    pub fail_on_new: bool,
 }
 
 /// Arguments of `odx dev`.
@@ -641,7 +653,7 @@ impl Command {
             Self::Suggest(_) => "suggest",
             Self::Verdict(_) => "verdict",
             Self::CheckDeps => "check-deps",
-            Self::Sniff => "sniff",
+            Self::Sniff(_) => "sniff",
             Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
             Self::Port(_) => "port",
@@ -665,7 +677,7 @@ impl Command {
             Self::Add(_) | Self::Drop(_) | Self::Import(_) | Self::Export(_) => 1,
             Self::Aggregate(_) | Self::GitAggregate(_) => 3,
             Self::Lock(_) | Self::Verify(_) => 4,
-            Self::Vendor(_) | Self::Build(_) | Self::Stats(_) | Self::Sniff => 5,
+            Self::Vendor(_) | Self::Build(_) | Self::Stats(_) | Self::Sniff(_) => 5,
             Self::Dev(_)
             | Self::Sync
             | Self::Daemon(_)

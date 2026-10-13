@@ -29,7 +29,6 @@ const STUBS: &[(&[&str], u8)] = &[
     (&["suggest"], 7),
     (&["verdict", "list"], 7),
     (&["check-deps"], 7),
-    (&["sniff"], 5),
     (&["upgrade", "--target", "19.0"], 7),
     (&["port", "pr", "OCA/contract#1476", "--to", "19.0"], 8),
     (&["promote", "contract"], 10),
@@ -87,6 +86,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "lock"][..], "lock", 4),
         (&["odx", "verify"][..], "verify", 4),
         (&["odx", "stats"][..], "stats", 5),
+        (&["odx", "sniff"][..], "sniff", 5),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));

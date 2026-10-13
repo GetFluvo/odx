@@ -322,6 +322,31 @@ the current format after an odx upgrade changed it.
 Credentials written into URLs (`https://user:token@host/…`) are replaced by
 `***` in everything odx prints.
 
+## Migration scripts
+
+```console
+$ odx sniff                        # what the merges bring on top of each base
+$ odx sniff --since main           # what changed since odx.lock on main (repositories and packages)
+$ odx sniff --fail-on-new          # exit 1 when there are any
+```
+
+A merge that adds `<addon>/migrations/<version>/pre-*.py` (or `post-*`,
+`end-*`, also under `upgrades/` and in OpenUpgrade's
+`openupgrade_scripts/scripts/<addon>/<version>/`) changes the database on
+the next update of that addon. `odx sniff` lists these scripts per addon with
+the addon's version, and flags a version change that comes without any
+migration script (informational: OCA bumps the version for every change).
+Scripts that were already in the base are never reported.
+
+Without `--since`, every locked repository is compared from its base commit
+to its locked result. With `--since <rev>`, the comparison is against
+`odx.lock` as committed at that revision: a repository from its previous
+result (from its base when it is new), a package from its previous commit,
+limited to its subdirectory. `odx aggregate` prints the same report for
+every repository it builds; `[tool.odx.sniff] fail_on_new = true` (or
+`--fail-on-new`) turns any script into a failure. The commits must be in the
+cache, which `odx aggregate` and `odx lock` take care of.
+
 ## Lines of code
 
 ```console

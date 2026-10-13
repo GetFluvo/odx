@@ -10,8 +10,14 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --since <REV>
+          Compare with odx.lock as committed at this git revision instead of each repository's base
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --fail-on-new
+          Fail when migration scripts are found (like `[tool.odx.sniff] fail_on_new`)
 
   -j, --jobs <N>
           Override the number of parallel jobs
