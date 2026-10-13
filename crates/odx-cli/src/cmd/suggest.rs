@@ -9,7 +9,7 @@ use std::time::Duration;
 use odx_config::Problem;
 use odx_core::Exit;
 use odx_core::system::OsRunner;
-use odx_forge::{CachedHttp, Http, RepoUrl, ReqwestHttp};
+use odx_forge::{CachedHttp, Http, ReqwestHttp};
 use odx_git::{FetchPlan, Forge, GitBackend, Source, SystemGit, fetch};
 use odx_index::{AddonIndex, series_key};
 use odx_port::analysis::{Class, Group, Query, Settings, analyse};
@@ -100,6 +100,21 @@ fn involved(args: &SuggestArgs, prepared: &Prepared, targets: &[String]) -> BTre
         .collect()
 }
 
+/// `<owner>/<repo>` of a repository URL: its last two path segments,
+/// without `.git`, as blacklist keys name it.
+///
+/// ```text
+/// https://github.com/OCA/pos.git -> OCA/pos
+/// git@github.com:OCA/pos         -> OCA/pos
+/// ```
+fn repository_name(url: &str) -> String {
+    let path = url.trim_end_matches('/').trim_end_matches(".git");
+    let mut parts = path.rsplit(['/', ':']);
+    let repo = parts.next().unwrap_or_default();
+    let owner = parts.next().unwrap_or_default();
+    format!("{owner}/{repo}")
+}
+
 /// The addon's name on `series`, `target` being where it is `addon`.
 fn name_there(index: &AddonIndex, addon: &str, target: &str, series: &str) -> String {
     if series_key(series) > series_key(target) {
@@ -181,8 +196,7 @@ impl Scan<'_> {
             .show(&target_ref, &blacklist::path(addon))
             .and_then(|text| Blacklist::parse(&text).ok())
             .unwrap_or_default();
-        let repository =
-            RepoUrl::parse(&location.url).map_or_else(|| location.url.clone(), |repo| repo.path);
+        let repository = repository_name(&location.url);
         let query = Query {
             source: &source_ref,
             targets: std::slice::from_ref(&target_ref),

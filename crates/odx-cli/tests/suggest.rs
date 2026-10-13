@@ -53,6 +53,12 @@ fn merged(dir: &Path, series: &str, n: u32, files: &[(&str, &str)], message: &st
     );
 }
 
+/// `<parent>/<name>` of a repository directory, as odx names it.
+fn repo_name(path: &Path) -> String {
+    let name = |p: &Path| p.file_name().unwrap().to_string_lossy().into_owned();
+    format!("{}/{}", name(path.parent().unwrap()), name(path))
+}
+
 fn file_url(path: &Path) -> String {
     let text = path.display().to_string().replace('\\', "/");
     if text.starts_with('/') {
@@ -66,6 +72,7 @@ struct Project {
     _tmp: tempfile::TempDir,
     root: PathBuf,
     url: String,
+    name: String,
     env: MapEnv,
 }
 
@@ -126,8 +133,9 @@ impl Project {
         git(&up, &["checkout", "--quiet", "17.0"]);
         let url = file_url(&up);
         // Blacklist #3 on 17.0, naming the repository as odx does.
+        let name = repo_name(&up);
         let blacklist = format!(
-            "{{\n  \"pull_requests\": {{\n    \"{url}#3\": \"not wanted on 17.0\"\n  }}\n}}\n"
+            "{{\n  \"pull_requests\": {{\n    \"{name}#3\": \"not wanted on 17.0\"\n  }}\n}}\n"
         );
         change(
             &up,
@@ -162,6 +170,7 @@ impl Project {
             _tmp: tmp,
             root,
             url,
+            name,
             env,
         }
     }
@@ -193,7 +202,7 @@ fn suggestions_from_the_series_below_and_above() {
     assert_eq!(exit, Exit::Success, "{err}");
     let (exit, out, err) = project.odx(&["suggest", "--env", "prod", "--addon", "pos_*"]);
     assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
-    let url = &project.url;
+    let url = &project.name;
     assert_eq!(
         out,
         format!(
