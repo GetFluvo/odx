@@ -56,7 +56,7 @@ pub(crate) fn run_suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context
 
 /// The series to suggest for: `--series`, else the series of the
 /// environment `--env` (or of every environment), else the project's.
-fn targets(args: &SuggestArgs, prepared: &Prepared) -> Result<Vec<String>, Report> {
+pub(crate) fn targets(args: &SuggestArgs, prepared: &Prepared) -> Result<Vec<String>, Report> {
     let config = &prepared.project.config;
     if let Some(series) = &args.series {
         return Ok(vec![series.clone()]);
@@ -125,7 +125,7 @@ fn involved(args: &SuggestArgs, prepared: &Prepared, targets: &[String]) -> BTre
 /// https://github.com/OCA/pos.git -> OCA/pos
 /// git@github.com:OCA/pos         -> OCA/pos
 /// ```
-fn repository_name(url: &str) -> String {
+pub(crate) fn repository_name(url: &str) -> String {
     let path = url.trim_end_matches('/').trim_end_matches(".git");
     let mut parts = path.rsplit(['/', ':']);
     let repo = parts.next().unwrap_or_default();
@@ -324,6 +324,7 @@ pub(crate) fn collect(
                 .clone()
                 .filter(|_| *target == config.odoo_version)
                 .or_else(|| index.locate(&addon.name, target).map(|l| l.url.clone()))
+                .or_else(|| addon.url.clone())
             else {
                 continue;
             };
@@ -350,16 +351,16 @@ pub(crate) fn collect(
 }
 
 /// A suggestion with the verdict or mute that concerns it, if any.
-struct Judged<'a> {
-    found: &'a Found,
-    group: &'a Group,
-    verdict: Option<(&'a Entry, Standing)>,
+pub(crate) struct Judged<'a> {
+    pub(crate) found: &'a Found,
+    pub(crate) group: &'a Group,
+    pub(crate) verdict: Option<(&'a Entry, Standing)>,
 }
 
 impl Judged<'_> {
     /// Hidden unless suppressed ones are asked for: blacklisted upstream,
     /// or covered by a verdict or mute in force.
-    fn hidden(&self) -> bool {
+    pub(crate) fn hidden(&self) -> bool {
         self.group.class == Class::Blacklisted
             || self
                 .verdict
@@ -368,7 +369,7 @@ impl Judged<'_> {
 }
 
 /// Match every suggestion with the first verdict or mute in force for it.
-fn judge<'a>(
+pub(crate) fn judge<'a>(
     found: &'a [Found],
     entries: &'a [(PathBuf, Entry)],
     env: Option<&str>,

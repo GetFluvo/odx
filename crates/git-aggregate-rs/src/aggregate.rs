@@ -48,32 +48,40 @@ struct Built {
 }
 
 /// Diagnostics, filtered by `--log-level`.
-struct Log {
+pub(crate) struct Log {
     level: LogLevel,
-    text: String,
+    pub(crate) text: String,
 }
 
 impl Log {
+    /// An empty log at `level`.
+    pub(crate) const fn new(level: LogLevel) -> Self {
+        Self {
+            level,
+            text: String::new(),
+        }
+    }
+
     fn info(&mut self, message: &str) {
         if matches!(self.level, LogLevel::Debug | LogLevel::Info) {
             let _ = writeln!(self.text, "{message}");
         }
     }
 
-    fn warning(&mut self, message: &str) {
+    pub(crate) fn warning(&mut self, message: &str) {
         if !matches!(self.level, LogLevel::Error | LogLevel::Critical) {
             let _ = writeln!(self.text, "warning: {message}");
         }
     }
 
-    fn error(&mut self, message: &str) {
+    pub(crate) fn error(&mut self, message: &str) {
         let _ = writeln!(self.text, "error: {message}");
     }
 }
 
 /// The `repos.yaml` text, with `$VAR` / `${VAR}` expanded when
 /// `--expand-env` is given (the environment wins over `--env-file`).
-fn load_text(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<String, String> {
+pub(crate) fn load_text(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<String, String> {
     let path = ctx.dir.join(&cli.config);
     let text = ctx
         .fs
@@ -127,10 +135,7 @@ pub(crate) fn aggregate(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<Exit> {
-    let mut log = Log {
-        level: cli.log_level,
-        text: String::new(),
-    };
+    let mut log = Log::new(cli.log_level);
     let exit = match prepare_and_run(cli, ctx, &mut log) {
         Ok(built) => {
             if cli.json {

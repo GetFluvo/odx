@@ -19,6 +19,7 @@ pub(crate) mod build;
 pub(crate) mod check_deps;
 pub(crate) mod compat;
 pub(crate) mod daemon;
+pub(crate) mod dashboard;
 pub(crate) mod dev;
 pub(crate) mod doctor;
 pub(crate) mod edit;

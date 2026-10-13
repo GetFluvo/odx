@@ -87,7 +87,11 @@ Differences from `gitaggregate`:
   for a linear history. Either way the resulting trees are identical, which
   CI checks against git-aggregator 4.1.
 - With `-e`, an unset variable is left as written with a warning.
-- `show-closed-prs` and `show-all-prs` land in roadmap phase 7.
+- `show-closed-prs` and `show-all-prs` print git-aggregator's `<url> in
+  state <state> (merged|not merged)` lines on standard output for every
+  `refs/pull/<n>/head` (or GitLab `refs/merge-requests/<n>/head`) merge, on
+  GitHub, GitLab and Gitea/Forgejo alike; a pull request odx cannot read is
+  a warning, not a failure.
 
 The cache and local clones are shared with `odx aggregate` (see
 [Command line](cli.md)).

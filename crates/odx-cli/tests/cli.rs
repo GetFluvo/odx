@@ -20,7 +20,6 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 
 /// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
 const STUBS: &[(&[&str], u8)] = &[
-    (&["dashboard"], 7),
     (&["port", "pr", "OCA/contract#1476", "--to", "19.0"], 8),
     (&["promote", "contract"], 10),
     (&["env", "diff", "19-test", "19-prod"], 10),
@@ -46,11 +45,31 @@ fn stubbed_commands_report_their_phase_with_usage_exit() {
 
 #[test]
 fn git_aggregate_subcommand_uses_the_drop_in() {
-    let (exit, _, err) = run(&["odx", "git-aggregate", "show-all-prs", "-c", "repos.yaml"]);
-    assert_eq!(exit, Exit::Usage);
-    assert_eq!(
-        err,
-        "odx git-aggregate show-all-prs: not implemented yet (roadmap phase 7)\n"
+    let (exit, _, err) = run(&["odx", "git-aggregate", "show-all-prs", "-c", "nowhere.yaml"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.starts_with("error: cannot read "), "{err}");
+    // Merges that are no pull requests, and one on no forge.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("repos.yaml"),
+        "./x:\n  remotes:\n    x: /srv/git/x\n  merges:\n    - x 17.0\n    - x refs/pull/1/merge\n    - x refs/pull/y/head\n    - x refs/merge-requests/2/head\n  target: x agg\n",
+    )
+    .unwrap();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let exit = odx_cli::run_with_env(
+        ["odx", "git-aggregate", "show-closed-prs"],
+        &odx_core::system::OsFs,
+        &odx_core::fake::MapEnv::default(),
+        tmp.path(),
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(exit, Exit::Success);
+    assert_eq!(String::from_utf8(out).unwrap(), "");
+    assert!(
+        String::from_utf8(err)
+            .unwrap()
+            .contains("refs/merge-requests/2/head: not on a forge"),
     );
 }
 
@@ -82,6 +101,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "check-deps"][..], "check-deps", 7),
         (&["odx", "suggest"][..], "suggest", 7),
         (&["odx", "verdict", "sync"][..], "verdict", 7),
+        (&["odx", "dashboard"][..], "dashboard", 7),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));
@@ -125,7 +145,7 @@ fn write_failure_maps_to_failure() {
         }
     }
     assert_eq!(
-        odx_cli::run(["odx", "dashboard"], &mut Broken, &mut Broken),
+        odx_cli::run(["odx", "lint"], &mut Broken, &mut Broken),
         Exit::Failure
     );
 }
@@ -167,8 +187,8 @@ fn binary_exit_codes() {
         .success();
     Command::cargo_bin("odx")
         .unwrap()
-        .arg("dashboard")
+        .arg("lint")
         .assert()
         .code(2)
-        .stderr("odx dashboard: not implemented yet (roadmap phase 7)\n");
+        .stderr("odx lint: not implemented yet (roadmap phase 9)\n");
 }

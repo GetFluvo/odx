@@ -44,6 +44,37 @@ struct Policy {
 /// `odx lock --auto-update`.
 pub(crate) fn auto_update(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
+    let Some((updated, review)) = candidates(ctx, &prepared)? else {
+        return Ok(Report {
+            out: "auto-update is off ([tool.odx.lock.auto_update] policy = \"none\")\n".to_owned(),
+            ..Report::default()
+        });
+    };
+    let mut report = Report::default();
+    if !updated.is_empty() {
+        repin_pyproject(ctx, &prepared, &updated)?;
+        upgrade(ctx, &prepared.project.root, &updated, &mut report);
+    }
+    report.out = if global.json {
+        format!(
+            "{}\n",
+            serde_json::json!({ "schema": 1, "updated": updated, "review": review })
+        )
+    } else {
+        describe(&updated, &review)
+    };
+    Ok(report)
+}
+
+/// Updates the policy takes, and updates it leaves for review.
+pub(crate) type Candidates = (Vec<Update>, Vec<Update>);
+
+/// The updates the auto-update policy would take, and those it leaves for
+/// review; `None` when the policy is `none`.
+pub(crate) fn candidates(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+) -> Result<Option<Candidates>, Report> {
     let config = &prepared.project.config;
     let settings = config
         .lock
@@ -51,10 +82,7 @@ pub(crate) fn auto_update(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repo
         .and_then(|lock| lock.auto_update.clone());
     let settings = settings.as_ref();
     if settings.and_then(|settings| settings.policy) == Some(AutoUpdatePolicy::None) {
-        return Ok(Report {
-            out: "auto-update is off ([tool.odx.lock.auto_update] policy = \"none\")\n".to_owned(),
-            ..Report::default()
-        });
+        return Ok(None);
     }
     let strings = |values: Option<&Vec<String>>, default: &[&str]| {
         values
@@ -100,7 +128,7 @@ pub(crate) fn auto_update(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repo
     }) {
         let checked = ReqwestHttp::new()
             .map_err(download_error(&index))
-            .and_then(|http| check(&http, &index, &prepared, package, &policy));
+            .and_then(|http| check(&http, &index, prepared, package, &policy));
         match checked {
             Ok(Some(update)) if update.reason.is_empty() => updated.push(update),
             Ok(Some(update)) => review.push(update),
@@ -114,20 +142,7 @@ pub(crate) fn auto_update(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repo
             }),
         }
     }
-    let mut report = Report::default();
-    if !updated.is_empty() {
-        repin_pyproject(ctx, &prepared, &updated)?;
-        upgrade(ctx, root, &updated, &mut report);
-    }
-    report.out = if global.json {
-        format!(
-            "{}\n",
-            serde_json::json!({ "schema": 1, "updated": updated, "review": review })
-        )
-    } else {
-        describe(&updated, &review)
-    };
-    Ok(report)
+    Ok(Some((updated, review)))
 }
 
 /// Whether the normalized distribution `name` matches one of `patterns`.

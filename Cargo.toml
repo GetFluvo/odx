@@ -23,6 +23,7 @@ odx-git = { path = "crates/odx-git", version = "0.0.4" }
 odx-aggregate = { path = "crates/odx-aggregate", version = "0.0.4" }
 odx-forge = { path = "crates/odx-forge", version = "0.0.4" }
 odx-analyze = { path = "crates/odx-analyze", version = "0.0.4" }
+odx-dashboard = { path = "crates/odx-dashboard", version = "0.0.4" }
 odx-index = { path = "crates/odx-index", version = "0.0.4" }
 odx-port = { path = "crates/odx-port", version = "0.0.4" }
 odx-verdicts = { path = "crates/odx-verdicts", version = "0.0.4" }

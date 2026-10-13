@@ -428,6 +428,55 @@ pub struct DashboardArgs {
     /// Environment to show; defaults to all.
     #[arg(long, value_name = "ENV")]
     pub env: Option<String>,
+    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, suppressed).
+    #[arg(long, value_name = "SECTION")]
+    pub section: Vec<String>,
+    /// With `--format markdown`, a box per action for the bot to read back.
+    #[arg(long)]
+    pub checkboxes: bool,
+    /// Take an entry's action instead of showing the dashboard.
+    #[command(subcommand)]
+    pub act: Option<DashboardAct>,
+}
+
+/// `odx dashboard act`.
+#[derive(Debug, Subcommand)]
+pub enum DashboardAct {
+    /// Take one entry's action.
+    Act(DashboardActArgs),
+}
+
+/// Arguments of `odx dashboard act`.
+#[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one flag per action, as the command line reads"
+)]
+#[command(group(clap::ArgGroup::new("action").required(true).args(["include", "port", "mute", "drop", "follow"])))]
+pub struct DashboardActArgs {
+    /// The entry id, as the dashboard shows it.
+    pub id: String,
+    /// Add the pull request to the project.
+    #[arg(long)]
+    pub include: bool,
+    /// Port the change upstream.
+    #[arg(long)]
+    pub port: bool,
+    /// Record a mute (or, with an organisation kind, a verdict).
+    #[arg(long)]
+    pub mute: bool,
+    /// Remove the override from the project.
+    #[arg(long)]
+    pub drop: bool,
+    /// Take the index update.
+    #[arg(long)]
+    pub follow: bool,
+    /// Why (mandatory with --mute).
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Kind of the mute or verdict.
+    #[arg(long, value_enum, default_value_t = VerdictKind::NotWanted)]
+    pub kind: VerdictKind,
 }
 
 /// Arguments of `odx suggest`.
