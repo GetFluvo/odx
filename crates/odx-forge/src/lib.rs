@@ -13,6 +13,7 @@ mod cache;
 mod ci;
 mod client;
 mod http;
+mod listing;
 mod pulls;
 pub mod secrets;
 #[cfg(test)]
@@ -49,6 +50,9 @@ pub enum ForgeError {
     /// No forge API was found on the host.
     #[error("{0} does not look like GitHub, GitLab, Gitea or Forgejo")]
     UnknownForge(String),
+    /// The request needs a token and none was found.
+    #[error("{0} needs a token for this request")]
+    TokenRequired(String),
     /// The repository is missing or the token cannot read it.
     #[error("cannot see {0}: it does not exist, or the token for its host cannot read it")]
     NotVisible(String),
