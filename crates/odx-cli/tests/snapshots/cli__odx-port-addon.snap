@@ -2,7 +2,7 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Port an addon's missing commits from another series
+Port the commits an addon has on another series and lacks on the target, grouped by pull request, on the branch `<to>-port-<addon>`
 
 Usage: odx port addon [OPTIONS] --from <SERIES> --to <SERIES> <ADDON>
 
@@ -26,14 +26,26 @@ Options:
   -j, --jobs <N>
           Override the number of parallel jobs
 
+      --remote <NAME>
+          The remote the series come from [default: the one pointing at the pull request's repository; for addons `upstream` when it exists, else `origin`]
+
+      --no-migrate
+          Leave out odoo-lint's upgrade fixes
+
       --offline
           Serve forge and index data from the cache only
 
       --fresh
           Ignore cached data; refresh everything before answering
 
+      --open-pr
+          Then push the branch and open a draft pull request
+
       --no-refresh
           Use cached data even when stale
+
+      --push-remote <NAME>
+          With --open-pr: push to this remote instead of the target or your fork
 
       --refresh-index
           Rebuild the addon index for the series involved

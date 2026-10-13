@@ -482,6 +482,49 @@ per series in the cache's `index/` directory for `[tool.odx.index] ttl`
 (default 7 days); `--refresh-index` asks again, `--offline` uses what is
 cached.
 
+## Porting changes between series
+
+```console
+$ odx port pr OCA/pos#123 --to 19.0              # one pull request
+$ odx port addon pos_x --from 18.0 --to 19.0     # what pos_x lacks on 19.0
+$ odx port --continue                            # after resolving a conflict
+$ odx port --abort
+$ odx port pr OCA/pos#123 --to 19.0 --open-pr    # then push it and open a draft PR
+```
+
+Both run in a clone of the repository and cherry-pick (`git cherry-pick -x`)
+onto a new branch of the target series, `<to>-port-<n>` or
+`<to>-port-<addon>`: authors and dates are kept, you are the committer, and
+each commit says where it was picked from. `odx port pr` asks the forge for
+the pull request's commits and fetches its head from the remote that points
+at the repository (`--remote` to name another). `odx port addon` runs the
+analysis of `odx suggest` on the clone: the changes the addon has on
+`--from` and lacks on `--to` (by patch-id), grouped by pull request; it
+lists what it ports and what it skips (migration commits, repo-wide
+changes, translations, blacklisted pull requests) and ports the rest.
+
+Then odoo-lint's upgrade fixes for the target series run on every addon the
+commits touch, each in a commit `[FW] <addon>: apply <to> migration fixes`
+(`--no-migrate` leaves them out), and what odoo-lint leaves to fix by hand
+is listed. A conflict stops at git's cherry-pick: resolve it, `git add` the
+files, then `odx port --continue`; `odx port --abort` restores what was
+checked out and deletes the branch. With `--open-pr` the branch is pushed
+and a draft pull request `[<to>][FW] ...` opened the way `odx migrate pr`
+does (`--push-remote` to push to a remote of your choice); its description
+lists the ported pull requests and the remaining findings.
+
+```console
+$ odx port blacklist pos_x OCA/pos#123 --reason "superseded on 19.0"
+$ odx port blacklist pos_x orphaned --reason "migration commits"
+```
+
+`odx port blacklist` adds an entry to the addon's oca-port blacklist,
+`.oca/oca-port/blacklist/<addon>.json`, written byte for byte as oca-port
+writes it, and commits only that file on the branch checked out (`[FW]
+<addon>: blacklist 1 port suggestion(s)`). The reason is mandatory. Once the
+entry is on the target branch upstream, `odx port addon` and `odx suggest`
+skip what it names.
+
 ## Migrating an addon
 
 ```console

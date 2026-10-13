@@ -6,11 +6,14 @@
 use std::fmt::Write as _;
 
 use odx_config::Problem;
+use odx_core::Exit;
 use odx_core::system::OsRunner;
-use odx_core::{Exit, Invocation};
-use odx_forge::{ForgeClient, ForgeError, Http, Opened, Proposal, RepoUrl, ReqwestHttp};
+use odx_forge::{ForgeClient, Http, ReqwestHttp};
 use odx_port::migrate::{Finding, Outcome, Plan, Summary, Tools, Worktree};
 
+use super::propose::{
+    Proposed, Pushed, default_remote, forge_repo, git, opened_json, opened_text, propose,
+};
 use super::{Report, output_of};
 use crate::Context;
 use crate::cli::{GlobalArgs, MigrateAddonArgs, MigrateArgs, MigrateCommand, MigratePrArgs};
@@ -170,30 +173,6 @@ fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
     })
 }
 
-fn git(ctx: &Context<'_>) -> Invocation {
-    Invocation::new("git").arg("-C").arg(ctx.dir.as_os_str())
-}
-
-/// `upstream` when the clone has it, else `origin`.
-fn default_remote(ctx: &Context<'_>) -> String {
-    let remotes = output_of(&git(ctx).arg("remote")).unwrap_or_default();
-    let upstream = remotes.lines().any(|remote| remote == "upstream");
-    if upstream { "upstream" } else { "origin" }.to_owned()
-}
-
-/// The repository `remote` points at, when it is on a forge: the URL git
-/// uses, or as configured when `insteadOf` turns it into something that is
-/// not on a forge.
-fn forge_repo(ctx: &Context<'_>, remote: &str) -> Option<RepoUrl> {
-    let key = format!("remote.{remote}.url");
-    let urls = [
-        git(ctx).args(["remote", "get-url", remote]),
-        git(ctx).args(["config", "--get", &key]),
-    ];
-    urls.iter()
-        .find_map(|query| RepoUrl::parse(&output_of(query).unwrap_or_default()))
-}
-
 /// Refuse when an open pull request on the remote's forge already migrates
 /// the addon: the work goes there instead. A forge that cannot be asked is
 /// a warning.
@@ -280,42 +259,6 @@ fn json(summary: &Summary, opened: Option<&Pushed>) -> String {
     format!("{}\n", serde_json::to_string(&done).unwrap_or_default())
 }
 
-/// A pushed branch and the pull request opened for it.
-#[derive(Debug)]
-struct Pushed {
-    /// Where the branch went: a remote or a URL.
-    to: String,
-    opened: Opened,
-    draft: bool,
-}
-
-fn opened_text(pushed: &Pushed) -> String {
-    let draft = if pushed.draft { " as a draft" } else { "" };
-    format!(
-        "pushed to {}\nopened {}{draft}\n",
-        pushed.to, pushed.opened.url
-    )
-}
-
-fn opened_json(pushed: &Pushed) -> serde_json::Value {
-    serde_json::json!({
-        "status": "opened",
-        "pushed_to": pushed.to,
-        "number": pushed.opened.number,
-        "url": pushed.opened.url,
-        "draft": pushed.draft,
-    })
-}
-
-/// Where to push a branch for a fork: like the remote's URL, SSH or HTTPS.
-fn push_url(remote_url: &str, fork: &RepoUrl) -> String {
-    if remote_url.starts_with("git@") || remote_url.starts_with("ssh://") {
-        format!("git@{}:{}.git", fork.host, fork.path)
-    } else {
-        format!("{}/{}.git", fork.origin(), fork.path)
-    }
-}
-
 /// The pull request's description.
 fn body(addon: &str, from: &str, to: &str, findings: &[Finding]) -> String {
     let mut body = format!(
@@ -343,15 +286,6 @@ fn body(addon: &str, from: &str, to: &str, findings: &[Finding]) -> String {
     body
 }
 
-/// A forge error as the report that ends the command.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "`map_err` hands the error over by value"
-)]
-fn failure(e: ForgeError) -> Report {
-    Report::error(Exit::Failure, e.to_string())
-}
-
 /// Push the migration branch checked out and open its pull request.
 fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pushed, Report> {
     let branch = output_of(&git(ctx).args(["branch", "--show-current"])).unwrap_or_default();
@@ -374,90 +308,20 @@ fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pus
             format!("the remote {remote} is not on a forge"),
         ));
     };
-    let sleep = std::thread::sleep;
-    let branch = Branch {
-        name: &branch,
-        addon,
-        from: &from,
-        to,
-        remote: &remote,
-        upstream: &upstream,
-    };
-    ReqwestHttp::new().map_err(failure).and_then(|http| {
-        let client = ForgeClient::new(&http as &dyn Http, ctx.env, &OsRunner, &sleep);
-        push_and_open(ctx, tools, args, &client, &branch)
-    })
-}
-
-/// A migration branch and where it comes from.
-struct Branch<'a> {
-    name: &'a str,
-    addon: &'a str,
-    from: &'a str,
-    to: &'a str,
-    remote: &'a str,
-    upstream: &'a RepoUrl,
-}
-
-/// Push `branch` and open its pull request through `client`.
-fn push_and_open(
-    ctx: &Context<'_>,
-    tools: &Tools,
-    args: &MigratePrArgs,
-    client: &ForgeClient<'_>,
-    branch: &Branch<'_>,
-) -> Result<Pushed, Report> {
-    let Branch {
-        name,
-        addon,
-        from,
-        to,
-        remote,
-        upstream,
-    } = *branch;
-    let kind = client.kind(upstream).map_err(failure)?;
-    let (target, head) = if let Some(other) = &args.push_remote {
-        let head = forge_repo(ctx, other).ok_or_else(|| {
-            Report::error(
-                Exit::Failure,
-                format!("the remote {other} is not on a forge"),
-            )
-        })?;
-        (other.clone(), head)
-    } else if client.can_push(upstream, kind).map_err(failure)? {
-        (remote.to_owned(), upstream.clone())
-    } else {
-        let fork = client.fork(upstream, kind).map_err(failure)?;
-        let url = output_of(&git(ctx).args(["config", "--get", &format!("remote.{remote}.url")]))
-            .unwrap_or_default();
-        (push_url(&url, &fork), fork)
-    };
-    let refspec = format!("HEAD:refs/heads/{name}");
-    super::run_checked(
-        &git(ctx).args(["push", "--quiet", &target, &refspec]),
-        "git push",
-    )
-    .map_err(|e| Report::error(Exit::Failure, e))?;
     let findings = Worktree::new(&OsRunner, &ctx.dir).findings(addon, to, tools);
-    let title = format!("[{to}][MIG] {addon}: Migration to {to}");
-    let body = body(addon, from, to, &findings);
-    let draft = !args.ready;
-    let proposal = Proposal {
-        head: &head,
-        branch: name,
-        base: to,
-        title: &title,
-        body: &body,
-        draft,
-    };
-    let opened = client
-        .open_pull_request(upstream, kind, &proposal)
-        .map_err(failure)?;
-    Ok(Pushed {
-        to: target,
-        opened,
-        draft,
-    })
+    propose(
+        ctx,
+        &Proposed {
+            branch: &branch,
+            base: to,
+            remote: &remote,
+            upstream: &upstream,
+            push_remote: args.push_remote.as_deref(),
+            draft: !args.ready,
+            title: format!("[{to}][MIG] {addon}: Migration to {to}"),
+            body: body(addon, &from, to, &findings),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -470,23 +334,6 @@ mod tests {
         assert_eq!(previous("0.0"), None);
         assert_eq!(previous("x.0"), None);
         assert_eq!(previous("19"), None);
-    }
-
-    #[test]
-    fn fork_push_urls_follow_the_remote() {
-        let fork = RepoUrl::parse("https://github.com/me/pos").unwrap();
-        assert_eq!(
-            push_url("git@github.com:OCA/pos.git", &fork),
-            "git@github.com:me/pos.git"
-        );
-        assert_eq!(
-            push_url("ssh://git@github.com/OCA/pos", &fork),
-            "git@github.com:me/pos.git"
-        );
-        assert_eq!(
-            push_url("https://github.com/OCA/pos", &fork),
-            "https://github.com/me/pos.git"
-        );
     }
 
     #[test]

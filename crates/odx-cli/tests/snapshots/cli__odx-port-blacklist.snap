@@ -1,0 +1,54 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Add an entry to an addon's oca-port blacklist and commit it on the branch checked out: `.oca/oca-port/blacklist/<addon>.json`, written as oca-port writes it
+
+Usage: odx port blacklist [OPTIONS] --reason <REASON> <ADDON> <ENTRY>
+
+Arguments:
+  <ADDON>
+          Addon name
+
+  <ENTRY>
+          The pull request, for example `OCA/contract#1201`, or `orphaned` for the addon's orphaned commits
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --reason <REASON>
+          Why it is not ported; mandatory
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
