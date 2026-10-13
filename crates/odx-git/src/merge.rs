@@ -6,6 +6,11 @@ use std::sync::Arc;
 use odx_core::{Invocation, Output, ProcessRunner};
 
 use crate::GitError;
+use crate::lock::RepoLock;
+
+/// How long a build waits for another to finish preparing its working
+/// tree of the same cache repository.
+const WORKTREE_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// One merge to apply on top of the base.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -590,6 +595,10 @@ impl Merger {
     fn prepare(&self, plan: &Aggregation) -> Result<(), MergeError> {
         let cache = &plan.cache_repo;
         let target = &plan.target_dir;
+        // Pruning while another build adds a working tree of the same cache
+        // repository breaks the other's half-made metadata: one at a time.
+        // Without the lock (a read-only cache), builds go on as before.
+        let _worktrees = RepoLock::acquire(&cache.join("odx-worktrees.lock"), WORKTREE_WAIT).ok();
         self.run("worktree", &self.git(cache).args(["worktree", "prune"]))?;
         let empty = fs::read_dir(target).is_ok_and(|mut entries| entries.next().is_none());
         if target.exists() && !empty {
