@@ -357,6 +357,55 @@ impl Merger {
         self.run("archive", &invocation).map(|out| out.stdout)
     }
 
+    /// The commit `rev` names in `repo`, if it names one there.
+    pub fn commit(&self, repo: &Path, rev: &str) -> Option<String> {
+        self.stdout(
+            "rev-parse",
+            &self
+                .git(repo)
+                .args(["rev-parse", "--verify", "--quiet"])
+                .arg(format!("{rev}^{{commit}}")),
+        )
+        .ok()
+    }
+
+    /// Whether commit `ancestor` is reachable from `rev` in `repo`.
+    pub fn contains(&self, repo: &Path, rev: &str, ancestor: &str) -> bool {
+        self.run(
+            "merge-base",
+            &self
+                .git(repo)
+                .args(["merge-base", "--is-ancestor", ancestor, rev]),
+        )
+        .is_ok()
+    }
+
+    /// How many commits `rev` has that `since` has not.
+    pub fn count(&self, repo: &Path, since: &str, rev: &str) -> Option<usize> {
+        self.stdout(
+            "rev-list",
+            &self
+                .git(repo)
+                .args(["rev-list", "--count"])
+                .arg(format!("{since}..{rev}")),
+        )
+        .ok()
+        .and_then(|count| count.parse().ok())
+    }
+
+    /// The changed paths of the working tree `target` (`git status
+    /// --porcelain` lines); none when it is no working tree.
+    pub fn modified(&self, target: &Path) -> Vec<String> {
+        self.run("status", &self.git(target).args(["status", "--porcelain"]))
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The content of `path` in the tree (or commit) `rev`, if it exists.
     pub fn show(&self, repo: &Path, rev: &str, path: &str) -> Option<String> {
         self.run(

@@ -113,7 +113,7 @@ pub enum Command {
     Dashboard(DashboardArgs),
     /// Aggregation and upstream status per merge and package.
     #[command(visible_alias = "track")]
-    Status,
+    Status(StatusArgs),
     /// Upstream changes on other series that touch your modules.
     Suggest(SuggestArgs),
     /// Record, list, revoke and share decisions about upstream changes.
@@ -692,6 +692,28 @@ pub struct SyncArgs {
     pub max_duration: Option<String>,
 }
 
+/// Arguments of `odx status`.
+#[derive(Debug, Args)]
+pub struct StatusArgs {
+    /// Order of the pull requests.
+    #[arg(long, value_enum, default_value_t = StatusSort::Name)]
+    pub sort_by: StatusSort,
+    /// Exit 1 when a pull request is merged upstream (for CI).
+    #[arg(long)]
+    pub fail_on_merged: bool,
+}
+
+/// How `odx status` orders pull requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StatusSort {
+    /// By repository or package, then number.
+    Name,
+    /// Merged first, then closed, open and unknown.
+    Status,
+    /// By merge date, oldest first; unmerged last.
+    Date,
+}
+
 /// Arguments of `odx lint`.
 #[derive(Debug, Args)]
 pub struct LintArgs {
@@ -740,7 +762,7 @@ impl Command {
             Self::Export(_) => "export",
             Self::GitAggregate(_) => "git-aggregate",
             Self::Dashboard(_) => "dashboard",
-            Self::Status => "status",
+            Self::Status(_) => "status",
             Self::Suggest(_) => "suggest",
             Self::Verdict(_) => "verdict",
             Self::CheckDeps => "check-deps",
@@ -776,7 +798,7 @@ impl Command {
             | Self::Doctor
             | Self::Auth(_) => 6,
             Self::Dashboard(_)
-            | Self::Status
+            | Self::Status(_)
             | Self::Suggest(_)
             | Self::Verdict(_)
             | Self::CheckDeps

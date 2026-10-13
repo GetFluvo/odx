@@ -110,7 +110,8 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         force: false,
         bundle_dir: None,
         locked: false,
-        update: false,
+        // Current heads of pull requests, not only the locked commits.
+        update: true,
     };
     let quiet = GlobalArgs {
         project_dir: None,

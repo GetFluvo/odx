@@ -884,3 +884,23 @@ fn steps_that_cannot_be_rebased_are_merged() {
     let err = FailOn::merger("--no-ff", 1).aggregate(&fresh).unwrap_err();
     assert!(err.to_string().contains("injected failure"), "{err}");
 }
+
+#[test]
+fn commits_ancestry_counts_and_modifications() {
+    let fx = fixture();
+    let m = merger();
+    let a = fx.sha("a");
+    assert_eq!(m.commit(&fx.cache, "a").as_deref(), Some(a.as_str()));
+    assert_eq!(m.commit(&fx.cache, "nope"), None);
+    assert!(m.contains(&fx.cache, &a, &fx.base));
+    assert!(!m.contains(&fx.cache, &fx.base, &a));
+    assert!(!m.contains(&fx.cache, &a, &"0".repeat(40)));
+    assert_eq!(m.count(&fx.cache, &fx.base, &a), Some(1));
+    assert_eq!(m.count(&fx.cache, &fx.base, "nope"), None);
+    assert_eq!(m.modified(&fx.root.join("nowhere")), Vec::<String>::new());
+    m.aggregate(&fx.plan(&[("a", false)])).unwrap();
+    let work = fx.root.join("work").join("pos");
+    assert_eq!(m.modified(&work), Vec::<String>::new());
+    fs::write(work.join("text.txt"), "mine\n").unwrap();
+    assert_eq!(m.modified(&work), [" M text.txt"]);
+}

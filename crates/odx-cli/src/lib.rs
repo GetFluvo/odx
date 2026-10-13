@@ -133,6 +133,7 @@ fn execute(
         Command::Daemon(command) => {
             cmd::daemon::run_daemon(command, &cli.global, ctx).emit(out, err)
         }
+        Command::Status(args) => cmd::status::run_status(args, &cli.global, ctx).emit(out, err),
         Command::Doctor => cmd::doctor::run_doctor(&cli.global, ctx).emit(out, err),
         Command::Dev(args) => cmd::dev::run_dev(args, &cli.global, ctx).emit(out, err),
         Command::Build(args) => cmd::build::run_build(args, &cli.global, ctx).emit(out, err),
