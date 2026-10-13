@@ -64,8 +64,10 @@ pub struct Aggregation {
 /// What happened to one merge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepOutcome {
-    /// A merge commit was created.
+    /// The step was applied: rebased, or merged with the merge strategy.
     Merged,
+    /// The step could not be rebased and was merged with a merge commit.
+    MergeCommit,
     /// The commit was already part of the result.
     UpToDate,
     /// The merge conflicted and was skipped (`on_conflict = "skip"`).
@@ -76,10 +78,27 @@ pub enum StepOutcome {
 }
 
 impl StepOutcome {
+    /// The outcome of a merge made because the step could not be rebased.
+    ///
+    /// ```
+    /// use odx_git::StepOutcome;
+    ///
+    /// assert_eq!(StepOutcome::Merged.instead_of_rebase(), StepOutcome::MergeCommit);
+    /// assert_eq!(StepOutcome::UpToDate.instead_of_rebase(), StepOutcome::UpToDate);
+    /// ```
+    #[must_use]
+    pub fn instead_of_rebase(self) -> Self {
+        match self {
+            Self::Merged => Self::MergeCommit,
+            other => other,
+        }
+    }
+
     /// `merged`, `up-to-date` or `skipped`, as in machine-readable output.
     pub const fn status(&self) -> &'static str {
         match self {
             Self::Merged => "merged",
+            Self::MergeCommit => "merge-commit",
             Self::UpToDate => "up-to-date",
             Self::Skipped { .. } => "skipped",
         }
@@ -126,9 +145,22 @@ impl Aggregated {
                 _ => None,
             })
             .collect();
+        let fallbacks: Vec<&str> = self
+            .steps
+            .iter()
+            .filter(|(_, outcome)| *outcome == StepOutcome::MergeCommit)
+            .map(|(label, _)| label.as_str())
+            .collect();
         let mut parts = Vec::new();
         if merged > 0 {
             parts.push(format!("{merged} merged"));
+        }
+        if !fallbacks.is_empty() {
+            parts.push(format!(
+                "{} merged with a merge commit (could not be rebased): {}",
+                fallbacks.len(),
+                fallbacks.join(", ")
+            ));
         }
         if current > 0 {
             parts.push(format!("{current} up to date"));
@@ -352,6 +384,30 @@ impl Merger {
     /// cannot be reset without `force`, [`MergeError::Conflict`] when a
     /// step conflicts and is not allowed to be skipped, and git failures.
     pub fn aggregate(&self, plan: &Aggregation) -> Result<Aggregated, MergeError> {
+        let built = self.build(plan);
+        // Rebased copies of earlier steps can make a later step conflict
+        // where the original commits would not: the whole repository is
+        // then built again with merge commits, as git-aggregator does.
+        match (&built, plan.strategy, plan.keep_conflicts) {
+            (Err(MergeError::Conflict { .. }), Strategy::Rebase, false) => {
+                let merged = Aggregation {
+                    strategy: Strategy::Merge,
+                    ..plan.clone()
+                };
+                self.build(&merged).map(|built| Aggregated {
+                    steps: built
+                        .steps
+                        .into_iter()
+                        .map(|(label, outcome)| (label, outcome.instead_of_rebase()))
+                        .collect(),
+                    ..built
+                })
+            }
+            _ => built,
+        }
+    }
+
+    fn build(&self, plan: &Aggregation) -> Result<Aggregated, MergeError> {
         self.prepare(plan)?;
         let identity = self.identity(&plan.target_dir)?;
         let attributes = match &plan.mergiraf {
@@ -460,6 +516,10 @@ impl Merger {
         })
     }
 
+    /// Apply `step` with the plan's strategy. A step that cannot be rebased
+    /// (its range replays merges that conflict when linearized) is merged
+    /// with a merge commit instead; only when that conflicts too is the
+    /// step a conflict.
     fn merge(
         &self,
         plan: &Aggregation,
@@ -467,8 +527,38 @@ impl Merger {
         identity: &[(&str, &str)],
         attributes: Option<&Path>,
     ) -> Result<StepOutcome, MergeError> {
+        let before = self.stdout(
+            "rev-parse",
+            &self.git(&plan.target_dir).args(["rev-parse", "HEAD"]),
+        )?;
+        if plan.strategy == Strategy::Rebase {
+            match self.attempt(plan, step, identity, attributes, Strategy::Rebase, &before)? {
+                Ok(outcome) => return Ok(outcome),
+                Err(_) => self.abandon(plan, Strategy::Rebase, &before)?,
+            }
+            return match self.attempt(plan, step, identity, attributes, Strategy::Merge, &before)? {
+                Ok(outcome) => Ok(outcome.instead_of_rebase()),
+                Err(files) => self.conflict(plan, step, files, &before),
+            };
+        }
+        match self.attempt(plan, step, identity, attributes, Strategy::Merge, &before)? {
+            Ok(outcome) => Ok(outcome),
+            Err(files) => self.conflict(plan, step, files, &before),
+        }
+    }
+
+    /// Run `strategy` for `step`: the outcome, or the conflicting files with
+    /// the operation still in progress.
+    fn attempt(
+        &self,
+        plan: &Aggregation,
+        step: &Step,
+        identity: &[(&str, &str)],
+        attributes: Option<&Path>,
+        strategy: Strategy,
+        before: &str,
+    ) -> Result<Result<StepOutcome, Vec<String>>, MergeError> {
         let target = &plan.target_dir;
-        let before = self.stdout("rev-parse", &self.git(target).args(["rev-parse", "HEAD"]))?;
         let mut invocation = self.git(target);
         if let (Some(program), Some(attributes)) = (&plan.mergiraf, attributes) {
             let mut driver = program.clone();
@@ -486,8 +576,7 @@ impl Merger {
         for (key, value) in identity {
             invocation = invocation.env(*key, *value);
         }
-        let command = plan.strategy.command();
-        let invocation = match plan.strategy {
+        let invocation = match strategy {
             Strategy::Merge => invocation
                 .args(["merge", "--no-ff", "--no-edit", "--quiet", "-m"])
                 .arg(format!("Merge {}", step.label))
@@ -505,7 +594,7 @@ impl Merger {
                         "rebase.updateRefs=false",
                     ])
                     .args(["rebase", "--quiet", "--no-autostash", "--onto"])
-                    .arg(&before)
+                    .arg(before)
                     .arg(fork_point)
                     .arg(&step.sha)
             }
@@ -513,11 +602,11 @@ impl Merger {
         let output = self.runner.run(&invocation).map_err(GitError::Io)?;
         if output.success() {
             let after = self.stdout("rev-parse", &self.git(target).args(["rev-parse", "HEAD"]))?;
-            return Ok(if after == before {
+            return Ok(Ok(if after == before {
                 StepOutcome::UpToDate
             } else {
                 StepOutcome::Merged
-            });
+            }));
         }
         let files: Vec<String> = self
             .stdout(
@@ -531,22 +620,45 @@ impl Merger {
             .collect();
         if files.is_empty() {
             return Err(MergeError::Git(GitError::Failed {
-                command: command.to_owned(),
+                command: strategy.command().to_owned(),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             }));
         }
+        Ok(Err(files))
+    }
+
+    /// Abort `strategy` in progress and return to `before` (an aborted
+    /// rebase returns to the step's commit, not to the result so far).
+    fn abandon(
+        &self,
+        plan: &Aggregation,
+        strategy: Strategy,
+        before: &str,
+    ) -> Result<(), GitError> {
+        let target = &plan.target_dir;
+        let command = strategy.command();
+        self.run(command, &self.git(target).args([command, "--abort"]))?;
+        self.run(
+            "checkout",
+            &self
+                .git(target)
+                .args(["checkout", "--detach", "--force", "--quiet"])
+                .arg(before),
+        )
+        .map(drop)
+    }
+
+    /// A merge that conflicted: skipped, kept for inspection, or aborted.
+    fn conflict(
+        &self,
+        plan: &Aggregation,
+        step: &Step,
+        files: Vec<String>,
+        before: &str,
+    ) -> Result<StepOutcome, MergeError> {
         let keep = plan.keep_conflicts && !step.skip_on_conflict;
         if !keep {
-            self.run(command, &self.git(target).args([command, "--abort"]))?;
-            // An aborted rebase returns to the step's commit, not to the
-            // result so far.
-            self.run(
-                "checkout",
-                &self
-                    .git(target)
-                    .args(["checkout", "--detach", "--force", "--quiet"])
-                    .arg(&before),
-            )?;
+            self.abandon(plan, Strategy::Merge, before)?;
         }
         if step.skip_on_conflict {
             Ok(StepOutcome::Skipped { files })

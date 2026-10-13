@@ -111,7 +111,13 @@ Each repository is checked out from the cache at its base branch into
 and its merges are applied in order. By default each merge is rebased onto
 the result so far (`merge_strategy = "rebase"`), so history stays linear and
 commits that are already applied are dropped; `merge_strategy = "merge"`
-creates one merge commit per merge instead (`git merge --no-ff`). The
+creates one merge commit per merge instead (`git merge --no-ff`).
+A pull request that cannot be rebased (its history merges branches whose
+changes conflict when replayed one by one) is merged with a merge commit
+instead; when earlier rebased steps keep a later one from merging, the
+repository is built again with merge commits throughout. Either way the
+summary says so (`merged with a merge commit (could not be rebased): #123`),
+and the result has the same files as merging. The
 working tree is a detached checkout of the shared cache, so several projects
 can use the same cache without their branch names getting in each other's
 way.
