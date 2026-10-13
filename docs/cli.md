@@ -342,6 +342,11 @@ upstream is always a person's decision and lands with `odx port`. With
 odx:<action> <id> -->` for the bot to read back once ticked. `--json` gives
 the model.
 
+A built dashboard is kept in the cache; for `[tool.odx.cache] ttl.pr_state`
+(default 30 minutes) `odx dashboard` shows it at once, with how old it is,
+and `--fresh` rebuilds it. `odx sync` rebuilds it for every workspace, and
+brings the verdict repository up to date on the way.
+
 ## Verdicts and mutes
 
 ```console

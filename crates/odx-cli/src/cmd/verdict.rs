@@ -59,7 +59,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 
 /// `[tool.odx] project_id`, else the first twelve hex digits of the SHA-256
 /// of the project repository's `origin` URL (or of its path).
-fn project_id(prepared: &Prepared) -> String {
+pub(crate) fn project_id(prepared: &Prepared) -> String {
     let root = &prepared.project.root;
     prepared
         .project

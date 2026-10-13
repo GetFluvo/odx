@@ -265,18 +265,38 @@ fn sync_one(
     quiet: &GlobalArgs,
     workspace: &Context<'_>,
 ) -> (&'static str, String) {
+    let prepared = match prepare(quiet, workspace) {
+        Ok(prepared) => prepared,
+        Err(error) => return ("failed", first_line(&error.error.unwrap_or_default())),
+    };
     let report = run_aggregate(fetch, quiet, workspace);
     if let Some(error) = report.error {
         return ("failed", first_line(&error));
     }
     let fetched = first_line(&report.out);
-    match prepare(quiet, workspace).and_then(|prepared| prefetch_wheels(workspace, &prepared)) {
-        Ok(0) => ("synced", fetched),
-        Ok(wheels) => ("synced", format!("{fetched}; {wheels} wheels cached")),
+    let detail = match prefetch_wheels(workspace, &prepared) {
+        Ok(0) => fetched,
+        Ok(wheels) => format!("{fetched}; {wheels} wheels cached"),
+        Err(error) => {
+            return (
+                "failed",
+                format!(
+                    "{fetched}; wheels: {}",
+                    first_line(&error.error.unwrap_or_default())
+                ),
+            );
+        }
+    };
+    // Forge state, suggestions and verdicts, kept for `odx dashboard`.
+    match super::dashboard::refresh(workspace, &prepared, quiet) {
+        Ok(entries) => (
+            "synced",
+            format!("{detail}; dashboard of {entries} entries"),
+        ),
         Err(error) => (
             "failed",
             format!(
-                "{fetched}; wheels: {}",
+                "{detail}; dashboard: {}",
                 first_line(&error.error.unwrap_or_default())
             ),
         ),

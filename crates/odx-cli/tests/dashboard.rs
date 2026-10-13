@@ -177,7 +177,7 @@ impl Setup {
         std::fs::write(
             project.join("pyproject.toml"),
             format!(
-                "[project]\nname = \"p\"\nversion = \"1\"\ndependencies = [\"odoo-addon-web-z\"]\n\n[tool.odx]\nodoo_version = \"17.0\"\nmergiraf = \"never\"\n\n[tool.odx.port]\ndefault_from = [\"16.0\", \"18.0\"]\n\n[tool.odx.environments.env.prod]\n\n[tool.odx.environments.env.next]\nseries = \"18.0\"\n\n[tool.odx.lock.auto_update]\ncontent_check = false\n\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{api}/OCA/pos.git\"\naddons = [\"pos_x\"]\nmerges = [{{ pr = 1 }}]\n"
+                "[project]\nname = \"p\"\nversion = \"1\"\ndependencies = [\"odoo-addon-web-z\"]\n\n[tool.odx]\nodoo_version = \"17.0\"\nmergiraf = \"never\"\n\n[tool.odx.port]\ndefault_from = [\"16.0\", \"18.0\"]\n\n[tool.odx.environments.env.prod]\n\n[tool.odx.environments.env.next]\nseries = \"18.0\"\n\n[tool.odx.lock.auto_update]\ncontent_check = false\n\n[tool.odx.cache]\nttl = {{ pr_state = \"30m\" }}\n\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{api}/OCA/pos.git\"\naddons = [\"pos_x\"]\nmerges = [{{ pr = 1 }}]\n"
             ),
         )
         .unwrap();
@@ -283,6 +283,12 @@ fn sections_and_renderers() {
         out.contains("  pkg:odoo-addon-web-q@17.0.2.0.0  review"),
         "{out}"
     );
+    // The second time, the kept dashboard answers.
+    let (_, out, _) = setup.odx(&["dashboard", "--section", "pinned"]);
+    assert!(
+        out.ends_with("data as of 0 min ago; --fresh rebuilds it\n"),
+        "{out}"
+    );
     let (_, out, _) = setup.odx(&["dashboard", "--format", "markdown", "--checkboxes"]);
     assert!(
         out.contains("  - [ ] mute <!-- odx:mute fwd:OCA/pos#2->17.0 -->\n"),
@@ -312,23 +318,24 @@ fn sections_and_renderers() {
         ),
     )
     .unwrap();
-    let (_, out, _) = setup.odx(&["dashboard", "--section", "pinned"]);
+    let (_, out, _) = setup.odx(&["--fresh", "dashboard", "--section", "pinned"]);
     assert!(out.contains("  pr:OCA/pos#7  unknown"), "{out}");
     // Merged upstream: the override can go.
     setup.pull("merged");
-    let (_, out, _) = setup.odx(&["dashboard", "--section", "droppable"]);
+    let (_, out, _) = setup.odx(&["--fresh", "dashboard", "--section", "droppable"]);
     assert!(
         out.contains("Overrides that can be dropped (1)\n  pr:OCA/pos#1  merged"),
         "{out}"
     );
     // A host that answers like no forge has no new pull requests.
     setup.route("/api/v3/meta", 404, "");
-    let (_, out, _) = setup.odx(&["dashboard", "--section", "new-upstream"]);
+    let (_, out, _) = setup.odx(&["--fresh", "dashboard", "--section", "new-upstream"]);
     assert!(!out.contains("new:"), "{out}");
     let (code, _, _) = setup.odx(&["-C", "..", "dashboard"]);
     assert_eq!(code, 2);
     // Without uv.lock the index section is a warning.
     std::fs::remove_file(setup.project.join("uv.lock")).unwrap();
+    std::fs::remove_dir_all(setup.root.join("cache").join("snapshots")).unwrap();
     let (code, _, err) = setup.odx(&["--offline", "dashboard"]);
     assert_eq!(code, 0);
     assert!(err.contains("warning: auto-update: "), "{err}");
@@ -385,7 +392,7 @@ fn actions() {
     ]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.starts_with("recorded m:17.0:pos_x:"), "{out}");
-    let (_, out, _) = setup.odx(&["dashboard", "--section", "suppressed"]);
+    let (_, out, _) = setup.odx(&["--fresh", "dashboard", "--section", "suppressed"]);
     assert!(out.contains("fwd:OCA/pos#2->17.0"), "{out}");
     // A deferred mute resurfaces when the 17.0 code it was about changes.
     let (code, out, err) = setup.odx(&[
@@ -419,7 +426,7 @@ fn actions() {
         ),
     )
     .unwrap();
-    let (code, _, _) = setup.odx(&["dashboard"]);
+    let (code, _, _) = setup.odx(&["--fresh", "dashboard"]);
     assert_eq!(code, 2);
     std::fs::write(setup.project.join("pyproject.toml"), pyproject).unwrap();
 
