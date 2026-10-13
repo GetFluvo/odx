@@ -24,6 +24,8 @@ use crate::cli::{GlobalArgs, StatusArgs, StatusSort};
 struct Tracked {
     /// `<repository> #<n>` or `<distribution> #<n>`.
     name: String,
+    /// The distribution, for a package from a pull request.
+    dist: Option<String>,
     url: String,
     forge: Forge,
     pr: u32,
@@ -41,15 +43,18 @@ struct Locked {
 }
 
 /// One line of the report.
-struct Row {
-    name: String,
-    url: String,
-    pr: u32,
-    upstream: Option<PullRequest>,
+pub(crate) struct Row {
+    /// `<repository> #<n>` or `<distribution> #<n>`.
+    pub(crate) name: String,
+    /// The distribution, for a package from a pull request.
+    pub(crate) dist: Option<String>,
+    pub(crate) url: String,
+    pub(crate) pr: u32,
+    pub(crate) upstream: Option<PullRequest>,
     error: Option<String>,
-    head: &'static str,
+    pub(crate) head: &'static str,
     new_commits: Option<usize>,
-    advice: &'static str,
+    pub(crate) advice: &'static str,
 }
 
 /// `odx status`.
@@ -90,6 +95,7 @@ fn tracked(prepared: &Prepared, planned: &[Planned]) -> Vec<Tracked> {
             });
             tracked.push(Tracked {
                 name: format!("{} #{pr}", repo.name),
+                dist: None,
                 url: repo.url.clone(),
                 forge: repo.forge,
                 pr,
@@ -102,6 +108,7 @@ fn tracked(prepared: &Prepared, planned: &[Planned]) -> Vec<Tracked> {
         if let Some(pr) = package.source.pr {
             tracked.push(Tracked {
                 name: format!("{dist} #{pr}"),
+                dist: Some(dist.clone()),
                 url: package.url.clone(),
                 forge: Forge::detect(&package.url),
                 pr,
@@ -177,14 +184,15 @@ fn advice(state: Option<PrState>, head: &str, pinned: bool) -> &'static str {
     }
 }
 
-fn status(args: &StatusArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    let prepared = prepare(global, ctx)?;
-    // Loaded configurations are validated, so planning all of them works.
-    let planned =
-        plan_config(&prepared.project.config, &prepared.project.root, None).unwrap_or_default();
-    let tracked = tracked(&prepared, &planned);
+/// Every tracked pull request with its state upstream and its head.
+pub(crate) fn rows(
+    prepared: &Prepared,
+    planned: &[Planned],
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+) -> Vec<Row> {
+    let tracked = tracked(prepared, planned);
     let merger = Merger::new(Arc::new(OsRunner));
-    let mut report = Report::default();
     let http =
         ReqwestHttp::new().map(|http| CachedHttp::new(http, prepared.cache.root().join("http")));
     let sleep = std::thread::sleep;
@@ -223,6 +231,7 @@ fn status(args: &StatusArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
         let pinned = item.locked.as_ref().is_some_and(|locked| locked.pinned);
         rows.push(Row {
             name: item.name.clone(),
+            dist: item.dist.clone(),
             url: item.url.clone(),
             pr: item.pr,
             advice: advice(upstream.as_ref().map(|pr| pr.state), head, pinned),
@@ -232,6 +241,17 @@ fn status(args: &StatusArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
             new_commits,
         });
     }
+    rows
+}
+
+fn status(args: &StatusArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let prepared = prepare(global, ctx)?;
+    // Loaded configurations are validated, so planning all of them works.
+    let planned =
+        plan_config(&prepared.project.config, &prepared.project.root, None).unwrap_or_default();
+    let merger = Merger::new(Arc::new(OsRunner));
+    let mut report = Report::default();
+    let mut rows = rows(&prepared, &planned, global, ctx);
     sort(&mut rows, args.sort_by);
     let modified = modified(&prepared, &planned, &merger);
     let merged_upstream = rows

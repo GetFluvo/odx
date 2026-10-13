@@ -84,8 +84,21 @@ pub fn distribution(addon: &str, series: &str) -> String {
     }
 }
 
-/// The JSON at `url`; `None` for a 404.
+/// The JSON at `url` (`file://` reads a local index); `None` for a 404 or
+/// a missing file.
 fn json(http: &dyn Http, url: &str) -> Result<Option<Json>, String> {
+    if let Some(path) = url.strip_prefix("file://") {
+        // `file:///C:/x` on Windows names `C:/x`.
+        let path = path
+            .strip_prefix('/')
+            .filter(|rest| rest.get(1..2) == Some(":"))
+            .unwrap_or(path);
+        return std::fs::read(path).map_or(Ok(None), |bytes| {
+            serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| format!("{url}: {e}"))
+        });
+    }
     let response = http.get(url, &[]).map_err(|e| e.to_string())?;
     match response.status {
         200 => serde_json::from_slice(&response.body)
@@ -308,6 +321,32 @@ mod tests {
             r#"{"info":{}}"#,
         )]);
         assert_eq!(package_index(&empty, BASE, "e", "18.0").unwrap(), None);
+    }
+
+    #[test]
+    fn local_indexes_are_read_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path().join("odoo-addon-pos-x");
+        std::fs::create_dir_all(dist.join("17.0.1.0.0")).unwrap();
+        std::fs::write(dist.join("json"), r#"{"releases":{"17.0.1.0.0":[]}}"#).unwrap();
+        std::fs::write(
+            dist.join("17.0.1.0.0").join("json"),
+            r#"{"info":{"home_page":"https://github.com/OCA/pos"}}"#,
+        )
+        .unwrap();
+        let text = tmp.path().display().to_string().replace('\\', "/");
+        let base = format!("file:///{}", text.trim_start_matches('/'));
+        let fake = Fake::new(&[]);
+        assert_eq!(
+            package_index(&fake, &base, "pos_x", "17.0")
+                .unwrap()
+                .as_deref(),
+            Some("https://github.com/OCA/pos")
+        );
+        assert_eq!(package_index(&fake, &base, "web_y", "17.0").unwrap(), None);
+        std::fs::write(dist.join("json"), "nonsense").unwrap();
+        assert!(package_index(&fake, &base, "pos_x", "17.0").is_err());
+        assert!(fake.asked.lock().unwrap().is_empty());
     }
 
     #[test]

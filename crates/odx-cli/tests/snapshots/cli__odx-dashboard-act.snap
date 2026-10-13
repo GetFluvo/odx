@@ -1,0 +1,80 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Take one entry's action
+
+Usage: odx dashboard act [OPTIONS] <--include|--port|--mute|--drop|--follow> <ID>
+
+Arguments:
+  <ID>
+          The entry id, as the dashboard shows it
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --include
+          Add the pull request to the project
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --port
+          Port the change upstream
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --mute
+          Record a mute (or, with an organisation kind, a verdict)
+
+      --drop
+          Remove the override from the project
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --follow
+          Take the index update
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --reason <REASON>
+          Why (mandatory with --mute)
+
+      --kind <KIND>
+          Kind of the mute or verdict
+
+          Possible values:
+          - not-applicable:  The change does not apply to the target series
+          - not-needed:      The change is not needed on the target series
+          - superseded:      Superseded by another change
+          - already-present: Already present on the target, possibly by another route
+          - declined:        Declined for this project
+          - not-wanted:      Not wanted in this project
+          - deferred:        Review later; re-checked on expiry and on target code changes
+          
+          [default: not-wanted]
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

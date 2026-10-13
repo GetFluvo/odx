@@ -309,6 +309,39 @@ on default to `[tool.odx.port] default_from`, else the one below and the
 one above; each environment's series (`[tool.odx.environments.env.<name>]
 series`) is a target of its own.
 
+## The dashboard
+
+```console
+$ odx dashboard                              # every environment series, as tables
+$ odx dashboard --section forward-port --section pinned
+$ odx dashboard --format markdown --checkboxes
+$ odx dashboard act fwd:OCA/pos#2->17.0 --mute --reason "not for us"
+$ odx dashboard act pr:OCA/pos#1 --drop --reason "merged upstream"
+$ odx dashboard act new:OCA/pos#5 --include
+$ odx dashboard act pkg:odoo-addon-web-z@17.0.1.0.1 --follow
+```
+
+One view of what needs a decision, per environment series:
+
+| Section | Entries | Actions |
+| --- | --- | --- |
+| `pinned` | pull requests the project merges, and packages from pull requests, with their state upstream (`odx status`) | `drop` |
+| `droppable` | those merged upstream | `drop` |
+| `new-upstream` | open pull requests on the project's series in the repositories it aggregates whose title names an addon it uses from them | `include` |
+| `forward-port` | changes from lower series (`odx suggest`) | `port`, `mute` |
+| `backport` | changes from higher series | `port`, `mute` |
+| `auto-update` | index releases the auto-update policy would take, or leaves for review | `follow` |
+| `suppressed` | what blacklists, verdicts and mutes hide, with the reason | |
+
+Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`) that
+`odx dashboard act` takes: `--drop` and `--include` run `odx drop` and `odx
+add`, `--follow` runs `odx lock --auto-update`, `--mute` records a mute
+(`--kind`, default `not-wanted`, and a mandatory `--reason`). Porting
+upstream is always a person's decision and lands with `odx port`. With
+`--format markdown --checkboxes`, every action is a box `- [ ] <!--
+odx:<action> <id> -->` for the bot to read back once ticked. `--json` gives
+the model.
+
 ## Verdicts and mutes
 
 ```console

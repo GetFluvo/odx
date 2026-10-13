@@ -1062,6 +1062,7 @@ dependencies = [
  "odx-aggregate",
  "odx-config",
  "odx-core",
+ "odx-forge",
  "odx-git",
  "serde_json",
  "tempfile",
@@ -1818,6 +1819,7 @@ dependencies = [
  "odx-analyze",
  "odx-config",
  "odx-core",
+ "odx-dashboard",
  "odx-dev",
  "odx-forge",
  "odx-git",
@@ -1857,6 +1859,9 @@ version = "0.0.4"
 [[package]]
 name = "odx-dashboard"
 version = "0.0.4"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "odx-dev"

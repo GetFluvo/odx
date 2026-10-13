@@ -21,6 +21,7 @@ clap.workspace = true
 odx-aggregate.workspace = true
 odx-config.workspace = true
 odx-core = { workspace = true, features = ["system"] }
+odx-forge.workspace = true
 odx-git.workspace = true
 serde_json.workspace = true
 

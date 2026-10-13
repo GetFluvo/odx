@@ -13,6 +13,7 @@
 
 mod aggregate;
 mod dirmatch;
+mod prs;
 
 pub use dirmatch::fnmatch;
 
@@ -153,16 +154,11 @@ pub fn execute(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<Exit> {
+    let _ = prefix;
     match cli.action {
         Action::Aggregate => aggregate::aggregate(cli, ctx, out, err),
-        action => {
-            writeln!(
-                err,
-                "{prefix} {}: not implemented yet (roadmap phase 7)",
-                action.name()
-            )?;
-            Ok(Exit::Usage)
-        }
+        Action::ShowClosedPrs => prs::show(cli, ctx, false, out, err),
+        Action::ShowAllPrs => prs::show(cli, ctx, true, out, err),
     }
 }
 
@@ -244,7 +240,10 @@ mod tests {
         assert_eq!(cli.action, Action::Aggregate);
         assert_eq!(cli.config, PathBuf::from("repos.yaml"));
         assert_eq!(cli.jobs, None);
-        assert_eq!(Action::Aggregate.name(), "aggregate");
+        assert_eq!(
+            [Action::Aggregate, Action::ShowClosedPrs, Action::ShowAllPrs].map(Action::name),
+            ["aggregate", "show-closed-prs", "show-all-prs"]
+        );
     }
 
     #[test]
@@ -276,15 +275,12 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_actions_are_not_implemented_yet() {
+    fn pull_request_actions_need_a_configuration() {
         for action in ["show-closed-prs", "show-all-prs"] {
             let (exit, out, err) = run_args(&["git-aggregate-rs", action]);
-            assert_eq!(exit, Exit::Usage);
+            assert_eq!(exit, Exit::Failure);
             assert_eq!(out, "");
-            assert_eq!(
-                err,
-                format!("git-aggregate-rs {action}: not implemented yet (roadmap phase 7)\n")
-            );
+            assert!(err.starts_with("error: cannot read "), "{err}");
         }
     }
 

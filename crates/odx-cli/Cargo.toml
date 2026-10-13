@@ -29,6 +29,7 @@ odx-forge.workspace = true
 odx-git.workspace = true
 odx-platform.workspace = true
 odx-sync.workspace = true
+odx-dashboard.workspace = true
 odx-index.workspace = true
 odx-port.workspace = true
 odx-verdicts.workspace = true
