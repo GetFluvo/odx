@@ -186,27 +186,24 @@ fn publish(
     message: &str,
 ) -> Result<(), String> {
     private(ctx, prepared, url)?;
-    // Recorded with the user's git identity, or odx's when there is none.
+    // Recorded with the user's git identity, or odx's when there is none,
+    // also for the commits a rebase rewrites.
     let name = git(dir, &["config", "--default", "odx", "user.name"]).unwrap_or_default();
     let email = author(dir);
     let name = format!("user.name={name}");
     let email = format!("user.email={email}");
+    let as_user = |args: &[&str]| {
+        let mut all = vec!["-c", name.as_str(), "-c", email.as_str()];
+        all.extend_from_slice(args);
+        git(dir, &all)
+    };
     git(dir, &["add", "-A"])
-        .and_then(|_| {
-            git(
-                dir,
-                &[
-                    "-c", &name, "-c", &email, "commit", "--quiet", "-m", message,
-                ],
-            )
-        })
+        .and_then(|_| as_user(&["commit", "--quiet", "-m", message]))
         .and_then(|_| {
             git(dir, &["push", "--quiet", "origin", "HEAD"]).or_else(|_| {
                 // Someone pushed meanwhile: rebase on their commits, once.
                 git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
-                    .and_then(|branch| {
-                        git(dir, &["pull", "--rebase", "--quiet", "origin", &branch])
-                    })
+                    .and_then(|branch| as_user(&["pull", "--rebase", "--quiet", "origin", &branch]))
                     .and_then(|_| git(dir, &["push", "--quiet", "origin", "HEAD"]))
             })
         })

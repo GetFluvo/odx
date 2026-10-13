@@ -89,7 +89,8 @@ pub struct Recheck {
     pub repo: String,
     /// The touched files, as on the target series.
     pub files: Vec<String>,
-    /// [`tree_id`]-style id of those files on the target at verdict time.
+    /// An id of those files as they were on the target at verdict time
+    /// (it changes exactly when one of them does).
     pub target_tree: String,
 }
 
