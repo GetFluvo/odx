@@ -35,7 +35,6 @@ const STUBS: &[(&[&str], u8)] = &[
     (&["daemon", "status"], 6),
     (&["cache", "info"], 6),
     (&["lint"], 9),
-    (&["doctor"], 6),
     (&["auth", "status"], 6),
 ];
 
@@ -87,6 +86,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "vendor"][..], "vendor", 5),
         (&["odx", "build"][..], "build", 5),
         (&["odx", "dev"][..], "dev", 6),
+        (&["odx", "doctor"][..], "doctor", 6),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));
