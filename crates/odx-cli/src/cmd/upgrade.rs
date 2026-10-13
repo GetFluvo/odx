@@ -12,12 +12,13 @@ use odx_aggregate::plan_config;
 use odx_analyze::stats::addon_dirs;
 use odx_config::Problem;
 use odx_config::deps::normalize_name;
+use odx_config::schema::{Index, IndexSource};
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner, repo_key};
 use odx_forge::{CachedHttp, ForgeClient, ForgeKind, Http, RepoUrl, ReqwestHttp};
 use odx_git::{Forge, Merger};
 use odx_index::sources::openupgrade;
-use odx_index::{AddonIndex, Build, Renames, SeriesIndex, build, series_key};
+use odx_index::{AddonIndex, Build, Listing, Renames, SeriesIndex, build, series_key};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -289,6 +290,65 @@ pub(crate) fn renames(
     renames
 }
 
+/// The organizations of `[tool.odx.index] orgs` whose listings the index
+/// reads, as (a URL on their host, owner): names are on GitHub, URLs name
+/// their host; none when `sources` leaves out `forge`.
+fn organizations(index: Option<&Index>) -> Vec<(RepoUrl, String)> {
+    let index = index.filter(|index| {
+        index
+            .sources
+            .as_ref()
+            .is_none_or(|sources| sources.contains(&IndexSource::Forge))
+    });
+    let mut orgs: Vec<(RepoUrl, String)> = Vec::new();
+    for spelling in index
+        .and_then(|index| index.orgs.as_ref())
+        .into_iter()
+        .flatten()
+    {
+        let spelling = spelling.trim_end_matches('/');
+        let url = if spelling.contains("://") {
+            format!("{spelling}/-")
+        } else {
+            format!("https://github.com/{spelling}/-")
+        };
+        let Some(site) = RepoUrl::parse(&url) else {
+            continue;
+        };
+        let owner = site.path.trim_end_matches("/-").to_owned();
+        if !orgs
+            .iter()
+            .any(|(known, name)| known.host == site.host && *name == owner)
+        {
+            orgs.push((site, owner));
+        }
+    }
+    orgs
+}
+
+/// The addons of `orgs` on `series`, with the listings that failed.
+fn list(
+    ctx: &Context<'_>,
+    http: &dyn Http,
+    orgs: &[(RepoUrl, String)],
+    series: &str,
+) -> (Vec<(String, String)>, Vec<String>) {
+    let sleep = std::thread::sleep;
+    let client = ForgeClient::new(http, ctx.env, &OsRunner, &sleep);
+    let mut found = Vec::new();
+    let mut failures = Vec::new();
+    for (site, owner) in orgs {
+        match client
+            .kind(site)
+            .and_then(|kind| client.organization_addons(site, kind, owner, series))
+        {
+            Ok(listed) => found.extend(listed),
+            Err(e) => failures.push(format!("listing {}/{owner} on {series}: {e}", site.host)),
+        }
+    }
+    (found, failures)
+}
+
 /// The addon index of the series in `wanted`, each with the addons to
 /// look up there.
 pub(crate) fn addon_index(
@@ -324,11 +384,16 @@ pub(crate) fn addon_index(
         .as_ref()
         .map(|index| index.overrides.clone())
         .unwrap_or_default();
+    let orgs = organizations(config.index.as_ref());
+    let listing = online
+        .filter(|_| !orgs.is_empty())
+        .map(|http| |series: &str| list(ctx, http, &orgs, series));
     let spec = Build {
         overrides: &overrides,
         cached: &cached,
         merger: &merger,
         package_index: online.map(|http| (http, pypi.as_str())),
+        listing: listing.as_ref().map(|listing| listing as Listing<'_>),
     };
     let mut index = AddonIndex {
         renames,
@@ -583,4 +648,41 @@ fn json(current: &str, target: &str, rows: &[Row]) -> serde_json::Value {
             "effort": row.effort,
         })).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listed(orgs: &[&str], sources: Option<Vec<IndexSource>>) -> Vec<String> {
+        let index = Index {
+            ttl: None,
+            orgs: Some(orgs.iter().map(|org| (*org).to_owned()).collect()),
+            sources,
+            overrides: BTreeMap::new(),
+            renames: BTreeMap::new(),
+        };
+        organizations(Some(&index))
+            .iter()
+            .map(|(site, owner)| format!("{} {owner}", site.origin()))
+            .collect()
+    }
+
+    #[test]
+    fn organizations_from_names_and_urls() {
+        let orgs = [
+            "OCA",
+            "https://gitlab.com/g/s/",
+            "https://gitlab.com/g/s",
+            "http://x",
+            "https://github.com/OCA",
+        ];
+        assert_eq!(
+            listed(&orgs, None),
+            ["https://github.com OCA", "https://gitlab.com g/s"]
+        );
+        assert_eq!(listed(&orgs[..1], Some(vec![IndexSource::Forge])).len(), 1);
+        assert_eq!(listed(&orgs, Some(vec![IndexSource::Cache])).len(), 0);
+        assert_eq!(organizations(None).len(), 0);
+    }
 }

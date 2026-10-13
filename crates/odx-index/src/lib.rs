@@ -27,16 +27,20 @@ pub enum Origin {
     Cache,
     /// The repository URL of the addon's release on the package index.
     PackageIndex,
+    /// The series tree of a repository of an indexed organization.
+    Forge,
 }
 
 impl Origin {
-    /// How the origin is written: `override`, `cache`, `package-index`.
+    /// How the origin is written: `override`, `cache`, `package-index`,
+    /// `forge`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Override => "override",
             Self::Cache => "cache",
             Self::PackageIndex => "package-index",
+            Self::Forge => "forge",
         }
     }
 }
@@ -66,6 +70,9 @@ pub struct SeriesIndex {
     /// Addons the package index did not know for this series.
     #[serde(default)]
     pub unknown: BTreeSet<String>,
+    /// Whether the organizations' listings were read into `addons`.
+    #[serde(default)]
+    pub listed: bool,
 }
 
 impl SeriesIndex {
@@ -209,7 +216,13 @@ pub struct Build<'a> {
     pub merger: &'a Merger,
     /// The package index and its JSON API base URL; `None` offline.
     pub package_index: Option<(&'a dyn Http, &'a str)>,
+    /// The indexed organizations' addons on a series, as (repository URL,
+    /// addon), with what failed; `None` offline or when not configured.
+    pub listing: Option<Listing<'a>>,
 }
+
+/// Lists the indexed organizations' addons on a series.
+pub type Listing<'a> = &'a dyn Fn(&str) -> (Vec<(String, String)>, Vec<String>);
 
 impl std::fmt::Debug for Build<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -223,8 +236,9 @@ impl std::fmt::Debug for Build<'_> {
 ///
 /// Overrides come first, then the cache's series branches, then what
 /// `previous` learnt from the package index, then the package index for
-/// addons still missing (and not known to be missing). Lookups that fail
-/// are reported, not remembered.
+/// addons still missing (and not known to be missing), then, when some
+/// are still missing, the organizations' listings, once per series.
+/// Lookups that fail are reported, not remembered.
 pub fn build(
     spec: &Build<'_>,
     series: &str,
@@ -239,26 +253,55 @@ pub fn build(
         fetched_at: previous.fetched_at,
         addons: sources::overrides(spec.overrides, series),
         unknown: previous.unknown,
+        listed: previous.listed,
     };
     for (addon, location) in sources::cached(spec.merger, spec.cached, series) {
         index.addons.entry(addon).or_insert(location);
     }
     for (addon, location) in previous.addons {
-        if location.origin == Origin::PackageIndex {
+        if matches!(location.origin, Origin::PackageIndex | Origin::Forge) {
             index.addons.entry(addon).or_insert(location);
         }
     }
     let mut problems = Vec::new();
-    let Some((http, base)) = spec.package_index else {
-        return (index, problems);
-    };
+    if let Some((http, base)) = spec.package_index {
+        package_index(&mut index, http, base, wanted, now, &mut problems);
+    }
+    let missing = wanted.iter().any(|addon| !index.addons.contains_key(addon));
+    if let Some(listing) = spec.listing.filter(|_| missing && !index.listed) {
+        index.fetched_at = now;
+        let (found, failures) = listing(series);
+        index.listed = failures.is_empty();
+        problems.extend(failures);
+        for (url, addon) in found {
+            index.unknown.remove(&addon);
+            index.addons.entry(addon.clone()).or_insert(Location {
+                url,
+                path: addon,
+                origin: Origin::Forge,
+            });
+        }
+    }
+    (index, problems)
+}
+
+/// Look up on the package index the `wanted` addons `index` misses.
+fn package_index(
+    index: &mut SeriesIndex,
+    http: &dyn Http,
+    base: &str,
+    wanted: &[String],
+    now: u64,
+    problems: &mut Vec<String>,
+) {
+    let series = index.series.clone();
     let missing: Vec<&String> = wanted
         .iter()
         .filter(|addon| !index.addons.contains_key(*addon) && !index.unknown.contains(*addon))
         .collect();
     for addon in missing {
         index.fetched_at = now;
-        match sources::package_index(http, base, addon, series) {
+        match sources::package_index(http, base, addon, &series) {
             Ok(Some(url)) => {
                 index.addons.insert(
                     addon.clone(),
@@ -275,7 +318,6 @@ pub fn build(
             Err(e) => problems.push(format!("{addon} on {series}: {e}")),
         }
     }
-    (index, problems)
 }
 
 /// Test doubles.
@@ -386,6 +428,7 @@ mod tests {
             fetched_at: 0,
             addons: BTreeMap::from([(addon.to_owned(), location(url))]),
             unknown: BTreeSet::new(),
+            listed: false,
         };
         let index = AddonIndex {
             series: BTreeMap::from([
@@ -410,8 +453,14 @@ mod tests {
         assert_eq!(AddonIndex::default().history("c"), Vec::new());
         assert_eq!(series_key("x"), (0, 0));
         assert_eq!(
-            [Origin::Override, Origin::Cache, Origin::PackageIndex].map(Origin::name),
-            ["override", "cache", "package-index"]
+            [
+                Origin::Override,
+                Origin::Cache,
+                Origin::PackageIndex,
+                Origin::Forge
+            ]
+            .map(Origin::name),
+            ["override", "cache", "package-index", "forge"]
         );
     }
 
@@ -483,6 +532,7 @@ mod tests {
             cached: &cached,
             merger: &merger,
             package_index: Some((&fake, "https://pypi.test")),
+            listing: None,
         };
         let wanted: Vec<String> = ["pos_a", "web_x", "gone", "down"]
             .map(str::to_owned)
@@ -511,6 +561,62 @@ mod tests {
     }
 
     #[test]
+    fn listings_fill_what_is_still_missing_once() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let listing = |series: &str| {
+            calls.lock().unwrap().push(series.to_owned());
+            (
+                vec![
+                    ("https://github.com/OCA/web".to_owned(), "web_x".to_owned()),
+                    ("https://github.com/OCA/b".to_owned(), "pos_b".to_owned()),
+                ],
+                Vec::new(),
+            )
+        };
+        let overrides = BTreeMap::from([(
+            "pos_b".to_owned(),
+            BTreeMap::from([("18.0".to_owned(), "OCA/pos".to_owned())]),
+        )]);
+        let merger = Merger::new(std::sync::Arc::new(odx_core::system::OsRunner));
+        let spec = Build {
+            overrides: &overrides,
+            cached: &[],
+            merger: &merger,
+            package_index: None,
+            listing: Some(&listing),
+        };
+        let previous = SeriesIndex {
+            unknown: BTreeSet::from(["web_x".to_owned()]),
+            ..SeriesIndex::default()
+        };
+        let wanted = vec!["web_x".to_owned(), "pos_b".to_owned()];
+        let (index, problems) = build(&spec, "18.0", &wanted, Some(previous), 3);
+        assert_eq!(index.addons["web_x"].origin, Origin::Forge);
+        assert_eq!(index.addons["pos_b"].origin, Origin::Override);
+        assert_eq!((index.listed, index.fetched_at), (true, 3));
+        assert!(index.unknown.is_empty() && problems.is_empty());
+        // Found addons are kept, and the listing is not read again.
+        let (again, _) = build(&spec, "18.0", &wanted, Some(index), 4);
+        assert_eq!(again.addons["web_x"].origin, Origin::Forge);
+        let missing = ["gone".to_owned()];
+        let (again, _) = build(&spec, "18.0", &missing, Some(again), 5);
+        assert_eq!(again.fetched_at, 3);
+        assert_eq!(*calls.lock().unwrap(), ["18.0"]);
+
+        // Failures are reported and the listing is read again next time.
+        let failing = |_: &str| (Vec::new(), vec!["OCA: down".to_owned()]);
+        let spec = Build {
+            listing: Some(&failing),
+            ..spec
+        };
+        let (index, problems) = build(&spec, "18.0", &missing, None, 6);
+        assert_eq!(
+            (index.listed, problems),
+            (false, vec!["OCA: down".to_owned()])
+        );
+    }
+
+    #[test]
     fn series_indexes_are_cached() {
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(SeriesIndex::load(tmp.path(), "18.0"), None);
@@ -520,6 +626,7 @@ mod tests {
             fetched_at: 5,
             addons: BTreeMap::from([("a".to_owned(), location("u"))]),
             unknown: BTreeSet::from(["b".to_owned()]),
+            listed: true,
         };
         index.save(tmp.path()).unwrap();
         assert_eq!(SeriesIndex::load(tmp.path(), "18.0"), Some(index.clone()));

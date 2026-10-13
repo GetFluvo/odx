@@ -366,3 +366,48 @@ fn odoo_lint_counts_the_work_on_own_addons() {
     assert!(err.contains("upgrade-check: expected"), "{err}");
     assert!(err.contains(": note"), "{err}");
 }
+
+#[test]
+fn organization_listings_find_what_the_package_index_does_not() {
+    let setup = Setup::new();
+    let routes: Routes = Arc::default();
+    let forge = serve(&routes);
+    for (path, body) in [
+        ("/api/v1/version", "{}".to_owned()),
+        (
+            "/api/v1/orgs/acme/repos",
+            format!(r#"[{{"full_name":"acme/tools","html_url":"{forge}/acme/tools"}}]"#),
+        ),
+        (
+            "/api/v1/repos/acme/tools/git/trees/18.0",
+            r#"{"tree":[{"path":"foo/__manifest__.py"}]}"#.to_owned(),
+        ),
+    ] {
+        routes.lock().unwrap().insert(path.to_owned(), (200, body));
+    }
+    let pyproject = std::fs::read_to_string(setup.root.join("pyproject.toml")).unwrap();
+    std::fs::write(
+        setup.root.join("pyproject.toml"),
+        pyproject.replacen(
+            "[tool.odx.groups]",
+            &format!(
+                "[tool.odx.index]\norgs = [\"{forge}/acme\", \"http://127.0.0.1:1/dead\"]\n\n[tool.odx.groups]"
+            ),
+            1,
+        ),
+    )
+    .unwrap();
+    let env = &setup.env;
+    let (exit, _, err) = setup.odx(env, &["aggregate"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let (exit, out, err) = setup.odx(env, &["upgrade", "--target", "18.0", "--no-lint"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.contains(&format!("foo: available in {forge}/acme/tools\n")),
+        "{out}"
+    );
+    assert!(
+        err.contains("warning: index: listing 127.0.0.1/dead on 18.0: "),
+        "{err}"
+    );
+}

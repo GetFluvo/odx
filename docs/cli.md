@@ -456,7 +456,8 @@ series has it:
 
 - `released`: the package index has a release for the target series;
 - `available`: the addon is on the target branch of a repository odx has in
-  its cache, or `[tool.odx.index.overrides]` names its repository;
+  its cache, `[tool.odx.index.overrides]` names its repository, or a
+  repository of an organization in `[tool.odx.index] orgs` has it;
 - `migration PR #n`: an open `[MIG]` pull request for the target series in
   the repository the addon lives in now;
 - `missing`: none of the above, so the team migrates it.
@@ -468,9 +469,18 @@ get odoo-lint's upgrade counts (`odl upgrade-check`; `ODX_ODL` names the
 executable): how many changes are automatic, need review, or are manual.
 The target defaults to `[tool.odx.upgrade] target_odoo_version`.
 
-The answers of the package index are cached per series in the cache's
-`index/` directory for `[tool.odx.index] ttl` (default 7 days);
-`--refresh-index` asks again, `--offline` uses what is cached.
+`[tool.odx.index] orgs` lists organizations (GitHub names such as `"OCA"`,
+or URLs such as `"https://gitlab.com/group"` or `"https://forge.example.com/org"`)
+whose repositories odx reads when an addon is still missing: the addons on
+the series branch of every repository they own (on GitHub, which needs a
+token for this, the directories at the root of the branch, apart from
+hidden ones and `setup`; GitLab groups include their subgroups). `sources` without `"forge"`
+turns this off.
+
+The answers of the package index and the organization listings are cached
+per series in the cache's `index/` directory for `[tool.odx.index] ttl`
+(default 7 days); `--refresh-index` asks again, `--offline` uses what is
+cached.
 
 ## Locking
 
