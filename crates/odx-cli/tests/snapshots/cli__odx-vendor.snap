@@ -10,11 +10,14 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
-      --requirements
-          Also write the platform requirements file
+      --requirements [<FILE>]
+          Write the platform requirements file (default: `[tool.odx.layout] requirements`)
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --strict
+          Fail when a requirement excludes the version the platform provides
 
   -j, --jobs <N>
           Override the number of parallel jobs

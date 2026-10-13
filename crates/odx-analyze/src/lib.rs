@@ -3,5 +3,6 @@
 //! Part of [odx](https://github.com/getfluvo/odx). `stats` counts lines of
 //! code with tokei; the other analyses land in roadmap phases 5 and 7.
 
+pub mod manifest;
 pub mod sniff;
 pub mod stats;

@@ -26,6 +26,7 @@ odx-config.workspace = true
 odx-core = { workspace = true, features = ["system"] }
 odx-forge.workspace = true
 odx-git.workspace = true
+odx-platform.workspace = true
 serde_json.workspace = true
 toml_edit.workspace = true
 

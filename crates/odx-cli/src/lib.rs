@@ -113,6 +113,7 @@ fn execute(
         }
         Command::Lock(args) => cmd::aggregate::run_lock(args, &cli.global, ctx).emit(out, err),
         Command::Verify(args) => cmd::verify::run_verify(args, &cli.global, ctx).emit(out, err),
+        Command::Vendor(args) => cmd::vendor::run_vendor(args, &cli.global, ctx).emit(out, err),
         Command::Sniff(args) => cmd::sniff::run_sniff(args, &cli.global, ctx).emit(out, err),
         Command::Stats(args) => cmd::stats::run_stats(args, &cli.global, ctx).emit(out, err),
         Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),

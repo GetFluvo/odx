@@ -15,6 +15,7 @@ pub(crate) mod compat;
 pub(crate) mod edit;
 pub(crate) mod sniff;
 pub(crate) mod stats;
+pub(crate) mod vendor;
 pub(crate) mod verify;
 
 /// What a command produced.

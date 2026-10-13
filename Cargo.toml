@@ -23,6 +23,7 @@ odx-git = { path = "crates/odx-git", version = "0.0.4" }
 odx-aggregate = { path = "crates/odx-aggregate", version = "0.0.4" }
 odx-forge = { path = "crates/odx-forge", version = "0.0.4" }
 odx-analyze = { path = "crates/odx-analyze", version = "0.0.4" }
+odx-platform = { path = "crates/odx-platform", version = "0.0.4" }
 
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }
@@ -39,6 +40,8 @@ tokio-util = "0.7"
 toml = "1"
 toml_edit = "0.25"
 tokei = { version = "15", default-features = false }
+pep440_rs = "0.7"
+sha2 = "0.10"
 
 # Test-only.
 assert_cmd = "2"
