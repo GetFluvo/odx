@@ -1251,7 +1251,6 @@ name = "odx-analyze"
 version = "0.0.4"
 dependencies = [
  "serde",
- "serde_json",
  "tempfile",
  "tokei",
 ]
