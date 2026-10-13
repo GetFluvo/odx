@@ -37,6 +37,10 @@ use toml_edit::DocumentMut;
 
 use super::Report;
 use super::edit::{read_lock, save};
+use super::sniff::{
+    Sniffed, describe as describe_sniffed, fail_on_new, script_count, sniff_locked,
+    to_json as sniffed_json,
+};
 use crate::Context;
 use crate::cli::{AggregateArgs, GlobalArgs, LockArgs};
 
@@ -377,9 +381,11 @@ fn aggregate(
             )
         })
         .collect();
+    let mut locked = prepared.locked().to_vec();
     if !args.fetch_only && !args.locked {
         let (entries, failures) = lock_entries(&planned, &built, &merger);
         summary.failures.extend(failures);
+        locked.clone_from(&entries);
         let lock = next_lock(&prepared, entries, args.repo.as_deref());
         let previous = prepared.lock.clone().unwrap_or_default();
         summary.changes = lock_changes(&previous, &lock);
@@ -387,7 +393,39 @@ fn aggregate(
             write_lock(ctx, &prepared, &lock)?;
         }
     }
+    if !args.fetch_only {
+        sniff_built(&prepared, &merger, &locked, &mut summary);
+    }
     Ok(summary.report(global.json, args.fetch_only, prepared.project.warnings))
+}
+
+/// The migration scripts the merges of every repository built in this run
+/// bring on top of its base; with `[tool.odx.sniff] fail_on_new`, any
+/// script fails the run.
+fn sniff_built(
+    prepared: &Prepared,
+    merger: &Merger,
+    locked: &[LockedRepository],
+    summary: &mut Summary,
+) {
+    let built: Vec<&LockedRepository> = locked
+        .iter()
+        .filter(|entry| {
+            summary
+                .builds
+                .iter()
+                .any(|(name, _, result)| *name == entry.name && result.is_ok())
+        })
+        .collect();
+    let mut problems = Vec::new();
+    summary.sniffed = sniff_locked(merger, &prepared.cache, &built, &mut problems);
+    summary.notes.append(&mut problems);
+    let scripts = script_count(&summary.sniffed);
+    if scripts > 0 && fail_on_new(&prepared.project.config) {
+        summary
+            .failures
+            .push(format!("{scripts} migration scripts (fail_on_new)"));
+    }
 }
 
 /// `odx lock [--repo NAME] [--check | --update]`.
@@ -1091,6 +1129,7 @@ struct Summary {
     kept: Vec<Kept>,
     bundled: Vec<(String, usize, String)>,
     notes: Vec<String>,
+    sniffed: Vec<Sniffed>,
     rewritten: bool,
     failures: Vec<String>,
     /// Built in scratch working trees (`odx lock`): directories are not
@@ -1139,6 +1178,7 @@ impl Summary {
             kept: Vec::new(),
             bundled: Vec::new(),
             notes: Vec::new(),
+            sniffed: Vec::new(),
             rewritten: false,
             failures: Vec::new(),
             scratch,
@@ -1218,6 +1258,7 @@ impl Summary {
                 }
             }
         }
+        report.out.push_str(&describe_sniffed(&self.sniffed));
         for change in &self.changes {
             let _ = writeln!(report.out, "{}", describe_change(change));
         }
@@ -1331,6 +1372,7 @@ impl Summary {
         value.insert("kept".to_owned(), serde_json::Value::Array(kept));
         value.insert("rewritten".to_owned(), serde_json::json!(self.rewritten));
         value.insert("notes".to_owned(), serde_json::json!(self.notes));
+        value.insert("migrations".to_owned(), sniffed_json(&self.sniffed));
         let bundled: Vec<serde_json::Value> = self
             .bundled
             .iter()

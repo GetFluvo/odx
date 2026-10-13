@@ -13,6 +13,7 @@ use odx_core::{Exit, redact};
 pub(crate) mod aggregate;
 pub(crate) mod compat;
 pub(crate) mod edit;
+pub(crate) mod sniff;
 pub(crate) mod stats;
 pub(crate) mod verify;
 

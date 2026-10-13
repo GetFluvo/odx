@@ -300,6 +300,51 @@ impl Merger {
         Ok(dirs)
     }
 
+    /// The files that differ between the trees (or commits) `old` and
+    /// `new`, without rename detection, under `path` when given: each with
+    /// git's status letter (`A`, `M`, `D`, ...).
+    ///
+    /// # Errors
+    ///
+    /// When git fails, for instance when a tree is not in `repo`.
+    pub fn changed_files(
+        &self,
+        repo: &Path,
+        old: &str,
+        new: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<(char, String)>, GitError> {
+        let invocation = self
+            .git(repo)
+            .args([
+                "diff",
+                "--name-status",
+                "--no-renames",
+                "-z",
+                old,
+                new,
+                "--",
+            ])
+            .args(path);
+        let listing = self.stdout("diff", &invocation)?;
+        let mut fields = listing.split('\0').filter(|field| !field.is_empty());
+        let mut changes = Vec::new();
+        while let (Some(status), Some(file)) = (fields.next(), fields.next()) {
+            changes.push((status.chars().next().unwrap_or('M'), file.to_owned()));
+        }
+        Ok(changes)
+    }
+
+    /// The content of `path` in the tree (or commit) `rev`, if it exists.
+    pub fn show(&self, repo: &Path, rev: &str, path: &str) -> Option<String> {
+        self.run(
+            "show",
+            &self.git(repo).arg("show").arg(format!("{rev}:{path}")),
+        )
+        .ok()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     /// The top-level directories of commit `rev`: the addons of a
     /// repository.
     ///

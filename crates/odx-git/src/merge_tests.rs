@@ -726,6 +726,25 @@ fn changed_and_present_directories() {
             .changed_dirs(repo, &base, &head)
             .is_err()
     );
+
+    let base_tree = m.tree(repo, &base).unwrap();
+    assert_eq!(
+        m.changed_files(repo, &base_tree, &head, None).unwrap(),
+        [
+            ('M', "README.md".to_owned()),
+            ('M', "pos_b/x.py".to_owned()),
+            ('A', "pos_b/y.py".to_owned())
+        ]
+    );
+    assert_eq!(
+        m.changed_files(repo, &base, &head, Some("pos_b/y.py"))
+            .unwrap(),
+        [('A', "pos_b/y.py".to_owned())]
+    );
+    assert_eq!(m.changed_files(repo, &head, &head, None).unwrap(), []);
+    assert!(m.changed_files(repo, "nope", &head, None).is_err());
+    assert_eq!(m.show(repo, &head, "pos_b/y.py").as_deref(), Some("new"));
+    assert_eq!(m.show(repo, &base, "pos_b/y.py"), None);
 }
 
 /// A pull request whose history merges two branches that both changed the
