@@ -1,0 +1,50 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Push the migration branch checked out and open its pull request: to the remote when you may push there, else to your fork (created when missing)
+
+Usage: odx migrate pr [OPTIONS]
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --push-remote <NAME>
+          Push to this remote instead of the migrated one or your fork
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --ready
+          Open the pull request ready for review instead of as a draft
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

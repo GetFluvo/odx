@@ -44,6 +44,9 @@ Options:
       --no-refresh
           Use cached data even when stale
 
+      --open-pr
+          Then push the branch and open a draft pull request (`odx migrate pr`)
+
       --refresh-index
           Rebuild the addon index for the series involved
 

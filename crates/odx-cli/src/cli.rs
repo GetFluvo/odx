@@ -651,6 +651,20 @@ pub enum MigrateCommand {
     /// series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the
     /// `[MIG]` commit.
     Addon(MigrateAddonArgs),
+    /// Push the migration branch checked out and open its pull request: to the
+    /// remote when you may push there, else to your fork (created when missing).
+    Pr(MigratePrArgs),
+}
+
+/// Arguments of `odx migrate pr`.
+#[derive(Debug, Args)]
+pub struct MigratePrArgs {
+    /// Push to this remote instead of the migrated one or your fork.
+    #[arg(long, value_name = "NAME")]
+    pub push_remote: Option<String>,
+    /// Open the pull request ready for review instead of as a draft.
+    #[arg(long)]
+    pub ready: bool,
 }
 
 /// Arguments of `odx migrate addon`.
@@ -673,6 +687,9 @@ pub struct MigrateAddonArgs {
     /// Migrate even when an open pull request already migrates the addon.
     #[arg(long)]
     pub force: bool,
+    /// Then push the branch and open a draft pull request (`odx migrate pr`).
+    #[arg(long)]
+    pub open_pr: bool,
 }
 
 /// `odx port` subcommands.

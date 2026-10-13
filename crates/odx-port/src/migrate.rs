@@ -266,6 +266,13 @@ impl<'a> Worktree<'a> {
         let branch = plan.branch();
         self.git(&["switch", "--quiet", "--no-track", "-c", &branch, &target])
             .map_err(|e| format!("cannot create branch {branch}: {e}"))?;
+        // Remembered for `odx migrate pr`.
+        for (key, value) in [
+            ("odxMigrateFrom", &plan.from),
+            ("odxMigrateRemote", &plan.remote),
+        ] {
+            self.git(&["config", &format!("branch.{branch}.{key}"), value])?;
+        }
         let state = State {
             plan,
             step: Step::History,
@@ -429,8 +436,10 @@ impl<'a> Worktree<'a> {
         Ok(changed || allow_empty)
     }
 
-    /// What odoo-lint leaves to fix by hand in the addon.
-    fn findings(&self, addon: &str, to: &str, tools: &Tools) -> Vec<Finding> {
+    /// What odoo-lint leaves to fix by hand in `addon` for series `to`;
+    /// nothing when it cannot tell.
+    #[must_use]
+    pub fn findings(&self, addon: &str, to: &str, tools: &Tools) -> Vec<Finding> {
         #[derive(Deserialize)]
         struct Module {
             #[serde(default)]
@@ -651,6 +660,13 @@ mod tests {
             git(&work, &["branch", "--show-current"]),
             "19.0-mig-my_addon"
         );
+        assert_eq!(
+            git(
+                &work,
+                &["config", "branch.19.0-mig-my_addon.odxMigrateFrom"]
+            ),
+            "18.0"
+        );
     }
 
     #[test]
@@ -864,7 +880,7 @@ mod tests {
         let odl = script(
             "odl",
             r#"case "$*" in
-  *--fix*) sed -i 's/18.0.1.0.0/19.0.1.0.0/' my_addon/__manifest__.py; exit 1;;
+  *--fix*) echo '{"version": "19.0.1.0.0"}' > my_addon/__manifest__.py; exit 1;;
   *) echo '{"modules":[{"name":"my_addon","violations":[{"file_path":"my_addon/data.xml","line":1,"column":1,"code":"U1908","name":"x","message":"by hand"}]}]}'; exit 1;;
 esac
 "#,
