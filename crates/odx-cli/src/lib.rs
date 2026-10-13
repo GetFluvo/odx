@@ -97,6 +97,15 @@ fn execute(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<Exit> {
+    // `odx sync` waits while a command that uses the cache runs.
+    let _presence = match &cli.command {
+        Command::Aggregate(_)
+        | Command::Lock(_)
+        | Command::Dev(_)
+        | Command::Build(_)
+        | Command::Vendor(_) => cmd::sync::presence(ctx),
+        _ => None,
+    };
     match &cli.command {
         Command::Completions(args) => {
             clap_complete::generate(args.shell, &mut Cli::command(), "odx", out);

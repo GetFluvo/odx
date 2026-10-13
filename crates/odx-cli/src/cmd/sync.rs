@@ -12,10 +12,11 @@ use odx_config::user::{self, UserConfig, load_user_config};
 use odx_core::Exit;
 use odx_git::{RepoLock, url_hash};
 use odx_sync::{
-    CachedRepo, SyncRecord, SyncedWorkspace, parse_size, register, to_collect, unregister,
+    CachedRepo, Presence, SyncRecord, SyncedWorkspace, busy, parse_size, register, to_collect,
+    unregister,
 };
 
-use super::aggregate::{prepare, run_aggregate};
+use super::aggregate::{Prepared, prepare, run_aggregate};
 use super::{Report, human, size};
 use crate::Context;
 use crate::cli::{AggregateArgs, CacheCommand, GlobalArgs, SyncArgs};
@@ -36,6 +37,26 @@ pub(crate) fn shared(ctx: &Context<'_>) -> Result<(UserConfig, PathBuf), Report>
     let cache = user::cache_dir(&user, ctx.env)
         .ok_or_else(|| failed(Exit::Usage, "no shared cache directory; set ODX_CACHE_DIR"))?;
     Ok((user, cache))
+}
+
+/// Announce a foreground command to `odx sync` for as long as the returned
+/// value lives.
+pub(crate) fn presence(ctx: &Context<'_>) -> Option<Presence> {
+    shared(ctx)
+        .ok()
+        .and_then(|(_, cache)| Presence::enter(&cache))
+}
+
+/// Wait until no foreground odx command uses `cache`; `false` when
+/// `deadline` came first.
+fn idle(cache: &Path, deadline: Instant) -> bool {
+    while busy(cache) {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    true
 }
 
 /// `odx sync`.
@@ -93,7 +114,8 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         config: None,
         jobs: settings.jobs.or(global.jobs).or(Some(2)),
         offline: global.offline,
-        fresh: false,
+        // Prefetching exists to bring the cache up to date.
+        fresh: true,
         no_refresh: false,
         refresh_index: false,
         json: false,
@@ -102,7 +124,8 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     };
     for dir in &workspaces {
         let path = dir.display().to_string();
-        let (status, detail) = if Instant::now() >= deadline {
+        // Foreground commands go first.
+        let (status, detail) = if Instant::now() >= deadline || !idle(&cache, deadline) {
             ("skipped", "max_duration reached".to_owned())
         } else {
             let workspace = Context {
@@ -213,6 +236,23 @@ pub(crate) fn last_sync(cache: &Path) -> String {
             )
         },
     )
+}
+
+/// Register the workspace of `prepared` for `odx sync --all` when the user
+/// configuration asks for that (`[cache] register_workspaces`).
+pub(crate) fn auto_register(prepared: &Prepared, ctx: &Context<'_>) {
+    if prepared.register {
+        let root = prepared.project.root.display().to_string();
+        // Registration is a convenience; the command goes on without it.
+        let _ = edit_user_config(ctx, |doc| {
+            register(
+                doc,
+                &root,
+                &date(SystemTime::now()),
+                &prepared.project.config.odoo_version,
+            );
+        });
+    }
 }
 
 /// `odx sync --register` / `--unregister`: edit `[workspaces]` in the user
@@ -372,6 +412,7 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
                 if removed {
                     if !*dry_run {
                         let _ = std::fs::remove_file(&url_file);
+                        let _ = std::fs::remove_file(url_file.with_extension("fetched"));
                     }
                     freed += repo.size;
                     let _ = writeln!(

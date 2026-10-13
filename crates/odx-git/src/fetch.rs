@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::lock::RepoLock;
 use crate::{Cache, Forge, GitBackend, GitError, LocalClone, Source};
@@ -21,6 +21,10 @@ pub struct FetchPlan {
     pub fallback: Option<String>,
     /// A local clone of the repository to borrow objects from.
     pub clone: Option<LocalClone>,
+    /// Serve every source from the cache, without network, when the cache
+    /// repository was fetched within this long and holds them all; `None`
+    /// always fetches.
+    pub max_age: Option<Duration>,
 }
 
 /// Where a fetched source came from.
@@ -76,6 +80,9 @@ pub fn fetch(
         fs::write(cache.url_file(&plan.url), format!("{}\n", plan.url))?;
     }
     check_alternates(&dir)?;
+    if let Some(fresh) = from_cache(cache, backend, &dir, plan) {
+        return Ok(fresh);
+    }
     if let Some(clone) = &plan.clone {
         borrow_from(&dir, clone)?;
     }
@@ -135,7 +142,8 @@ pub fn fetch(
             );
         }
     }
-    plan.sources
+    let fetched: Result<Vec<Fetched>, GitError> = plan
+        .sources
         .iter()
         .enumerate()
         .map(|(i, (remote, source))| {
@@ -160,6 +168,45 @@ pub fn fetch(
                 source: source.clone(),
                 sha,
                 via,
+            })
+        })
+        .collect();
+    fetched.inspect(|_| stamp(cache, &plan.url))
+}
+
+/// Record that the repository at `url` was just fetched. Without the stamp
+/// the next run fetches again, so a failure to write it loses nothing.
+fn stamp(cache: &Cache, url: &str) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let _ = fs::write(cache.fetched_file(url), format!("{now}\n"));
+}
+
+/// Every source of `plan` from the cache, when the plan allows that and
+/// the repository was fetched within its `max_age` and holds them all.
+fn from_cache(
+    cache: &Cache,
+    backend: &dyn GitBackend,
+    dir: &Path,
+    plan: &FetchPlan,
+) -> Option<Vec<Fetched>> {
+    let max_age = plan.max_age?;
+    let stamp = fs::read_to_string(cache.fetched_file(&plan.url)).ok()?;
+    let fetched = UNIX_EPOCH + Duration::from_secs(stamp.trim().parse().ok()?);
+    if SystemTime::now().duration_since(fetched).ok()? > max_age {
+        return None;
+    }
+    plan.sources
+        .iter()
+        .map(|(remote, source)| {
+            let local = source.local_ref(plan.forge, remote.as_deref());
+            Some(Fetched {
+                remote: remote.clone(),
+                source: source.clone(),
+                sha: backend.resolve(dir, &local).ok().flatten()?,
+                via: Via::Cache,
             })
         })
         .collect()

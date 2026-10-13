@@ -4,7 +4,9 @@
 //! the registered workspaces into the shared cache; this crate holds the
 //! registry edits, the sync record and the cache's garbage collection.
 
-use std::path::Path;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -48,6 +50,66 @@ pub fn set_sync(doc: &mut DocumentMut, enabled: bool, interval: Option<&str>) {
         table.insert("interval", value(interval));
     }
     doc.insert("sync", Item::Table(table));
+}
+
+/// A foreground odx command, visible to `odx sync` while it lives: a file
+/// under `active/` in the cache, locked for as long as the command runs, so
+/// a file nobody holds is left over from a command that died.
+#[derive(Debug)]
+pub struct Presence {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+/// Tells presences of one process apart.
+static PRESENCES: AtomicUsize = AtomicUsize::new(0);
+
+impl Presence {
+    /// Announce a foreground command in `cache`; `None` when the file
+    /// cannot be created (the command runs anyway).
+    pub fn enter(cache: &Path) -> Option<Self> {
+        let dir = cache.join("active");
+        let path = dir.join(format!(
+            "{}-{}",
+            std::process::id(),
+            PRESENCES.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = fs::create_dir_all(&dir)
+            .and_then(|()| File::create(&path))
+            .and_then(|file| file.lock().map(|()| file))
+            .ok()?;
+        Some(Self {
+            path,
+            file: Some(file),
+        })
+    }
+}
+
+impl Drop for Presence {
+    fn drop(&mut self) {
+        // Unlock first: a file still open cannot be removed everywhere.
+        drop(self.file.take());
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// Whether a foreground odx command is running on `cache`; presence files
+/// of commands that died are removed on the way.
+pub fn busy(cache: &Path) -> bool {
+    let mut live = false;
+    for entry in fs::read_dir(cache.join("active"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let path = entry.path();
+        if File::open(&path).is_ok_and(|file| file.try_lock().is_ok()) {
+            let _ = fs::remove_file(&path);
+        } else {
+            live = true;
+        }
+    }
+    live
 }
 
 /// A size written as a number and a unit: `"500MB"`, `"20GB"` (powers of
@@ -136,7 +198,7 @@ pub struct SyncedWorkspace {
 impl SyncRecord {
     /// Read `last_sync.json`, if there is a readable one.
     pub fn read(path: &Path) -> Option<Self> {
-        std::fs::read(path)
+        fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
     }
@@ -151,9 +213,9 @@ impl SyncRecord {
         let temporary = path.with_extension("json.tmp");
         let text = serde_json::to_string_pretty(self).unwrap_or_default();
         path.parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&temporary, text))
-            .and_then(|()| std::fs::rename(&temporary, path))
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::write(&temporary, text))
+            .and_then(|()| fs::rename(&temporary, path))
     }
 }
 
@@ -204,6 +266,30 @@ mod tests {
         let mut odd: DocumentMut = "sync = 1\n".parse().unwrap();
         set_sync(&mut odd, true, None);
         assert_eq!(odd.to_string(), "[sync]\nenabled = true\n");
+    }
+
+    #[test]
+    fn presences() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        assert!(!busy(&cache));
+        let first = Presence::enter(&cache).unwrap();
+        let second = Presence::enter(&cache).unwrap();
+        assert_ne!(first.path, second.path);
+        assert!(busy(&cache));
+        drop(first);
+        assert!(busy(&cache));
+        drop(second);
+        assert!(!busy(&cache));
+        assert_eq!(fs::read_dir(cache.join("active")).unwrap().count(), 0);
+        // Left over from a command that died: nobody holds it.
+        fs::write(cache.join("active").join("1-0"), "").unwrap();
+        assert!(!busy(&cache));
+        assert!(!cache.join("active").join("1-0").exists());
+        // No cache to announce in.
+        let blocked = tmp.path().join("file");
+        fs::write(&blocked, "").unwrap();
+        assert!(Presence::enter(&blocked).is_none());
     }
 
     #[test]
@@ -269,10 +355,10 @@ mod tests {
         record.write(&path).unwrap();
         assert_eq!(SyncRecord::read(&path), Some(record.clone()));
         assert!(!path.with_extension("json.tmp").exists());
-        std::fs::write(&path, "nonsense").unwrap();
+        fs::write(&path, "nonsense").unwrap();
         assert_eq!(SyncRecord::read(&path), None);
         let blocked = tmp.path().join("file");
-        std::fs::write(&blocked, "").unwrap();
+        fs::write(&blocked, "").unwrap();
         assert!(record.write(&blocked.join("last_sync.json")).is_err());
     }
 }

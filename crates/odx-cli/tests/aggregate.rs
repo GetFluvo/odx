@@ -111,14 +111,27 @@ fn fetch_only_fills_the_cache() {
         (exit, out.as_str(), err.as_str()),
         (Exit::Success, "fetched pos: 2 refs\n", "")
     );
+    // Fetched moments ago: served from the cache.
     let (exit, out, _) = run(
         &project,
         &["--jobs", "1", "aggregate", "--fetch-only", "--repo", "pos"],
     );
     assert_eq!(
         (exit, out.as_str()),
-        (Exit::Success, "fetched pos: 2 refs\n")
+        (Exit::Success, "fetched pos: 2 refs (2 already cached)\n")
     );
+    let (_, out, _) = run(&project, &["--fresh", "aggregate", "--fetch-only"]);
+    assert_eq!(out, "fetched pos: 2 refs\n");
+    let (_, out, _) = run(&project, &["--no-refresh", "aggregate", "--fetch-only"]);
+    assert_eq!(out, "fetched pos: 2 refs (2 already cached)\n");
+    // With a TTL of zero, every run fetches.
+    write_config(
+        &project,
+        "[tool.odx.cache]\nttl = { refs = \"0s\" }",
+        "{ pr = 1 }",
+    );
+    let (_, out, _) = run(&project, &["aggregate", "--fetch-only"]);
+    assert_eq!(out, "fetched pos: 2 refs\n");
 }
 
 #[test]
@@ -157,6 +170,63 @@ fn locked_commits_come_from_the_mirror() {
         (exit, out.as_str()),
         (Exit::Success, "fetched pos: 2 refs (1 from the mirror)\n")
     );
+}
+
+#[test]
+fn commits_come_from_the_users_mirror() {
+    for prefer in [true, false] {
+        let tmp = tempfile::tempdir().unwrap();
+        let mirror = tmp.path().join("mirror.git");
+        let base = project("");
+        git(
+            tmp.path(),
+            &["init", "--quiet", "--bare", mirror.to_str().unwrap()],
+        );
+        let upstream_dir = base.upstream.trim_start_matches("file://").to_owned();
+        let upstream_dir = if cfg!(windows) {
+            upstream_dir.trim_start_matches('/').to_owned()
+        } else {
+            upstream_dir
+        };
+        git(
+            Path::new(&upstream_dir),
+            &[
+                "push",
+                "--quiet",
+                mirror.to_str().unwrap(),
+                &format!("{0}:refs/odx/{0}", base.pr),
+            ],
+        );
+        write_config(&base, "", &format!("{{ sha = \"{}\" }}", base.pr));
+        // Keyed by the directory that holds the upstream repository.
+        let (prefix, _) = base.upstream.rsplit_once('/').unwrap();
+        std::fs::create_dir_all(tmp.path().join("config")).unwrap();
+        std::fs::write(
+            tmp.path().join("config").join("config.toml"),
+            format!(
+                "[mirrors]\n\"{prefix}\" = {{ url = \"{}\", prefer = {prefer} }}\n",
+                file_url(&mirror)
+            ),
+        )
+        .unwrap();
+        let project = Project {
+            env: base.env.clone().with(
+                "ODX_CONFIG_DIR",
+                tmp.path().join("config").display().to_string(),
+            ),
+            ..base
+        };
+        let (exit, out, err) = run(&project, &["aggregate", "--fetch-only"]);
+        let expected = if prefer {
+            "fetched pos: 2 refs (1 from the mirror)\n"
+        } else {
+            "fetched pos: 2 refs\n"
+        };
+        assert_eq!(
+            (exit, out.as_str(), err.as_str()),
+            (Exit::Success, expected, "")
+        );
+    }
 }
 
 #[test]
@@ -343,7 +413,7 @@ fn conflicts_stop_or_are_skipped() {
     assert_eq!(exit, Exit::Success);
     assert_eq!(
         redact(&out),
-        "fetched pos: 3 refs\nbuilt pos in vendor/pos: 1 merged, 1 skipped: #2 conflicts in b.txt (<sha>)\nlocked pos at <sha>\n"
+        "fetched pos: 3 refs (3 already cached)\nbuilt pos in vendor/pos: 1 merged, 1 skipped: #2 conflicts in b.txt (<sha>)\nlocked pos at <sha>\n"
     );
     let (_, json, _) = run(&project, &["--json", "aggregate", "--update"]);
     assert!(
