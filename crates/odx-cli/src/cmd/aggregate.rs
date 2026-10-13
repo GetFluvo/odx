@@ -10,26 +10,31 @@ use std::time::Duration;
 use odx_aggregate::{
     BuildOptions, Change, ChangeKind, HeadDecision, PlanError, Planned, PlannedSource,
     RepoAggregation, RepoPlan, aggregations, classify, date, decide, fetch_plans, local_clones,
-    lock_changes, lock_entry, locked_entry, mergiraf_program, pin, plan_config, run_pipeline,
-    strategy, update_lock,
+    lock_changes, lock_entry, locked_entry, mergiraf_program, package_entries, package_fetch_plans,
+    pin, plan_config, rewrite_packages, run_fetches, run_pipeline, strategy, update_lock,
 };
+use odx_config::deps::{normalize_name, read_uv_git_sources};
+use odx_config::edit::PyprojectEdit;
 use odx_config::lock::{
-    CiState as LockCi, LockedRepository, Lockfile, MergeStatus, RedClassification,
+    CiState as LockCi, LockedRepository, Lockfile, MergeStatus, OdooPin, RedClassification,
 };
+use odx_config::packages::{PackageSpec, package_specs};
 use odx_config::schema::OnHeadChange;
 use odx_config::schema::RefStyle;
 use odx_config::user::{self, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Project, Source, discover};
 use odx_core::system::OsRunner;
-use odx_core::{Env, Exit, repo_key};
+use odx_core::{Env, Exit, Invocation, ProcessRunner, repo_key};
 use odx_forge::{CachedHttp, CiState, ForgeClient, ForgeKind, RepoUrl, ReqwestHttp, Visibility};
 use odx_git::{
     Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
     Outcome, StepOutcome, SystemGit, VaultRefs, Via, url_hash, vault,
 };
+use std::collections::BTreeMap;
+use toml_edit::DocumentMut;
 
 use super::Report;
-use super::edit::read_lock;
+use super::edit::{read_lock, save};
 use crate::Context;
 use crate::cli::{AggregateArgs, GlobalArgs, LockArgs};
 
@@ -400,18 +405,7 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     // Pinned repositories keep their entries; the others are built in
     // scratch working trees inside the cache, never in the project.
     let mut planned: Vec<Planned> = planned.into_iter().filter(|repo| !repo.pinned).collect();
-    for repo in &mut planned {
-        let name: String = repo
-            .name
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
-        repo.target_dir = prepared
-            .cache
-            .root()
-            .join("locks")
-            .join(format!("{}-{name}", url_hash(&repo.url)));
-    }
+    in_scratch_dirs(&prepared.cache, &mut planned);
     let (merger, options) = merger_and_options(&prepared.project.config, ctx, false, true)?;
     let mut warnings = prepared.project.warnings.clone();
     let kept = if args.update && prepared.lock.is_some() {
@@ -440,7 +434,20 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     record_kept(&mut entries, &kept, prepared.locked());
     summary.kept = kept;
     summary.failures.extend(failures);
-    let lock = next_lock(&prepared, entries, args.repo.as_deref());
+    let mut lock = next_lock(&prepared, entries, args.repo.as_deref());
+    // Packages and the Odoo core belong to the whole project, not to a
+    // repository: `--repo` leaves them as they are.
+    let packages = if args.repo.is_none() {
+        Some(lock_packages(
+            &prepared,
+            args.update,
+            &mut lock,
+            &mut summary,
+            &mut warnings,
+        )?)
+    } else {
+        None
+    };
     let previous = prepared.lock.clone().unwrap_or_default();
     summary.changes = lock_changes(&previous, &lock);
     let outdated = previous != lock;
@@ -452,9 +459,19 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
             ));
         }
     } else {
-        let mut lock = lock;
         if !args.no_push {
             vault_lock(ctx, &prepared, &mut lock, &mut summary, &mut warnings)?;
+            if let Some((specs, doc)) = packages {
+                point_packages_at_the_vault(
+                    ctx,
+                    &prepared,
+                    args.no_uv,
+                    &specs,
+                    doc,
+                    &lock,
+                    &mut summary,
+                )?;
+            }
         }
         if previous != lock {
             write_lock(ctx, &prepared, &lock)?;
@@ -462,6 +479,161 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         return Ok(summary.report(global.json, false, warnings));
     }
     Ok(summary.report(global.json, false, warnings))
+}
+
+/// Build in scratch working trees inside the cache, never in the project.
+fn in_scratch_dirs(cache: &Cache, planned: &mut [Planned]) {
+    for repo in planned.iter_mut() {
+        let name: String = repo
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        repo.target_dir = cache
+            .root()
+            .join("locks")
+            .join(format!("{}-{name}", url_hash(&repo.url)));
+    }
+}
+
+/// Resolve the project's git packages (pinned by `odx.lock` unless
+/// `update`) and its Odoo core source into `lock`; returns the packages and
+/// the parsed `pyproject.toml` for rewriting.
+fn lock_packages(
+    prepared: &Prepared,
+    update: bool,
+    lock: &mut Lockfile,
+    summary: &mut Summary,
+    warnings: &mut Vec<odx_config::Problem>,
+) -> Result<(Vec<PackageSpec>, PyprojectEdit), Report> {
+    // The text was read and validated when the project was loaded.
+    let edit = PyprojectEdit::parse(&prepared.project.text).unwrap_or_default();
+    let doc = edit.document();
+    let previous = prepared.lock.clone().unwrap_or_default();
+    let pinned = if update {
+        BTreeMap::new()
+    } else {
+        previous.packages.clone()
+    };
+    let (specs, problems) = package_specs(doc, &prepared.project.config, &previous.packages);
+    warnings.extend(problems);
+    let vault = prepared
+        .project
+        .config
+        .mirror
+        .as_ref()
+        .map(|m| m.url.as_str());
+    let mut plans = package_fetch_plans(&specs, &pinned, vault);
+    for plan in &mut plans {
+        plan.clone = prepared.clones.find(&plan.url).cloned();
+    }
+    let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::new(OsRunner)));
+    let outcomes = run_fetches(&prepared.cache, &backend, plans, prepared.limits);
+    let fetched: Vec<(String, Vec<Fetched>)> = outcomes
+        .iter()
+        .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+        .collect();
+    summary.failures.extend(outcomes.iter().filter_map(|o| {
+        o.result
+            .as_ref()
+            .err()
+            .map(|e| format!("packages from {}: {e}", o.url))
+    }));
+    let (entries, missing) = package_entries(&specs, &fetched, &pinned);
+    summary
+        .failures
+        .extend(missing.iter().map(|dist| format!("{dist}: not resolved")));
+    lock.packages = entries;
+    lock.odoo = odoo_pin(doc, &previous, update).map_err(|e| Report::error(Exit::Failure, e))?;
+    Ok((specs, edit))
+}
+
+/// The Odoo core revision from `[tool.uv.sources] odoo` (git), asked of
+/// the remote without downloading anything; the locked one while the
+/// source is unchanged and not `update`.
+fn odoo_pin(
+    doc: &DocumentMut,
+    previous: &Lockfile,
+    update: bool,
+) -> Result<Option<OdooPin>, String> {
+    let Some(source) = read_uv_git_sources(doc)
+        .into_iter()
+        .find(|source| normalize_name(&source.name) == "odoo")
+    else {
+        return Ok(None);
+    };
+    let kept = previous
+        .odoo
+        .clone()
+        .filter(|pin| !update && repo_key(&pin.url) == repo_key(&source.git));
+    if kept.is_some() {
+        return Ok(kept);
+    }
+    let reference = source
+        .rev
+        .clone()
+        .or_else(|| source.tag.clone())
+        .or_else(|| source.branch.clone())
+        .unwrap_or_else(|| "HEAD".to_owned());
+    let full =
+        matches!(reference.len(), 40 | 64) && reference.bytes().all(|b| b.is_ascii_hexdigit());
+    let rev = if full {
+        reference
+    } else {
+        SystemGit::new(Arc::new(OsRunner))
+            .ls_remote(&source.git, &reference)
+            .map_err(|e| format!("odoo: {e}"))?
+            .ok_or_else(|| format!("odoo: {} has no {reference}", source.git))?
+    };
+    Ok(Some(OdooPin {
+        url: source.git,
+        rev,
+    }))
+}
+
+/// Rewrite vaulted packages to their vault tags in `pyproject.toml`, then
+/// update `uv.lock` (`ODX_UV` names the executable) unless `no_uv`.
+fn point_packages_at_the_vault(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    no_uv: bool,
+    specs: &[PackageSpec],
+    mut edit: PyprojectEdit,
+    lock: &Lockfile,
+    summary: &mut Summary,
+) -> Result<(), Report> {
+    let Some(mirror) = prepared.project.config.mirror.as_ref() else {
+        return Ok(());
+    };
+    let before = edit.to_string();
+    let file = &prepared.project.file;
+    let failures = rewrite_packages(edit.document_mut(), specs, &lock.packages, &mirror.url);
+    summary.failures.extend(
+        failures
+            .iter()
+            .map(|dist| format!("{dist}: cannot point it at the vault in {}", file.display())),
+    );
+    if edit.to_string() == before {
+        return Ok(());
+    }
+    save(ctx, file, &edit)?;
+    summary.rewritten = true;
+    if !no_uv {
+        let uv = ctx.env.var("ODX_UV").unwrap_or_else(|| "uv".to_owned());
+        let invocation = Invocation::new(&uv)
+            .arg("lock")
+            .current_dir(&prepared.project.root);
+        let output = OsRunner.run(&invocation);
+        let ok = output.as_ref().is_ok_and(odx_core::Output::success);
+        if !ok {
+            let detail = output.map_or_else(
+                |e| e.to_string(),
+                |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            );
+            summary.failures.push(format!("{uv} lock failed: {detail}"));
+        }
+    }
+    Ok(())
 }
 
 /// A pull request the guard rail kept at its locked commit.
@@ -663,7 +835,12 @@ fn vault_lock(
         return Ok(());
     };
     let unvaulted = |entry: &LockedRepository| entry.merges.iter().any(|m| m.mirror_ref.is_none());
-    if !lock.repositories.iter().any(unvaulted) {
+    if !lock.repositories.iter().any(unvaulted)
+        && lock
+            .packages
+            .values()
+            .all(|package| package.mirror_ref.is_some())
+    {
         return Ok(());
     }
     let refs = vault_refs(ctx, prepared.cache.root(), mirror, warnings)?;
@@ -692,6 +869,29 @@ fn vault_lock(
             Err(e) => summary
                 .failures
                 .push(format!("{}: vaulting failed: {e}", entry.name)),
+        }
+    }
+    // uv fetches tags and branches only: packages are always vaulted as tags.
+    for (dist, package) in lock
+        .packages
+        .iter_mut()
+        .filter(|(_, package)| package.mirror_ref.is_none())
+    {
+        let shas = [package.sha.clone()];
+        match vault(
+            &git,
+            &prepared.cache.repo_dir(&package.url),
+            &mirror.url,
+            &shas,
+            &VaultRefs::Tags,
+        ) {
+            Ok(names) => {
+                package.mirror_ref = names.into_iter().next();
+                summary.vaulted.push((dist.clone(), 1));
+            }
+            Err(e) => summary
+                .failures
+                .push(format!("{dist}: vaulting failed: {e}")),
         }
     }
     Ok(())
@@ -773,6 +973,7 @@ struct Summary {
     changes: Vec<Change>,
     vaulted: Vec<(String, usize)>,
     kept: Vec<Kept>,
+    rewritten: bool,
     failures: Vec<String>,
     /// Built in scratch working trees (`odx lock`): directories are not
     /// shown.
@@ -818,6 +1019,7 @@ impl Summary {
             changes: Vec::new(),
             vaulted: Vec::new(),
             kept: Vec::new(),
+            rewritten: false,
             failures: Vec::new(),
             scratch,
         }
@@ -898,6 +1100,11 @@ impl Summary {
         }
         for change in &self.changes {
             let _ = writeln!(report.out, "{}", describe_change(change));
+        }
+        if self.rewritten {
+            report
+                .out
+                .push_str("pointed packages at the vault in pyproject.toml\n");
         }
         for keep in &self.kept {
             let _ = writeln!(report.out, "{}", describe_kept(keep));
@@ -994,6 +1201,7 @@ impl Summary {
             })
             .collect();
         value.insert("kept".to_owned(), serde_json::Value::Array(kept));
+        value.insert("rewritten".to_owned(), serde_json::json!(self.rewritten));
         let failures = &self.failures;
         value.insert("errors".to_owned(), serde_json::json!(failures));
         serde_json::Value::Object(value)

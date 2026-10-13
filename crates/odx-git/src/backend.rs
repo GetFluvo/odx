@@ -113,6 +113,42 @@ impl SystemGit {
     }
 }
 
+impl SystemGit {
+    /// The commit `reference` (a branch or tag name, or a full ref) points
+    /// at on `url`, without fetching anything; annotated tags are peeled.
+    ///
+    /// # Errors
+    ///
+    /// When the remote cannot be reached.
+    pub fn ls_remote(&self, url: &str, reference: &str) -> Result<Option<String>, GitError> {
+        let invocation = self
+            .git(None)
+            .args(["ls-remote", url, reference])
+            .arg(format!("{reference}^{{}}"));
+        let output = self.run("ls-remote", &invocation)?;
+        let listing = String::from_utf8_lossy(&output.stdout);
+        let refs: Vec<(&str, &str)> = listing
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .collect();
+        let wanted = |name: &str| {
+            [
+                reference.to_owned(),
+                format!("refs/heads/{reference}"),
+                format!("refs/tags/{reference}"),
+            ]
+            .iter()
+            .any(|candidate| name == candidate || name == format!("{candidate}^{{}}"))
+        };
+        let peeled = refs
+            .iter()
+            .find(|(_, name)| name.ends_with("^{}") && wanted(name));
+        Ok(peeled
+            .or_else(|| refs.iter().find(|(_, name)| wanted(name)))
+            .map(|(sha, _)| (*sha).to_owned()))
+    }
+}
+
 impl GitBackend for SystemGit {
     fn init_bare(&self, dir: &Path) -> Result<(), GitError> {
         let invocation = self
@@ -147,5 +183,54 @@ impl GitBackend for SystemGit {
         Ok(output
             .success()
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use odx_core::system::OsRunner;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "odx")
+            .env("GIT_AUTHOR_EMAIL", "odx@example.com")
+            .env("GIT_COMMITTER_NAME", "odx")
+            .env("GIT_COMMITTER_EMAIL", "odx@example.com")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    #[test]
+    fn remote_refs_without_fetching() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        git(repo, &["init", "--quiet", "--initial-branch=17.0"]);
+        git(repo, &["commit", "--quiet", "--allow-empty", "-m", "a"]);
+        let head = git(repo, &["rev-parse", "HEAD"]);
+        git(repo, &["tag", "light"]);
+        git(repo, &["tag", "-a", "annotated", "-m", "tag"]);
+        let system = SystemGit::new(Arc::new(OsRunner));
+        let url = repo.to_str().unwrap();
+        for reference in [
+            "17.0",
+            "refs/heads/17.0",
+            "light",
+            "annotated",
+            "refs/tags/annotated",
+        ] {
+            assert_eq!(
+                system.ls_remote(url, reference).unwrap().as_deref(),
+                Some(head.as_str()),
+                "{reference}"
+            );
+        }
+        assert_eq!(system.ls_remote(url, "missing").unwrap(), None);
+        assert!(system.ls_remote("/nonexistent/odx", "17.0").is_err());
     }
 }

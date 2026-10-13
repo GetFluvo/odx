@@ -227,3 +227,42 @@ false`, locks without vaulting.
 ```text
 vaulted pos: 3 commits
 ```
+
+## Packages
+
+Addons installed as Python packages from git are locked too: entries of
+`[tool.odx.packages]` and git direct references in the dependency groups of
+`[tool.odx.groups]`:
+
+```toml
+[project.optional-dependencies]
+oca_unmerged = [
+  "odoo-addon-pos_vouchers @ git+https://github.com/OCA/pos.git@refs/pull/45/head#subdirectory=pos_vouchers",
+]
+
+[tool.odx.packages]
+odoo-addon-private-reports = { url = "https://forge.example.com/odoo/private-reports.git", branch = "17.0", subdirectory = "private_reports", group = "private" }
+```
+
+`odx lock` resolves each to a commit and records it in `odx.lock`
+(`[packages.<name>]`); until `--update`, a package keeps its commit. With a
+vault configured, every package commit is vaulted as the tag
+`refs/tags/odx/<commit>` (uv fetches tags and branches, not other refs) and
+the project is pointed at it: a direct reference becomes
+`…@odx/<commit>`, and a `[tool.odx.packages]` entry gets a
+`[tool.uv.sources]` entry (and is added to its group when missing). The
+original source stays in `odx.lock`, so `--update` still follows the pull
+request. Then `uv lock` runs (`--no-uv` skips it; `ODX_UV` names another
+executable).
+
+The Odoo core, `[tool.uv.sources] odoo = { git = …, branch = … }`, is
+recorded as `[odoo]` with the commit the branch or tag points at, asked of
+the remote without downloading it; it is not vaulted (uv.lock pins it, and
+copying all of Odoo into the vault would be costly).
+
+```text
+locked odoo-addon-pos_vouchers package at 1a2b3c4d5e6f
+locked odoo core at 0a1b2c3d4e5f
+vaulted odoo-addon-pos_vouchers: 1 commits
+pointed packages at the vault in pyproject.toml
+```

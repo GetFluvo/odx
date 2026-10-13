@@ -80,6 +80,7 @@ pub fn plan_yaml(repos: &[RepoSpec], root: &Path) -> Vec<Planned> {
                             sha: None,
                             branch: Some(merge.reference.clone()),
                             remote: Some(merge.url.clone()),
+                            tag: None,
                         },
                     })
                     .collect(),

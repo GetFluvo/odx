@@ -26,6 +26,7 @@ odx-core = { workspace = true, features = ["system"] }
 odx-forge.workspace = true
 odx-git.workspace = true
 serde_json.workspace = true
+toml_edit.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

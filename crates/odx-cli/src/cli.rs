@@ -212,6 +212,9 @@ pub struct LockArgs {
     /// Adopt this pull request's new head even when its CI is not green (`<repo>#<pr>`).
     #[arg(long, value_name = "REPO#PR")]
     pub follow: Vec<String>,
+    /// Do not run `uv lock` after rewriting package sources.
+    #[arg(long)]
+    pub no_uv: bool,
     /// Do not push locked commits to the configured vault.
     #[arg(long)]
     pub no_push: bool,

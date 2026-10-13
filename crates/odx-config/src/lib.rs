@@ -14,6 +14,7 @@ mod error;
 mod load;
 pub mod lock;
 pub mod mutes;
+pub mod packages;
 pub mod schema;
 pub mod user;
 

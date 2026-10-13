@@ -48,7 +48,7 @@ fn open(ctx: &Context<'_>, file: &Path) -> Result<PyprojectEdit, Report> {
 
 /// Validate the edited text and write it; the file is left untouched when
 /// the result would be invalid.
-fn save(ctx: &Context<'_>, file: &Path, doc: &PyprojectEdit) -> Result<(), Report> {
+pub(crate) fn save(ctx: &Context<'_>, file: &Path, doc: &PyprojectEdit) -> Result<(), Report> {
     let text = doc.to_string();
     parse_pyproject(&text, file).map_err(|e| Report::error(Exit::Usage, e.to_string()))?;
     ctx.fs
@@ -159,6 +159,7 @@ fn drop(args: &DropArgs, ctx: &Context<'_>) -> Result<Report, Report> {
             sha: None,
             branch: None,
             remote: None,
+            tag: None,
         };
         let source = match &spec.target {
             Target::Pr(pr) => LockSource {

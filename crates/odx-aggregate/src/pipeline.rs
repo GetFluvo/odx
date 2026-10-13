@@ -102,6 +102,19 @@ pub fn run_pipeline(
     })
 }
 
+/// Fetch every plan on a runtime of its own (see [`run_pipeline`]).
+///
+/// Excluded from coverage for the same reasons as [`run_pipeline`].
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn run_fetches(
+    cache: &Cache,
+    backend: &Arc<dyn GitBackend>,
+    plans: Vec<FetchPlan>,
+    limits: Limits,
+) -> Vec<Outcome> {
+    run_pipeline(cache, backend, plans, limits, None, &|_| Vec::new()).0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

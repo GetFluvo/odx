@@ -17,6 +17,8 @@ pub struct Project {
     pub file: PathBuf,
     /// The validated configuration.
     pub config: OdxConfig,
+    /// The text of the file, as read.
+    pub text: String,
     /// Non-fatal findings, such as values that were corrected.
     pub warnings: Vec<Problem>,
 }
@@ -104,6 +106,7 @@ pub fn parse_pyproject(text: &str, file: &Path) -> Result<Option<Project>, Confi
         root: file.parent().map(Path::to_path_buf).unwrap_or_default(),
         file: file.to_path_buf(),
         config,
+        text: text.to_owned(),
         warnings,
     }))
 }

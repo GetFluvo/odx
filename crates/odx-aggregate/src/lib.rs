@@ -11,6 +11,7 @@
 mod aggregation;
 mod guard;
 mod locking;
+mod packages;
 mod pipeline;
 mod plan;
 mod repos_yaml;
@@ -18,7 +19,10 @@ mod repos_yaml;
 pub use aggregation::{BuildOptions, RepoAggregation, aggregations};
 pub use guard::{HeadDecision, classify, date, decide};
 pub use locking::{Change, ChangeKind, lock_changes, lock_entry, source_label, update_lock};
-pub use pipeline::{local_clones, mergiraf_program, run_pipeline};
+pub use packages::{
+    locked_package, package_entries, package_fetch_plans, package_source, rewrite_packages,
+};
+pub use pipeline::{local_clones, mergiraf_program, run_fetches, run_pipeline};
 pub use plan::{Planned, PlannedSource, PlannedStep, locked_entry, pin, plan_config};
 pub use repos_yaml::{plan_yaml, yaml_source};
 
