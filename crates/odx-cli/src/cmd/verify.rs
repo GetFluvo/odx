@@ -27,6 +27,7 @@ use toml_edit::{DocumentMut, Item};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
+use super::hooks::{Hook, Ran, run_hook};
 use super::vendor::{describe_conflict, generate, provided_lines, vendor_manifest};
 use crate::Context;
 use crate::cli::{GlobalArgs, VerifyArgs};
@@ -50,6 +51,10 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     }
     if let Some(dir) = &args.installed {
         installed(ctx, &prepared, dir, &lock, &mut problems);
+    }
+    match run_hook(ctx, &prepared, Hook::Verify, args.allow_shell) {
+        Ran::Nothing | Ran::Succeeded => {}
+        Ran::NotAllowed(message) | Ran::Failed(message) => problems.push(message),
     }
     if args.vendored || args.deployed.is_some() {
         vendored(

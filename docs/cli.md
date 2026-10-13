@@ -412,12 +412,44 @@ addons already are wheels; aggregated, unmerged and private addons are not.
    reports an installed version that differs.
 5. **Publish:** `--publish` runs `uv publish --index <name>` for the built
    wheels; the index is `--index`, else `[tool.odx.platform] index`, else
-   `private`, and must be a `[[tool.uv.index]]` of the project. PyPI is
-   refused: it does not accept local versions. The index is recorded in
-   the wheel entries.
+   `private`, and must be a `[[tool.uv.index]]` of the project with a
+   `url` and a `publish-url`. uv checks the `url` first and skips files the
+   index already has, so publishing again is a no-op, and a file with the
+   same name but other content fails: with content-derived versions that
+   means a build that is not reproducible. PyPI is refused: it does not
+   accept local versions. The index is recorded in the wheel entries.
 
 The wheels land in `dist/wheels` (`--out-dir`). Pointing a dependency group
 at the published versions is not automated yet.
+
+## Custom platforms
+
+```toml
+[tool.odx.platform]
+profile = "custom"
+
+[tool.odx.platform.custom]
+prepare = "./deploy/prepare.sh"   # after odx vendor
+verify = "./deploy/verify.sh"     # during odx verify
+```
+
+For a platform odx does not know, the `custom` profile runs your own
+commands: `prepare` at the end of `odx vendor`, `verify` as part of
+`odx verify` (a failure fails the verification). They run with `sh -c`
+(`cmd /C` on Windows) in the project root, with `ODX_PROJECT_ROOT`,
+`ODX_ENVIRONMENT`, `ODX_SERIES`, `ODX_LOCKFILE`, `ODX_VENDOR_MANIFEST` and
+`ODX_REQUIREMENTS` set. Because they execute commands from the project,
+they only run with `--allow-shell` or when the project is listed in the
+user configuration:
+
+```toml
+# ~/.config/odx/config.toml
+[trust]
+projects = ["~/projects/acme"]
+```
+
+Otherwise `odx vendor` warns that the hook was skipped and `odx verify`
+fails.
 
 ## Installed wheels
 

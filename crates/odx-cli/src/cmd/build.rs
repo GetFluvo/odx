@@ -16,8 +16,8 @@ use odx_vendor::archive::{extract, subdirectory_entry};
 use odx_vendor::content::hex;
 use sha2::{Digest, Sha256};
 
-use super::Report;
 use super::aggregate::{Prepared, prepare, uv_program, write_lock};
+use super::{Report, run_checked};
 use crate::Context;
 use crate::cli::{BuildArgs, GlobalArgs};
 
@@ -367,19 +367,30 @@ fn publish(
                 .iter()
                 .find(|table| table.get("name").and_then(toml_edit::Item::as_str) == Some(index))
                 .map(|table| {
-                    ["url", "publish-url"]
-                        .iter()
-                        .filter_map(|key| table.get(key).and_then(toml_edit::Item::as_str))
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
+                    let url = |key: &str| {
+                        table
+                            .get(key)
+                            .and_then(toml_edit::Item::as_str)
+                            .map(str::to_owned)
+                    };
+                    (url("url"), url("publish-url"))
                 })
         })
         .ok_or_else(|| {
             format!("publish: pyproject.toml has no [[tool.uv.index]] named {index:?}")
         })?;
-    if configured.iter().any(|url| url.contains("pypi.org")) {
+    let (url, publish_url) = configured;
+    if [&url, &publish_url]
+        .iter()
+        .any(|url| url.as_deref().is_some_and(|url| url.contains("pypi.org")))
+    {
         return Err(format!(
             "publish: {index} is PyPI, which refuses the +odx local versions; publish to a private index"
+        ));
+    }
+    if url.is_none() || publish_url.is_none() {
+        return Err(format!(
+            "publish: [[tool.uv.index]] {index} needs a url (to skip files it already has) and a publish-url"
         ));
     }
     let uv = uv_program(ctx.env);
@@ -390,19 +401,6 @@ fn publish(
         |invocation, (_, file)| invocation.arg(file.as_os_str()),
     );
     run_checked(&invocation, &format!("{uv} publish"))
-}
-
-/// Run `invocation`; a failure carries its standard error.
-fn run_checked(invocation: &Invocation, what: &str) -> Result<(), String> {
-    let output = OsRunner.run(invocation);
-    if output.as_ref().is_ok_and(odx_core::Output::success) {
-        return Ok(());
-    }
-    let detail = output.map_or_else(
-        |e| e.to_string(),
-        |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-    );
-    Err(format!("{what} failed: {detail}"))
 }
 
 fn relative(path: &Path, root: &Path) -> String {

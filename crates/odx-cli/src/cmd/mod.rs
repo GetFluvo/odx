@@ -8,17 +8,32 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 
 use odx_config::Problem;
-use odx_core::{Exit, redact};
+use odx_core::system::OsRunner;
+use odx_core::{Exit, Invocation, ProcessRunner, redact};
 
 pub(crate) mod aggregate;
 pub(crate) mod autoupdate;
 pub(crate) mod build;
 pub(crate) mod compat;
 pub(crate) mod edit;
+pub(crate) mod hooks;
 pub(crate) mod sniff;
 pub(crate) mod stats;
 pub(crate) mod vendor;
 pub(crate) mod verify;
+
+/// Run `invocation`; a failure carries its standard error.
+pub(crate) fn run_checked(invocation: &Invocation, what: &str) -> Result<(), String> {
+    let output = OsRunner.run(invocation);
+    if output.as_ref().is_ok_and(odx_core::Output::success) {
+        return Ok(());
+    }
+    let detail = output.map_or_else(
+        |e| e.to_string(),
+        |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+    );
+    Err(format!("{what} failed: {detail}"))
+}
 
 /// What a command produced.
 #[derive(Debug, Default)]

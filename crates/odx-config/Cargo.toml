@@ -21,6 +21,7 @@ toml.workspace = true
 toml_edit.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 insta.workspace = true
 odx-core = { workspace = true, features = ["fakes"] }
 proptest.workspace = true
