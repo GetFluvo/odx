@@ -365,6 +365,44 @@ is not odx's, and when `uv.lock` or `odx.lock` moved on since `odx vendor`.
 the deployment repository before a push. The `generic-wheels` profile
 installs wheels instead, so `odx vendor` only writes its requirements there.
 
+## Odoo.sh
+
+Odoo.sh deploys the repository as it is: addons come from committed
+directories or git submodules, and Python packages only from public PyPI
+through `requirements.txt` at the root. With `profile = "odoo-sh"`:
+
+- `odx vendor --requirements` writes `requirements.txt` at the root;
+- `odx verify` checks every submodule: one that `.gitmodules` names
+  without a committed commit is unpinned, and a submodule at a locked
+  repository's `target_dir` must pin a commit whose tree is the locked
+  result (push the aggregated branch and update the submodule);
+- `odx verify --requirements` also refuses lines Odoo.sh cannot install
+  (`name @ git+...`, `-e`, other options).
+
+## Installed wheels
+
+```console
+$ odx verify --installed .venv         # a virtual environment
+$ odx verify --installed /srv/odoo/lib/python3.12/site-packages
+```
+
+Proof that a deployment installed what was locked. For every distribution
+in the environment that `uv.lock` knows:
+
+- the installed version is the locked one;
+- a package from git was installed from the locked commit
+  (`direct_url.json`);
+- a package from an index holds exactly the files of the locked wheel: odx
+  takes the wheel `uv.lock` names for the installed tags (from the cache,
+  or downloaded and checked against its sha256) and compares its `RECORD`
+  with the installed one, so a different wheel with the same version is
+  found;
+- no installed file changed since installation (its hash against the
+  installed `RECORD`).
+
+Distributions `uv.lock` does not know (pip, setuptools) and packages from a
+local directory are not compared.
+
 ## Platform requirements
 
 ```console
@@ -409,6 +447,40 @@ A requirement whose range excludes every version the platform provides is
 reported with the addon that declares it (`--strict` makes that an error).
 odx owns the file: hand edits are overwritten and reported, recognized by a
 digest in the header.
+
+## Automatic updates of index packages
+
+```console
+$ odx lock --auto-update
+auto-updated odoo-addon-web-responsive 17.0.1.1.9 -> 17.0.1.1.10 (i18n/nl.po)
+needs review odoo-addon-account-statement-base 17.0.1.6.0 -> 17.0.1.6.1: changes files outside allowed_paths: models/account_bank_statement.py
+needs review odoo-addon-base-tier-validation 17.0.1.2.0 -> 17.0.2.0.0: changes more than the last version segment
+```
+
+OCA releases a new wheel for almost every merged pull request, translation
+updates included. `odx lock --auto-update` looks at every addon package in
+`uv.lock` that comes from an index, matches `allow` and not `deny`, and asks
+the index (`ODX_PYPI_URL`, default PyPI's JSON API) for newer releases in
+the project's series:
+
+- only an update that changes the last version segment is taken
+  (`policy = "last-segment"`; `"none"` turns the command off);
+- with `content_check` (the default), odx downloads the locked and the new
+  wheel (hash-checked, cached) and compares the addon's files: when every
+  changed file matches `allowed_paths`, the update is taken, otherwise it
+  is listed for review with the offending files. The version line of
+  `__manifest__.py` does not count as a change.
+
+Taken updates go through `uv lock --upgrade-package <dist>==<version>`.
+
+```toml
+[tool.odx.lock.auto_update]
+policy = "last-segment"
+allow = ["odoo-addon-*"]
+deny = ["odoo-addon-base_tier_validation"]
+content_check = true
+allowed_paths = ["i18n/*.po", "i18n/*.pot", "README.rst", "readme/**", "static/description/**"]
+```
 
 ## Migration scripts
 

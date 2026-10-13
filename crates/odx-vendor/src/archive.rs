@@ -25,19 +25,7 @@ pub fn fetch(http: &dyn Http, cache: &Path, url: &str, hash: &str) -> Result<Vec
     {
         return Ok(bytes);
     }
-    let bytes = if url.starts_with("http://") || url.starts_with("https://") {
-        let response = http.get(url, &[]).map_err(download_error(url))?;
-        if response.status != 200 {
-            return Err(VendorError::Download {
-                url: url.to_owned(),
-                message: format!("HTTP {}", response.status),
-            });
-        }
-        response.body
-    } else {
-        let path = local_path(url);
-        std::fs::read(&path).map_err(|source| VendorError::Io { path, source })?
-    };
+    let bytes = get(http, url)?;
     let actual = hex(&Sha256::digest(&bytes));
     if actual != expected {
         return Err(VendorError::Hash {
@@ -55,6 +43,30 @@ pub fn fetch(http: &dyn Http, cache: &Path, url: &str, hash: &str) -> Result<Vec
     Ok(bytes)
 }
 
+/// The bytes at `url`: over HTTP(S), or from disk for `file://` URLs and
+/// plain paths.
+///
+/// # Errors
+///
+/// When the request fails, the server does not answer 200, or the file
+/// cannot be read.
+pub fn get(http: &dyn Http, url: &str) -> Result<Vec<u8>, VendorError> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        let response = http.get(url, &[]).map_err(download_error(url))?;
+        if response.status == 200 {
+            Ok(response.body)
+        } else {
+            Err(VendorError::Download {
+                url: url.to_owned(),
+                message: format!("HTTP {}", response.status),
+            })
+        }
+    } else {
+        let path = local_path(url);
+        std::fs::read(&path).map_err(|source| VendorError::Io { path, source })
+    }
+}
+
 /// Turns an HTTP failure for `what` (a URL) into a [`VendorError`].
 pub fn download_error(what: &str) -> impl Fn(ForgeError) -> VendorError + '_ {
     move |error| VendorError::Download {
@@ -64,7 +76,7 @@ pub fn download_error(what: &str) -> impl Fn(ForgeError) -> VendorError + '_ {
 }
 
 /// The file a `file://` URL (or a plain path) names.
-fn local_path(url: &str) -> PathBuf {
+pub fn local_path(url: &str) -> PathBuf {
     let path = url.strip_prefix("file://").unwrap_or(url);
     // file:///C:/x on Windows.
     let path = path

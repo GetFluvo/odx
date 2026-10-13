@@ -137,6 +137,65 @@ fn parse_direct_ref(raw: &str) -> DirectRef {
     }
 }
 
+/// Replace the exact pin `==<from>` of `dist` by `==<to>`.
+///
+/// In `[project] dependencies`, every `[project.optional-dependencies]`
+/// group and every `[dependency-groups]` group, keeping extras, markers and
+/// formatting; returns how many requirements changed.
+pub fn repin(doc: &mut DocumentMut, dist: &str, from: &str, to: &str) -> usize {
+    let wanted = normalize_name(dist);
+    let mut arrays: Vec<&mut toml_edit::Array> = Vec::new();
+    let tables = doc
+        .as_table_mut()
+        .iter_mut()
+        .filter(|(key, _)| matches!(key.get(), "project" | "dependency-groups"))
+        .filter_map(|(key, item)| item.as_table_like_mut().map(|table| (key, table)));
+    for (key, table) in tables {
+        if key.get() == "dependency-groups" {
+            arrays.extend(table.iter_mut().filter_map(|(_, item)| item.as_array_mut()));
+        } else {
+            for (key, item) in table.iter_mut() {
+                if key.get() == "dependencies" {
+                    arrays.extend(item.as_array_mut());
+                } else if key.get() == "optional-dependencies" {
+                    let groups = item.as_table_like_mut().into_iter();
+                    arrays.extend(groups.flat_map(|groups| {
+                        groups
+                            .iter_mut()
+                            .filter_map(|(_, item)| item.as_array_mut())
+                    }));
+                }
+            }
+        }
+    }
+    let mut changed = 0;
+    for array in arrays {
+        for value in array.iter_mut() {
+            let Some(req) = value.as_str().and_then(|text| parse_requirement(text).ok()) else {
+                continue;
+            };
+            if normalize_name(&req.name) != wanted
+                || req.specifier.replace(' ', "") != format!("=={from}")
+            {
+                continue;
+            }
+            let extras = req
+                .extras
+                .map(|extras| format!("[{extras}]"))
+                .unwrap_or_default();
+            let markers = req
+                .markers
+                .map(|markers| format!(" ; {markers}"))
+                .unwrap_or_default();
+            let decor = value.decor().clone();
+            *value = Value::from(format!("{}{extras}=={to}{markers}", req.name));
+            *value.decor_mut() = decor;
+            changed += 1;
+        }
+    }
+    changed
+}
+
 /// Where a dependency group is declared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupTable {
@@ -389,6 +448,35 @@ pub fn remove_uv_source(doc: &mut DocumentMut, dist: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pins_move_in_place() {
+        let mut doc: DocumentMut = "top = 1\n[project]\nname = \"p\"\ndependencies = [\n  \"odoo-addon-a==1.0\",  # pinned\n  \"other==1.0\",\n]\n\
+            [project.optional-dependencies]\noca = [\"Odoo_Addon.A[x] == 1.0 ; python_version > '3'\", \"odoo-addon-a>=1.0\", 1]\nnone = \"x\"\n\
+            [dependency-groups]\ndev = [\"odoo-addon-a==1.0\", \"odoo-addon-a==0.9\"]\nflag = true\n"
+            .parse()
+            .unwrap();
+        assert_eq!(repin(&mut doc, "odoo_addon_a", "1.0", "1.1"), 3);
+        let text = doc.to_string();
+        assert!(
+            text.contains("  \"odoo-addon-a==1.1\",  # pinned\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"Odoo_Addon.A[x]==1.1 ; python_version > '3'\""),
+            "{text}"
+        );
+        assert!(text.contains("\"odoo-addon-a>=1.0\""), "{text}");
+        assert!(
+            text.contains("dev = [\"odoo-addon-a==1.1\", \"odoo-addon-a==0.9\"]"),
+            "{text}"
+        );
+        assert!(text.contains("\"other==1.0\""), "{text}");
+        let mut empty = DocumentMut::new();
+        assert_eq!(repin(&mut empty, "a", "1", "2"), 0);
+        let mut other: DocumentMut = "[project]\nname = \"p\"\n".parse().unwrap();
+        assert_eq!(repin(&mut other, "a", "1", "2"), 0);
+    }
 
     #[test]
     fn uv_sources_are_written_in_place() {

@@ -440,10 +440,7 @@ pub(crate) fn run_lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) 
 
 fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     if args.auto_update {
-        return Err(Report::error(
-            Exit::Usage,
-            "odx lock --auto-update: not implemented yet (roadmap phase 5)".to_owned(),
-        ));
+        return super::autoupdate::auto_update(global, ctx);
     }
     if args.migrate {
         return migrate(ctx);

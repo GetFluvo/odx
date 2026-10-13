@@ -624,9 +624,6 @@ fn configuration_changes_invalidate_the_lock() {
 #[test]
 fn lock_errors() {
     let project = project("mergiraf = \"never\"");
-    let (exit, _, err) = run(&project, &["lock", "--auto-update"]);
-    assert_eq!(exit, Exit::Usage);
-    assert!(err.contains("roadmap phase 5"), "{err}");
     let (exit, _, err) = run(&project, &["lock", "--repo", "nope"]);
     assert_eq!(exit, Exit::Usage);
     assert!(err.contains("no repository named \"nope\""), "{err}");
@@ -999,9 +996,6 @@ fn verify_checks_the_lock_and_the_working_trees() {
         json.contains("pos: locked but no longer configured"),
         "{json}"
     );
-    let (exit, _, err) = run(&project, &["verify", "--installed"]);
-    assert_eq!(exit, Exit::Usage);
-    assert!(err.contains("roadmap phase 5"), "{err}");
 }
 
 #[test]

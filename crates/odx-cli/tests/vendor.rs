@@ -309,6 +309,10 @@ fn vendored_source_requirements() {
     assert_eq!(value["requirements"]["conflicts"][0]["by"], "c");
     assert_eq!(value["requirements"]["lines"][3]["specifier"], "==1.20");
     assert_eq!(project.read("deploy/req.txt"), text);
+    // Not Odoo.sh: any requirement line is fine, the conflict is not.
+    let (exit, _, err) = project.odx(&["verify", "--requirements"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(!err.contains("public PyPI"), "{err}");
 }
 
 #[test]

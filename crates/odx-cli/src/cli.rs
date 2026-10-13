@@ -260,9 +260,9 @@ pub struct VerifyArgs {
     /// Check the vendored addon directories against the vendor manifest.
     #[arg(long)]
     pub vendored: bool,
-    /// Check installed wheels against uv.lock and odx.lock.
-    #[arg(long)]
-    pub installed: bool,
+    /// Check the wheels installed in a virtual environment (or site-packages) against uv.lock.
+    #[arg(long, value_name = "DIR")]
+    pub installed: Option<PathBuf>,
     /// Check the platform requirements file against the provided-package set.
     #[arg(long)]
     pub requirements: bool,
