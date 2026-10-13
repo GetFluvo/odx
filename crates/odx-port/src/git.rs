@@ -71,14 +71,14 @@ impl<'a> Repo<'a> {
         ])?;
         Ok(log
             .lines()
-            .filter_map(|line| {
-                let mut fields = line.split('\u{1f}');
-                Some(Commit {
-                    sha: fields.next()?.to_owned(),
-                    subject: fields.next()?.to_owned(),
-                    author: fields.next()?.to_owned(),
-                    date: fields.next()?.to_owned(),
-                })
+            .map(|line| {
+                let mut fields = line.splitn(4, '\u{1f}').map(str::to_owned);
+                Commit {
+                    sha: fields.next().unwrap_or_default(),
+                    subject: fields.next().unwrap_or_default(),
+                    author: fields.next().unwrap_or_default(),
+                    date: fields.next().unwrap_or_default(),
+                }
             })
             .collect())
     }
@@ -102,7 +102,10 @@ impl<'a> Repo<'a> {
             "--",
             dir,
         ]))?;
-        let ids = self.output(&self.git().args(["patch-id", "--stable"]).stdin(diff))?;
+        // patch-id reads any input; it has nothing to fail on.
+        let ids = self
+            .output(&self.git().args(["patch-id", "--stable"]).stdin(diff))
+            .unwrap_or_default();
         Ok(String::from_utf8_lossy(&ids)
             .lines()
             .filter_map(|line| line.split_once(' '))

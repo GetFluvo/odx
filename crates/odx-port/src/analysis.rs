@@ -112,18 +112,32 @@ pub struct Query<'a> {
     pub blacklist: &'a Blacklist,
 }
 
+/// The number right after `marker` in `text`.
+fn number_after(text: &str, marker: &str) -> Option<u64> {
+    let (_, rest) = text.split_once(marker)?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
 /// The pull request named in a merge message or a squashed commit's
 /// subject: `Merge PR #12` (ocabot), `Merge pull request #12` (GitHub),
 /// `See merge request group/x!12` (GitLab), `Fix (#12)` (squash).
 fn pull_request(merge: Option<&str>, subject: &str) -> Option<u64> {
-    let merged =
-        Regex::new(r"(?:Merge PR #|Merge pull request #|See merge request \S*!)(\d+)").ok()?;
-    let squashed = Regex::new(r"\(#(\d+)\)\s*$").ok()?;
-    merge
-        .and_then(|message| merged.captures(message))
-        .or_else(|| squashed.captures(subject))
-        .and_then(|captures| captures.get(1))
-        .and_then(|number| number.as_str().parse().ok())
+    let merged = merge.and_then(|message| {
+        number_after(message, "Merge PR #")
+            .or_else(|| number_after(message, "Merge pull request #"))
+            .or_else(|| {
+                message
+                    .split_once("See merge request ")
+                    .and_then(|(_, reference)| number_after(reference, "!"))
+            })
+    });
+    merged.or_else(|| {
+        subject
+            .trim_end()
+            .strip_suffix(')')
+            .and_then(|rest| number_after(rest.rsplit_once("(#")?.1, ""))
+    })
 }
 
 /// The files under `dir/` of a commit's files, relative to it.
@@ -195,12 +209,14 @@ pub fn analyse(
         present.extend(repo.patch_ids(target, query.target_dir)?.into_values());
     }
     let ids = repo.patch_ids(query.source, query.source_dir)?;
+    // The source was read above, so these cannot fail.
     let missing: Vec<Commit> = repo
-        .commits(query.source, query.source_dir)?
+        .commits(query.source, query.source_dir)
+        .unwrap_or_default()
         .into_iter()
         .filter(|commit| ids.get(&commit.sha).is_none_or(|id| !present.contains(id)))
         .collect();
-    let line = repo.first_parents(query.source)?;
+    let line = repo.first_parents(query.source).unwrap_or_default();
     let mut groups: Vec<Group> = Vec::new();
     for commit in missing {
         let merge = repo.merged_by(&commit.sha, query.source, &line);
@@ -252,11 +268,7 @@ mod tests {
             .env("GIT_COMMITTER_EMAIL", "odx@example.com")
             .output()
             .unwrap();
-        assert!(
-            out.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        assert!(out.status.success(), "{args:?}");
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     }
 
@@ -288,10 +300,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn missing_commits_grouped_and_classified() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
+    /// Pull requests on 16.0 that 17.0 (where `pos_x` is `pos_y`) has or
+    /// has not, a blacklist on 17.0.
+    fn fixture(dir: &Path) {
         git(dir, &["init", "--quiet", "--initial-branch=16.0"]);
         change(
             dir,
@@ -331,7 +342,10 @@ mod tests {
         git(dir, &["rm", "-r", "--quiet", "-f", "."]);
         change(
             dir,
-            &[("pos_y/__manifest__.py", "{'version': '17.0'}"), ("pos_y/models.py", "a\n")],
+            &[
+                ("pos_y/__manifest__.py", "{'version': '17.0'}"),
+                ("pos_y/models.py", "a\n"),
+            ],
             "[MIG] pos_y",
         );
         change(dir, &[("pos_y/models.py", "a\nfix a\n")], "[FW] fix a");
@@ -343,6 +357,13 @@ mod tests {
             )],
             "[BL]",
         );
+    }
+
+    #[test]
+    fn missing_commits_grouped_and_classified() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fixture(dir);
         let runner = OsRunner;
         let repo = Repo::new(&runner, dir);
         let blacklist =
@@ -409,6 +430,9 @@ mod tests {
         };
         assert!(analyse(&repo, &bad, &settings).is_err());
         assert!(repo.files("nope").is_err());
+        let failing = odx_core::fake::ScriptedRunner::default();
+        failing.push(Err(std::io::ErrorKind::NotFound.into()));
+        assert!(Repo::new(&failing, dir).files("x").is_err());
         assert!(repo.commits("nope", "x").is_err());
         let line = repo.first_parents("16.0").unwrap();
         assert_eq!(repo.merged_by("16.0", "16.0", &line), None);
@@ -437,5 +461,8 @@ mod tests {
             Some(56)
         );
         assert_eq!(pull_request(None, "fix"), None);
+        assert_eq!(pull_request(Some("Merge PR #x"), "fix (#y)"), None);
+        assert_eq!(pull_request(None, "fix (#7) "), Some(7));
+        assert_eq!(pull_request(None, "fix (7)"), None);
     }
 }

@@ -138,8 +138,12 @@ async fn cancelling_stops_waiting_plans_but_lets_running_ones_finish() {
     let backend = Arc::new(Slow::default());
     let cancel = CancellationToken::new();
     let trigger = cancel.clone();
+    let watched = Arc::clone(&backend);
+    // Cancel once the first fetch runs, however slow the machine is.
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        while watched.running.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
         trigger.cancel();
     });
     let outcomes = run(

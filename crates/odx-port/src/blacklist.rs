@@ -1,7 +1,7 @@
 //! oca-port blacklists: `.oca/oca-port/blacklist/<addon>.json` on a target
 //! branch, read and written byte-compatibly with oca-port.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use serde::Deserialize;
 use serde::de::{Deserializer, MapAccess, Visitor};
@@ -25,29 +25,6 @@ pub fn path(addon: &str) -> String {
 pub struct Blacklist {
     /// Entries in order.
     pub entries: Vec<(String, String)>,
-}
-
-/// A JSON object read in file order.
-struct Ordered<V>(Vec<(String, V)>);
-
-impl<'de, V: Deserialize<'de>> Deserialize<'de> for Ordered<V> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Entries<V>(std::marker::PhantomData<V>);
-        impl<'de, V: Deserialize<'de>> Visitor<'de> for Entries<V> {
-            type Value = Ordered<V>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("an object")
-            }
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                let mut entries = Vec::new();
-                while let Some(entry) = map.next_entry()? {
-                    entries.push(entry);
-                }
-                Ok(Ordered(entries))
-            }
-        }
-        deserializer.deserialize_map(Entries(std::marker::PhantomData))
-    }
 }
 
 /// A blacklist file: its `pull_requests` in file order (empty when it is
@@ -89,9 +66,12 @@ impl<'de> Deserialize<'de> for Maybe {
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("any value")
             }
-            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Maybe, A::Error> {
-                Ordered::deserialize(serde::de::value::MapAccessDeserializer::new(map))
-                    .map(|ordered| Maybe(ordered.0))
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Maybe, A::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry()? {
+                    entries.push(entry);
+                }
+                Ok(Maybe(entries))
             }
             fn visit_seq<A: serde::de::SeqAccess<'de>>(
                 self,
@@ -117,7 +97,9 @@ fn quoted(text: &str) -> String {
             '\t' => out.push_str("\\t"),
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
-            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c if u32::from(c) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", u32::from(c));
+            }
             c => out.push(c),
         }
     }
@@ -227,12 +209,21 @@ mod tests {
         // Other keys and values are tolerated on reading.
         let odd = Blacklist::parse(r#"{"other": 1, "pull_requests": {"a": 1, "b": "x"}}"#).unwrap();
         assert_eq!(odd.entries, [("b".to_owned(), "x".to_owned())]);
-        assert!(
+        assert_eq!(
             Blacklist::parse(r#"{"pull_requests": []}"#)
                 .unwrap()
-                .entries
-                .is_empty()
+                .entries,
+            Vec::new()
         );
         assert!(Blacklist::parse("[]").is_err());
+        for broken in [
+            "{,}",
+            r#"{"pull_requests": {"a": }}"#,
+            r#"{"x": [}"#,
+            r#"{"pull_requests": [1,}"#,
+            r#"{"pull_requests": "x"}"#,
+        ] {
+            assert!(Blacklist::parse(broken).is_err(), "{broken}");
+        }
     }
 }

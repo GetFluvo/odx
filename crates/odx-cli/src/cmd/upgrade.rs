@@ -26,7 +26,7 @@ use crate::cli::{GlobalArgs, UpgradeArgs};
 
 /// Where an addon of the project comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Own,
     Aggregated,
     Package,
@@ -43,13 +43,13 @@ impl Kind {
 }
 
 /// One addon of the project.
-struct Addon {
-    name: String,
-    kind: Kind,
+pub(crate) struct Addon {
+    pub(crate) name: String,
+    pub(crate) kind: Kind,
     /// Its directory, for own addons.
     dir: Option<PathBuf>,
     /// Its repository on the current series, when known without the index.
-    url: Option<String>,
+    pub(crate) url: Option<String>,
 }
 
 /// The answer for one addon.
@@ -81,7 +81,7 @@ pub(crate) fn run_upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context
 
 /// The project's own addons, the selected addons of its aggregated
 /// repositories, and the addon packages in `uv.lock`.
-fn addons(ctx: &Context<'_>, prepared: &Prepared) -> Vec<Addon> {
+pub(crate) fn addons(ctx: &Context<'_>, prepared: &Prepared) -> Vec<Addon> {
     let config = &prepared.project.config;
     let root = &prepared.project.root;
     let name_of = |dir: &std::path::Path| {
@@ -143,13 +143,13 @@ fn addons(ctx: &Context<'_>, prepared: &Prepared) -> Vec<Addon> {
 
 /// The series from `current` (exclusive) to `target` (inclusive), by
 /// major version.
-fn steps(current: &str, target: &str) -> Vec<String> {
+pub(crate) fn steps(current: &str, target: &str) -> Vec<String> {
     let (from, to) = (series_key(current).0, series_key(target).0);
     (from + 1..=to).map(|major| format!("{major}.0")).collect()
 }
 
 /// `addon`'s name on `target`: renames and merges applied in order.
-fn name_on(renames: &Renames, addon: &str, series: &[String]) -> String {
+pub(crate) fn name_on(renames: &Renames, addon: &str, series: &[String]) -> String {
     series.iter().fold(addon.to_owned(), |name, step| {
         renames
             .renamed
@@ -244,6 +244,103 @@ fn series_index(
     index
 }
 
+/// Configured renames, then OpenUpgrade's for every step.
+pub(crate) fn renames(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    online: Option<&dyn Http>,
+    series: &[String],
+    warnings: &mut Vec<Problem>,
+) -> Renames {
+    let config = &prepared.project.config;
+    let mut renames = Renames {
+        renamed: config
+            .index
+            .as_ref()
+            .map(|index| index.renames.clone())
+            .unwrap_or_default(),
+        ..Renames::default()
+    };
+    let Some(http) = online else {
+        return renames;
+    };
+    let base = ctx
+        .env
+        .var("ODX_OPENUPGRADE_URL")
+        .as_deref()
+        .unwrap_or("https://raw.githubusercontent.com/OCA/OpenUpgrade")
+        .to_owned();
+    for step in series {
+        match openupgrade(http, &base, step) {
+            Ok((renamed_here, merged_here)) => {
+                renames
+                    .renamed
+                    .entry(step.clone())
+                    .or_default()
+                    .extend(renamed_here);
+                renames.merged.insert(step.clone(), merged_here);
+            }
+            Err(message) => warnings.push(Problem {
+                key: "openupgrade".to_owned(),
+                message,
+            }),
+        }
+    }
+    renames
+}
+
+/// The addon index of the series in `wanted`, each with the addons to
+/// look up there.
+pub(crate) fn addon_index(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    online: Option<&dyn Http>,
+    renames: Renames,
+    wanted: &[(String, Vec<String>)],
+    refresh: bool,
+    warnings: &mut Vec<Problem>,
+) -> AddonIndex {
+    let config = &prepared.project.config;
+    let planned = plan_config(config, &prepared.project.root, None).unwrap_or_default();
+    let cached: Vec<(String, PathBuf, Forge)> = planned
+        .iter()
+        .map(|repo| {
+            (
+                repo.url.clone(),
+                prepared.cache.repo_dir(&repo.url),
+                repo.forge,
+            )
+        })
+        .collect();
+    let pypi = ctx
+        .env
+        .var("ODX_PYPI_URL")
+        .as_deref()
+        .unwrap_or("https://pypi.org/pypi")
+        .to_owned();
+    let merger = Merger::new(Arc::new(OsRunner));
+    let overrides = config
+        .index
+        .as_ref()
+        .map(|index| index.overrides.clone())
+        .unwrap_or_default();
+    let spec = Build {
+        overrides: &overrides,
+        cached: &cached,
+        merger: &merger,
+        package_index: online.map(|http| (http, pypi.as_str())),
+    };
+    let mut index = AddonIndex {
+        renames,
+        ..AddonIndex::default()
+    };
+    for (series, addons) in wanted {
+        let built = series_index(prepared, &spec, series, addons, refresh, warnings);
+        index.series.insert(series.clone(), built);
+    }
+    index
+}
+
 /// What one `odx upgrade` run works with.
 struct Run<'a> {
     ctx: &'a Context<'a>,
@@ -259,42 +356,7 @@ struct Run<'a> {
 impl Run<'_> {
     /// Configured renames, then OpenUpgrade's for every step.
     fn renames(&self, warnings: &mut Vec<Problem>) -> Renames {
-        let config = &self.prepared.project.config;
-        let mut renames = Renames {
-            renamed: config
-                .index
-                .as_ref()
-                .map(|index| index.renames.clone())
-                .unwrap_or_default(),
-            ..Renames::default()
-        };
-        let Some(http) = self.online else {
-            return renames;
-        };
-        let base = self
-            .ctx
-            .env
-            .var("ODX_OPENUPGRADE_URL")
-            .as_deref()
-            .unwrap_or("https://raw.githubusercontent.com/OCA/OpenUpgrade")
-            .to_owned();
-        for step in &self.series {
-            match openupgrade(http, &base, step) {
-                Ok((renamed_here, merged_here)) => {
-                    renames
-                        .renamed
-                        .entry(step.clone())
-                        .or_default()
-                        .extend(renamed_here);
-                    renames.merged.insert(step.clone(), merged_here);
-                }
-                Err(message) => warnings.push(Problem {
-                    key: "openupgrade".to_owned(),
-                    message,
-                }),
-            }
-        }
-        renames
+        renames(self.ctx, self.prepared, self.online, &self.series, warnings)
     }
 
     /// The index of the current and the target series for `addons`.
@@ -305,52 +367,24 @@ impl Run<'_> {
         refresh: bool,
         warnings: &mut Vec<Problem>,
     ) -> AddonIndex {
-        let prepared = self.prepared;
-        let config = &prepared.project.config;
-        let planned = plan_config(config, &prepared.project.root, None).unwrap_or_default();
-        let cached: Vec<(String, PathBuf, Forge)> = planned
-            .iter()
-            .map(|repo| {
-                (
-                    repo.url.clone(),
-                    prepared.cache.repo_dir(&repo.url),
-                    repo.forge,
-                )
-            })
-            .collect();
-        let pypi = self
-            .ctx
-            .env
-            .var("ODX_PYPI_URL")
-            .as_deref()
-            .unwrap_or("https://pypi.org/pypi")
-            .to_owned();
-        let merger = Merger::new(Arc::new(OsRunner));
-        let overrides = config
-            .index
-            .as_ref()
-            .map(|index| index.overrides.clone())
-            .unwrap_or_default();
-        let spec = Build {
-            overrides: &overrides,
-            cached: &cached,
-            merger: &merger,
-            package_index: self.online.map(|http| (http, pypi.as_str())),
-        };
         let foreign = addons.iter().filter(|addon| addon.kind != Kind::Own);
         let wanted_now: Vec<String> = foreign.clone().map(|addon| addon.name.clone()).collect();
         let wanted_then: Vec<String> = foreign
             .map(|addon| name_on(&renames, &addon.name, &self.series))
             .collect();
-        let mut index = AddonIndex {
+        let wanted = [
+            (self.current.clone(), wanted_now),
+            (self.target.clone(), wanted_then),
+        ];
+        addon_index(
+            self.ctx,
+            self.prepared,
+            self.online,
             renames,
-            ..AddonIndex::default()
-        };
-        for (step, wanted) in [(&self.current, &wanted_now), (&self.target, &wanted_then)] {
-            let built = series_index(prepared, &spec, step, wanted, refresh, warnings);
-            index.series.insert(step.clone(), built);
-        }
-        index
+            &wanted,
+            refresh,
+            warnings,
+        )
     }
 
     /// Where an addon of another source stands on the target series.

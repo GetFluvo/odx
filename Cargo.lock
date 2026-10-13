@@ -1823,6 +1823,7 @@ dependencies = [
  "odx-git",
  "odx-index",
  "odx-platform",
+ "odx-port",
  "odx-sync",
  "odx-vendor",
  "serde",
@@ -1933,6 +1934,13 @@ dependencies = [
 [[package]]
 name = "odx-port"
 version = "0.0.4"
+dependencies = [
+ "odx-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "odx-sync"

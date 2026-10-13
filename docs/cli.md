@@ -276,6 +276,39 @@ local changes are listed at the end. The head is compared with the cache
 pull request the forge cannot show is reported as a warning while the others
 are listed. `--json` gives the same as data.
 
+## Suggestions from other series
+
+```console
+$ odx suggest                         # every environment's series, from the series below and above
+$ odx suggest --env prod              # one environment
+$ odx suggest --series 17.0 --from 16.0,18.0
+$ odx suggest --addon 'pos_*' --show-suppressed
+```
+
+`odx suggest` looks for changes the addons you use have on other series and
+not on yours: a fix merged on 16.0 that never reached 17.0, or one already
+made on 18.0. For every aggregated addon and addon package it finds the
+addon's repository on each series (the addon index; an aggregated
+repository is also looked in on every series), fetches the branches into the
+cache, and compares the commits that touch the addon:
+
+- a commit whose patch (taken relative to the addon's directory, so a moved
+  or renamed addon still matches) is already on your series is dropped;
+- the rest are grouped by the pull request that merged them (from the merge
+  commit, or `(#123)` in a squashed subject); commits without one are the
+  addon's `orphaned_commits`;
+- each group is classified: `portable`, `migration commit` (subjects
+  matching `[tool.odx.port] migration_commit_patterns`, default `[MIG]`),
+  `translations` (only `i18n/*.po`), `repo-wide change` (more than
+  `repo_wide_threshold` addons, default 5, or only the generated README),
+  and `blacklisted` when the target branch's oca-port blacklist
+  (`.oca/oca-port/blacklist/<addon>.json`) lists it.
+
+Blacklisted groups are hidden unless `--show-suppressed`. The series looked
+on default to `[tool.odx.port] default_from`, else the one below and the
+one above; each environment's series (`[tool.odx.environments.env.<name>]
+series`) is a target of its own.
+
 ## Checking dependencies
 
 ```console

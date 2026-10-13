@@ -21,7 +21,6 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 /// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
 const STUBS: &[(&[&str], u8)] = &[
     (&["dashboard"], 7),
-    (&["suggest"], 7),
     (&["verdict", "list"], 7),
     (&["port", "pr", "OCA/contract#1476", "--to", "19.0"], 8),
     (&["promote", "contract"], 10),
@@ -82,6 +81,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "track"][..], "status", 7),
         (&["odx", "upgrade"][..], "upgrade", 7),
         (&["odx", "check-deps"][..], "check-deps", 7),
+        (&["odx", "suggest"][..], "suggest", 7),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));
@@ -125,7 +125,7 @@ fn write_failure_maps_to_failure() {
         }
     }
     assert_eq!(
-        odx_cli::run(["odx", "suggest"], &mut Broken, &mut Broken),
+        odx_cli::run(["odx", "dashboard"], &mut Broken, &mut Broken),
         Exit::Failure
     );
 }
@@ -167,8 +167,8 @@ fn binary_exit_codes() {
         .success();
     Command::cargo_bin("odx")
         .unwrap()
-        .arg("suggest")
+        .arg("dashboard")
         .assert()
         .code(2)
-        .stderr("odx suggest: not implemented yet (roadmap phase 7)\n");
+        .stderr("odx dashboard: not implemented yet (roadmap phase 7)\n");
 }
