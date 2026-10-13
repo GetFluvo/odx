@@ -62,6 +62,12 @@ pub enum LockError {
         /// The version in the file.
         found: u32,
     },
+    /// The file has a version no odx release wrote.
+    #[error("odx.lock has version {found}, which no odx release wrote")]
+    Unknown {
+        /// The version in the file.
+        found: u32,
+    },
     /// A commit, tree or patch id is not a hexadecimal object id.
     #[error("{key}: {value:?} is not a hexadecimal object id")]
     BadObjectId {
@@ -315,6 +321,30 @@ impl Lockfile {
         let lock: Self = toml::from_str(text).map_err(format)?;
         lock.check_object_ids()?;
         Ok(lock)
+    }
+
+    /// Read `odx.lock` text written by any odx and return it in the current
+    /// format. Version 1 is the first format, so for now this reads it as
+    /// [`Lockfile::parse`] does; formats that change later are converted
+    /// here.
+    ///
+    /// ```
+    /// use odx_config::lock::Lockfile;
+    ///
+    /// let lock = Lockfile::migrate("version = 1\n").unwrap();
+    /// assert_eq!(lock, Lockfile::new());
+    /// assert!(Lockfile::migrate("version = 0\n").is_err());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`LockError::Unknown`] for a version no odx wrote, and the errors
+    /// of [`Lockfile::parse`].
+    pub fn migrate(text: &str) -> Result<Self, LockError> {
+        match Self::parse(text) {
+            Err(LockError::Older { found }) => Err(LockError::Unknown { found }),
+            other => other,
+        }
     }
 
     fn check_object_ids(&self) -> Result<(), LockError> {

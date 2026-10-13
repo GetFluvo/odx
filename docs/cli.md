@@ -266,3 +266,28 @@ locked odoo core at 0a1b2c3d4e5f
 vaulted odoo-addon-pos_vouchers: 1 commits
 pointed packages at the vault in pyproject.toml
 ```
+
+## Verifying a checkout
+
+```console
+$ odx verify          # exit 1 with a list when anything differs
+$ odx --json verify   # {"schema": 1, "ok": …, "problems": […]}
+```
+
+`odx verify` checks, without network access, that the checkout is exactly
+what the lockfiles describe:
+
+- every repository and package is locked as configured, and nothing else is
+  locked;
+- `uv.lock` resolves every locked package to its locked commit;
+- no locked package is in develop mode (an editable path source);
+- every working tree is the locked result, without local changes;
+- no addon directory under `[tool.odx.groups] project_addons` is unknown to
+  git (the build would ship it although nobody committed it).
+
+Use it as a pre-commit hook, as the first step of a build job, and as the
+last step before a deployment. `odx lock --migrate` rewrites `odx.lock` in
+the current format after an odx upgrade changed it.
+
+Credentials written into URLs (`https://user:token@host/…`) are replaced by
+`***` in everything odx prints.

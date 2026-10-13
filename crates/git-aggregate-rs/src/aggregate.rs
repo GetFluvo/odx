@@ -18,7 +18,7 @@ use odx_config::compat::{RepoSpec, expand_env, parse_env_file, parse_repos};
 use odx_config::schema::MergirafMode;
 use odx_config::user::{self, load_user_config};
 use odx_core::system::OsRunner;
-use odx_core::{Exit, Invocation, ProcessRunner, repo_key};
+use odx_core::{Exit, Invocation, ProcessRunner, redact, repo_key};
 use odx_git::{
     Aggregated, Aggregation, Cache, Fetched, GitBackend, Limits, MergeError, Merger, Outcome,
     Strategy, SystemGit,
@@ -134,7 +134,7 @@ pub(crate) fn aggregate(
     let exit = match prepare_and_run(cli, ctx, &mut log) {
         Ok(built) => {
             if cli.json {
-                writeln!(out, "{}", to_json(&built))?;
+                writeln!(out, "{}", redact(&to_json(&built).to_string()))?;
             }
             report(&built, &mut log)
         }
@@ -143,7 +143,8 @@ pub(crate) fn aggregate(
             exit
         }
     };
-    err.write_all(log.text.as_bytes())?;
+    // Credentials in URLs never leave the tool.
+    err.write_all(redact(&log.text).as_bytes())?;
     Ok(exit)
 }
 

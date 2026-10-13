@@ -363,3 +363,96 @@ fn package_and_core_failures() {
     assert!(err.contains("odoo-addon-other: not resolved"), "{err}");
     assert!(err.contains("packages from "), "{err}");
 }
+
+#[test]
+fn verify_checks_packages_and_uv_lock() {
+    let project = Project::new();
+    project.write(false, "");
+    assert_eq!(project.run(&["lock"]).0, Exit::Success);
+    let (exit, _, err) = project.run(&["verify"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("uv.lock is missing"), "{err}");
+
+    let lock = project.read("odx.lock");
+    let sha_of = |dist: &str| {
+        let start = lock.find(&format!("[packages.{dist}]")).unwrap();
+        let line = lock[start..]
+            .lines()
+            .find(|l| l.starts_with("sha = "))
+            .unwrap();
+        line.trim_start_matches("sha = ")
+            .trim_matches('"')
+            .to_owned()
+    };
+    let uv_lock = |pos_x: &str| {
+        use std::fmt::Write as _;
+        let mut text = String::from("version = 1\n");
+        // uv writes normalized names.
+        for (name, dist) in [
+            ("odoo-addon-pos-x", "odoo-addon-pos_x"),
+            ("odoo-addon-branchy", "odoo-addon-branchy"),
+            ("odoo-addon-fixed", "odoo-addon-fixed"),
+            ("odoo-addon-other", "odoo-addon-other"),
+        ] {
+            let sha = if name == "odoo-addon-pos-x" {
+                pos_x.to_owned()
+            } else {
+                sha_of(dist)
+            };
+            let _ = write!(
+                text,
+                "\n[[package]]\nname = \"{name}\"\nsource = {{ git = \"{}?subdirectory=x#{sha}\" }}\n",
+                project.url
+            );
+        }
+        // Entries that are not git packages, or are odd, are ignored.
+        text.push_str(concat!(
+            "\n[[package]]\nname = \"requests\"\nsource = { registry = \"https://pypi.org/simple\" }\n",
+            "\n[[package]]\nversion = \"1\"\n",
+            "\n[[package]]\nname = 1\n",
+            "\n[[package]]\nname = \"no-source\"\n",
+            "\n[[package]]\nname = \"odd-git\"\nsource = { git = 1 }\n",
+            "\n[[package]]\nname = \"no-commit\"\nsource = { git = \"https://x/y.git\" }\n",
+        ));
+        text
+    };
+    let good = sha_of("odoo-addon-pos_x");
+    std::fs::write(project.root.join("uv.lock"), uv_lock(&good)).unwrap();
+    let (exit, out, err) = project.run(&["verify"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.starts_with("verified"), "{out}");
+
+    std::fs::write(project.root.join("uv.lock"), uv_lock(&"0".repeat(40))).unwrap();
+    let (_, _, err) = project.run(&["verify"]);
+    assert!(
+        err.contains("odoo-addon-pos_x: uv.lock has another commit"),
+        "{err}"
+    );
+    std::fs::write(project.root.join("uv.lock"), "version = 1\n").unwrap();
+    let (_, _, err) = project.run(&["verify"]);
+    assert!(
+        err.contains("odoo-addon-pos_x: not in uv.lock from git"),
+        "{err}"
+    );
+
+    // Develop mode, a package changed in the configuration, one removed.
+    let text = project.read("pyproject.toml").replace(
+        "[tool.uv.sources]\n",
+        "[tool.uv.sources]\nodoo-addon-other = { path = \"../other\", editable = true }\nunrelated = { path = \"../x\", editable = true }\n",
+    );
+    let text = text
+        .replace("@refs/pull/1/head", "@17.0")
+        .replace("  \"odoo-addon-fixed", "  \"#odoo-addon-fixed");
+    std::fs::write(project.root.join("pyproject.toml"), text).unwrap();
+    let (_, _, err) = project.run(&["verify"]);
+    assert!(err.contains("odoo-addon-other: in develop mode"), "{err}");
+    assert!(!err.contains("unrelated"), "{err}");
+    assert!(
+        err.contains("odoo-addon-pos_x: package not locked as configured"),
+        "{err}"
+    );
+    assert!(
+        err.contains("odoo-addon-fixed: package locked but no longer configured"),
+        "{err}"
+    );
+}

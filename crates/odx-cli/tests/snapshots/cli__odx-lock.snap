@@ -16,11 +16,17 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
+      --migrate
+          Rewrite odx.lock in the current format and stop
+
       --check
           Fail if odx.lock would change
 
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only
 
       --update
           Re-resolve every entry instead of keeping existing pins
@@ -28,11 +34,11 @@ Options:
       --follow <REPO#PR>
           Adopt this pull request's new head even when its CI is not green (`<repo>#<pr>`)
 
-      --offline
-          Serve forge and index data from the cache only
-
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
 
       --no-uv
           Do not run `uv lock` after rewriting package sources
@@ -40,14 +46,11 @@ Options:
       --no-push
           Do not push locked commits to the configured vault
 
-      --no-refresh
-          Use cached data even when stale
+      --refresh-index
+          Rebuild the addon index for the series involved
 
       --auto-update
           Apply the configured lock auto-update policy to PyPI packages
-
-      --refresh-index
-          Rebuild the addon index for the series involved
 
       --json
           Machine-readable output on stdout

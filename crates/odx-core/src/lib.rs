@@ -15,6 +15,7 @@ mod env;
 mod exit;
 mod fs;
 mod process;
+mod redact;
 mod url;
 
 #[cfg(feature = "fakes")]
@@ -27,4 +28,5 @@ pub use env::Env;
 pub use exit::Exit;
 pub use fs::FileSystem;
 pub use process::{Invocation, Output, ProcessRunner};
+pub use redact::redact;
 pub use url::repo_key;
