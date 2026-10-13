@@ -13,10 +13,12 @@ use odx_config::packages::package_specs;
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner};
 use odx_git::Merger;
+use odx_platform::requirements_path;
 use toml_edit::{DocumentMut, Item};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
+use super::vendor::{describe_conflict, generate, provided_lines};
 use crate::Context;
 use crate::cli::{GlobalArgs, VerifyArgs};
 
@@ -26,11 +28,10 @@ pub(crate) fn run_verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'
 }
 
 fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    if args.vendored || args.installed || args.requirements {
+    if args.vendored || args.installed {
         return Err(Report::error(
             Exit::Usage,
-            "odx verify --vendored/--installed/--requirements: not implemented yet (roadmap phase 5)"
-                .to_owned(),
+            "odx verify --vendored/--installed: not implemented yet (roadmap phase 5)".to_owned(),
         ));
     }
     let prepared = prepare(global, ctx)?;
@@ -40,6 +41,9 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     let edit = PyprojectEdit::parse(&prepared.project.text).unwrap_or_default();
     packages(ctx, &prepared, edit.document(), &lock, &mut problems);
     stray_addons(&prepared, &mut problems);
+    if args.requirements {
+        requirements(ctx, &prepared, &mut problems)?;
+    }
     if prepared.lock.is_none() && !problems.is_empty() {
         problems.insert(
             0,
@@ -194,6 +198,47 @@ fn packages(
             None => problems.push(format!("{dist}: not in uv.lock from git; run `odx lock`")),
         }
     }
+}
+
+/// The platform requirements file is what `odx vendor --requirements`
+/// writes, lists no provided package and has no unresolved conflict.
+fn requirements(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    problems: &mut Vec<String>,
+) -> Result<(), Report> {
+    let generated = generate(ctx, prepared)?;
+    let relative = requirements_path(&prepared.project.config);
+    let file = prepared.project.root.join(&relative);
+    let relative = relative.display().to_string().replace('\\', "/");
+    problems.extend(
+        generated
+            .requirements
+            .conflicts
+            .iter()
+            .map(|conflict| format!("{}: {}", conflict.package, describe_conflict(conflict))),
+    );
+    let Ok(text) = ctx
+        .fs
+        .read(&file)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    else {
+        problems.push(format!(
+            "{relative} is missing; run `odx vendor --requirements`"
+        ));
+        return Ok(());
+    };
+    problems.extend(
+        provided_lines(&text, &generated.provided)
+            .into_iter()
+            .map(|package| format!("{relative}: lists {package}, which the platform provides")),
+    );
+    if text != generated.text {
+        problems.push(format!(
+            "{relative} is not what `odx vendor --requirements` writes; run it"
+        ));
+    }
+    Ok(())
 }
 
 /// `[tool.uv.sources]` entries that point at an editable local path.

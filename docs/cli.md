@@ -322,6 +322,51 @@ the current format after an odx upgrade changed it.
 Credentials written into URLs (`https://user:token@host/…`) are replaced by
 `***` in everything odx prints.
 
+## Platform requirements
+
+```console
+$ odx vendor --requirements              # writes [tool.odx.layout] requirements
+$ odx vendor --requirements deploy/req.txt
+$ odx vendor --requirements --strict     # fail on a conflict with the platform
+$ odx verify --requirements              # the file is current, lists nothing provided, no conflict
+```
+
+Hosting platforms install a base stack (Odoo's own requirements, database
+drivers, `lxml`, ...). Declaring one of those packages again, or pinning it
+differently, breaks deploys, so `odx vendor --requirements` leaves out what
+the platform provides:
+
+```toml
+[tool.odx.platform]
+profile = "vendored-source"          # generic-wheels (default) | vendored-source | odoo-sh | custom
+provided = "odoo-standard"           # or "odoo-sh", or a constraints file in the project
+provided_extra = ["rq==1.16.2"]      # what the platform image adds
+provided_remove = ["python-ldap"]    # what it lacks despite the named set
+```
+
+The named sets ship with odx per Odoo series (16.0 to 19.0) and contain
+the packages of Odoo's `requirements.txt`; `odoo-sh` is the same set until
+the platform image's additions are collected, so add those with
+`provided_extra`.
+
+- **`generic-wheels`**: the file is `uv export --frozen` (with hashes) of
+  the project and its `[tool.odx.groups]`, without provided packages and
+  without Odoo itself; addon wheels stay in it.
+- **`vendored-source`, `odoo-sh`, `custom`**: the file lists the external
+  Python packages that what you ship needs: the non-addon requirements of
+  `[project]` and the configured groups, the dependencies of every addon
+  package they reach in `uv.lock`, and `external_dependencies["python"]` of
+  your own addons and the selected addons of every aggregated repository.
+  Each is pinned to its version in `uv.lock` and annotated with who needs
+  it; import names such as `dateutil` become their distribution
+  (`python-dateutil`). Odoo.sh reads `requirements.txt` from the repository
+  root, which is the default path for that profile.
+
+A requirement whose range excludes every version the platform provides is
+reported with the addon that declares it (`--strict` makes that an error).
+odx owns the file: hand edits are overwritten and reported, recognized by a
+digest in the header.
+
 ## Migration scripts
 
 ```console

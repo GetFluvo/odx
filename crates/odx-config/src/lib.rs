@@ -17,6 +17,7 @@ pub mod mutes;
 pub mod packages;
 pub mod schema;
 pub mod user;
+pub mod uvlock;
 
 pub use duration::{Span, SpanError};
 pub use error::{ConfigError, Problem};

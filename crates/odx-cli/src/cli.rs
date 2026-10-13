@@ -235,9 +235,12 @@ pub struct LockArgs {
 /// Arguments of `odx vendor`.
 #[derive(Debug, Args)]
 pub struct VendorArgs {
-    /// Also write the platform requirements file.
+    /// Write the platform requirements file (default: `[tool.odx.layout] requirements`).
+    #[arg(long, value_name = "FILE", num_args = 0..=1)]
+    pub requirements: Option<Option<PathBuf>>,
+    /// Fail when a requirement excludes the version the platform provides.
     #[arg(long)]
-    pub requirements: bool,
+    pub strict: bool,
 }
 
 /// Arguments of `odx build`.

@@ -20,7 +20,6 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 
 /// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
 const STUBS: &[(&[&str], u8)] = &[
-    (&["vendor"], 5),
     (&["build"], 5),
     (&["dev"], 6),
     (&["dashboard"], 7),
@@ -87,6 +86,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "verify"][..], "verify", 4),
         (&["odx", "stats"][..], "stats", 5),
         (&["odx", "sniff"][..], "sniff", 5),
+        (&["odx", "vendor"][..], "vendor", 5),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));

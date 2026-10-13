@@ -122,6 +122,11 @@ pub(crate) fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared
     })
 }
 
+/// The `uv` executable: `ODX_UV`, else `uv` from `PATH`.
+pub(crate) fn uv_program(env: &dyn Env) -> String {
+    env.var("ODX_UV").unwrap_or_else(|| "uv".to_owned())
+}
+
 /// Whether odx runs in CI (`CI` set and not `false`), where locked commits
 /// come from the vault first.
 fn in_ci(env: &dyn Env) -> bool {
@@ -751,7 +756,7 @@ fn point_packages_at_the_vault(
     save(ctx, file, &edit)?;
     summary.rewritten = true;
     if !no_uv {
-        let uv = ctx.env.var("ODX_UV").unwrap_or_else(|| "uv".to_owned());
+        let uv = uv_program(ctx.env);
         let invocation = Invocation::new(&uv)
             .arg("lock")
             .current_dir(&prepared.project.root);
