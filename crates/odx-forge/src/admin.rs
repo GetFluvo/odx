@@ -99,6 +99,97 @@ impl ForgeClient<'_> {
     }
 }
 
+impl ForgeClient<'_> {
+    /// Whether the vault's `odx/*` tags are protected from being deleted or
+    /// moved: an active GitHub tag ruleset that covers them and forbids
+    /// deletion and updates, a GitLab protected tag, a Gitea/Forgejo tag
+    /// protection. A forge without the endpoint answers `false`.
+    ///
+    /// # Errors
+    ///
+    /// Network, status and rate-limit errors, for instance when the token
+    /// may not read the rules.
+    pub fn vault_tags_protected(
+        &self,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+    ) -> Result<bool, ForgeError> {
+        let api = api(repo, kind);
+        let path = &repo.path;
+        let names = |value: Option<Value>, key: &str| -> Vec<String> {
+            value
+                .as_ref()
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|rule| rule.get(key).and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        };
+        match kind {
+            ForgeKind::Gitlab => {
+                let rules = self.json(
+                    &format!("{api}/projects/{}/protected_tags", path.replace('/', "%2F")),
+                    repo,
+                    kind,
+                )?;
+                Ok(names(rules, "name")
+                    .iter()
+                    .any(|name| matches!(name.as_str(), "odx/*" | "*")))
+            }
+            ForgeKind::Gitea => {
+                let rules =
+                    self.json(&format!("{api}/repos/{path}/tag_protections"), repo, kind)?;
+                Ok(names(rules, "name_pattern")
+                    .iter()
+                    .any(|name| matches!(name.as_str(), "odx/*" | "odx/**" | "*" | "**")))
+            }
+            ForgeKind::Github => {
+                let list = self.json(&format!("{api}/repos/{path}/rulesets"), repo, kind)?;
+                let tag_rulesets: Vec<u64> = list
+                    .as_ref()
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|ruleset| {
+                        ruleset.get("target").and_then(Value::as_str) == Some("tag")
+                            && ruleset.get("enforcement").and_then(Value::as_str) == Some("active")
+                    })
+                    .filter_map(|ruleset| ruleset.get("id").and_then(Value::as_u64))
+                    .collect();
+                for id in tag_rulesets {
+                    let ruleset = self
+                        .json(&format!("{api}/repos/{path}/rulesets/{id}"), repo, kind)?
+                        .unwrap_or_default();
+                    let covers = ruleset
+                        .pointer("/conditions/ref_name/include")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .any(|pattern| {
+                            matches!(
+                                pattern,
+                                "refs/tags/odx/**"
+                                    | "refs/tags/odx/*"
+                                    | "refs/tags/**"
+                                    | "refs/tags/*"
+                                    | "~ALL"
+                            )
+                        });
+                    let rules = names(ruleset.get("rules").cloned(), "type");
+                    let forbids = ["deletion", "update"]
+                        .iter()
+                        .all(|rule| rules.iter().any(|found| found == rule));
+                    if covers && forbids {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +342,122 @@ mod tests {
         let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
         let repo = RepoUrl::parse("https://forge.corp/odoo/vault").unwrap();
         assert!(client.create_private(&repo, ForgeKind::Gitea).is_err());
+    }
+
+    #[test]
+    fn protection_is_read_per_forge() {
+        let check = |url: &str, kind, answers: Vec<(u16, &str)>| {
+            let http = Scripted::new(
+                answers
+                    .into_iter()
+                    .map(|(status, body)| Ok(reply(status, body)))
+                    .collect(),
+            );
+            let env = MapEnv::default();
+            let runner = ScriptedRunner::default();
+            let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
+            let result = client.vault_tags_protected(&RepoUrl::parse(url).unwrap(), kind);
+            (result, http.urls())
+        };
+        let (result, urls) = check(
+            "https://gitlab.com/odoo/vault",
+            ForgeKind::Gitlab,
+            vec![(200, r#"[{"name":"v*"},{"name":"odx/*"}]"#)],
+        );
+        assert_eq!(result, Ok(true));
+        assert_eq!(
+            urls,
+            ["https://gitlab.com/api/v4/projects/odoo%2Fvault/protected_tags"]
+        );
+        let (result, _) = check(
+            "https://gitlab.com/odoo/vault",
+            ForgeKind::Gitlab,
+            vec![(200, "[]")],
+        );
+        assert_eq!(result, Ok(false));
+        let (result, urls) = check(
+            "https://forge.corp/odoo/vault",
+            ForgeKind::Gitea,
+            vec![(200, r#"[{"name_pattern":"*"}]"#)],
+        );
+        assert_eq!(result, Ok(true));
+        assert_eq!(
+            urls,
+            ["https://forge.corp/api/v1/repos/odoo/vault/tag_protections"]
+        );
+        let (result, _) = check(
+            "https://forge.corp/odoo/vault",
+            ForgeKind::Gitea,
+            vec![(200, r#"[{"name_pattern":"v*"},{"name_pattern":"**"}]"#)],
+        );
+        assert_eq!(result, Ok(true));
+        let (result, _) = check(
+            "https://forge.corp/odoo/vault",
+            ForgeKind::Gitea,
+            vec![(404, "")],
+        );
+        assert_eq!(result, Ok(false));
+
+        let list = r#"[{"id":1,"target":"branch","enforcement":"active"},{"id":2,"target":"tag","enforcement":"disabled"},{"id":3,"target":"tag","enforcement":"active"},{"id":4,"target":"tag","enforcement":"active"},{"target":"tag","enforcement":"active"}]"#;
+        let weak = r#"{"conditions":{"ref_name":{"include":["refs/tags/odx/**"]}},"rules":[{"type":"deletion"}]}"#;
+        let strong = r#"{"conditions":{"ref_name":{"include":["~ALL"]}},"rules":[{"type":"deletion"},{"type":"update"}]}"#;
+        let (result, urls) = check(
+            "https://github.com/odoo/vault",
+            ForgeKind::Github,
+            vec![(200, list), (200, weak), (200, strong)],
+        );
+        assert_eq!(result, Ok(true));
+        assert_eq!(
+            urls,
+            [
+                "https://api.github.com/repos/odoo/vault/rulesets",
+                "https://api.github.com/repos/odoo/vault/rulesets/3",
+                "https://api.github.com/repos/odoo/vault/rulesets/4"
+            ]
+        );
+        let (result, _) = check(
+            "https://github.com/odoo/vault",
+            ForgeKind::Github,
+            vec![
+                (200, r#"[{"id":3,"target":"tag","enforcement":"active"}]"#),
+                (404, ""),
+            ],
+        );
+        assert_eq!(result, Ok(false));
+        let (result, _) = check(
+            "https://github.com/odoo/vault",
+            ForgeKind::Github,
+            vec![(404, "")],
+        );
+        assert_eq!(result, Ok(false));
+        let (result, _) = check(
+            "https://github.com/odoo/vault",
+            ForgeKind::Github,
+            vec![(403, "")],
+        );
+        assert!(result.is_err());
+        for (url, kind, answers) in [
+            (
+                "https://gitlab.com/odoo/vault",
+                ForgeKind::Gitlab,
+                vec![(500, "")],
+            ),
+            (
+                "https://forge.corp/odoo/vault",
+                ForgeKind::Gitea,
+                vec![(500, "")],
+            ),
+            (
+                "https://github.com/odoo/vault",
+                ForgeKind::Github,
+                vec![
+                    (200, r#"[{"id":3,"target":"tag","enforcement":"active"}]"#),
+                    (500, ""),
+                ],
+            ),
+        ] {
+            assert!(check(url, kind, answers).0.is_err(), "{url}");
+        }
     }
 
     #[test]

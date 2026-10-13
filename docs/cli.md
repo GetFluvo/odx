@@ -579,6 +579,39 @@ every repository it builds; `[tool.odx.sniff] fail_on_new = true` (or
 `--fail-on-new`) turns any script into a failure. The commits must be in the
 cache, which `odx aggregate` and `odx lock` take care of.
 
+## Checking the setup
+
+```console
+$ odx doctor
+ok   git: git version 2.56.0
+ok   uv: uv 0.11.16
+info odl: odl not found; optional: odoo-lint for odx lint
+ok   mergiraf: mergiraf resolves conflicts
+ok   project: /work/acme/pyproject.toml (Odoo 17.0)
+ok   token github.com: found
+ok   vault visibility: https://forge.example/odoo/vault.git is private on Forgejo
+FAIL vault protection: odx/* tags are not protected; protect them on the forge (or create the vault with mirror.auto_create)
+ok   platform: vendored-source, provided set odoo-standard-17.0 (58 packages, 1 overrides)
+info cache: /home/dev/.cache/odx (1.2 GB)
+```
+
+`odx doctor` checks the machine (git, uv, mergiraf, odl) and, in a
+project, the forge tokens per host, the vault, the platform profile with its
+provided set, the cache and packages left in develop mode. It exits with
+`1` when something required is missing or wrong:
+
+- the vault is public (unless `allow_public = true`), or cannot be read;
+- the vault's lock refs are not protected: odx needs a protection rule that
+  stops `odx/*` tags from being deleted or moved (a GitHub tag ruleset,
+  GitLab protected tags, Gitea/Forgejo tag protection). Lock refs under
+  `refs/odx/*` cannot be protected on any forge, so use `ref_style =
+  "tags"`;
+- the provided set cannot be loaded, or `mergiraf = "always"` and mergiraf
+  is missing.
+
+With `--offline` the vault is not checked; `--json` gives the same list as
+data.
+
 ## Development workspace
 
 ```console
