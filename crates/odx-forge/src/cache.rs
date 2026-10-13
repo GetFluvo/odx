@@ -67,6 +67,16 @@ impl<H: Http> Http for CachedHttp<H> {
             _ => Ok(response),
         }
     }
+
+    /// Not cached: a POST changes something.
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        self.inner.post(url, headers, body)
+    }
 }
 
 #[cfg(test)]
@@ -125,6 +135,14 @@ mod tests {
             file.join("http"),
         );
         assert_eq!(http.get("https://x/a", &[]).unwrap().body, b"body");
+        let posting = CachedHttp::new(Scripted::new(vec![Ok(reply(201, ""))]), tmp.path());
+        assert_eq!(
+            posting
+                .post("https://x/a", &[], &serde_json::json!({}))
+                .unwrap()
+                .status,
+            201
+        );
         let failing = CachedHttp::new(
             Scripted::new(vec![Err(ForgeError::Http("down".into()))]),
             tmp.path(),

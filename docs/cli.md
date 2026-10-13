@@ -230,6 +230,15 @@ other characters as `_`), or `GITHUB_TOKEN`/`GH_TOKEN` (or `gh auth token`),
 or `file://` URL is not checked. `odx lock --no-push`, or `push_on_lock =
 false`, locks without vaulting.
 
+With `auto_create = true`, a vault that does not exist yet is created
+through the forge's API: private, in the organization (or GitLab group) its
+URL names, else for the token's user, with a rule that keeps its `odx/*`
+tags from being deleted or moved (a GitHub tag ruleset, GitLab protected
+tags, Gitea/Forgejo tag protection). Forges protect tags, not custom refs,
+so such a vault always uses `refs/tags/odx/<commit>`. The token needs the
+right to create repositories. odx never creates forks for vaulting: forks of
+public repositories are public.
+
 ```text
 vaulted pos: 3 commits
 ```

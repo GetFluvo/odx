@@ -7,6 +7,7 @@
 //! times; tokens are sent only to their own host and never appear in
 //! errors.
 
+mod admin;
 mod cache;
 mod ci;
 mod client;

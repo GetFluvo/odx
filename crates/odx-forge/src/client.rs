@@ -129,7 +129,8 @@ impl<'a> ForgeClient<'a> {
     }
 
     /// GET with the forge's authentication, waiting out rate limits.
-    fn get(&self, url: &str, repo: &RepoUrl, kind: ForgeKind) -> Result<HttpResponse, ForgeError> {
+    /// The forge's authentication and API headers for `repo`.
+    pub(crate) fn headers(&self, repo: &RepoUrl, kind: ForgeKind) -> Vec<(&'static str, String)> {
         let mut headers: Vec<(&str, String)> = Vec::new();
         if let Some(token) = token(&repo.host, kind, self.env, self.runner) {
             headers.push((
@@ -144,6 +145,22 @@ impl<'a> ForgeClient<'a> {
             headers.push(("accept", "application/vnd.github+json".to_owned()));
             headers.push(("x-github-api-version", "2022-11-28".to_owned()));
         }
+        headers
+    }
+
+    /// POST `body` with the forge's authentication.
+    pub(crate) fn post(
+        &self,
+        url: &str,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        body: &Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        self.http.post(url, &self.headers(repo, kind), body)
+    }
+
+    fn get(&self, url: &str, repo: &RepoUrl, kind: ForgeKind) -> Result<HttpResponse, ForgeError> {
+        let headers = self.headers(repo, kind);
         for _ in 0..ATTEMPTS {
             let response = self.http.get(url, &headers)?;
             let retry_after = response.header("retry-after");
