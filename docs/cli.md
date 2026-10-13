@@ -69,6 +69,54 @@ else the platform cache directory (`$XDG_CACHE_HOME/odx` or
 `%LOCALAPPDATA%\odx\cache` on Windows). Concurrent odx processes take
 turns per repository through an advisory lock.
 
+### Prefetching in the background
+
+```console
+$ odx sync --register                 # add this workspace to `odx sync --all`
+$ odx sync                            # fetch this workspace into the cache now
+$ odx sync --all                      # every registered workspace
+$ odx sync --all --max-duration 10m   # stop starting new workspaces after 10 minutes
+$ odx sync --unregister
+```
+
+`odx sync` runs `odx aggregate --fetch-only --prefer-mirror` for each
+workspace, quietly and with few jobs, so a later `odx aggregate` finds
+everything in the cache. `--register` records the workspace (its path,
+the date and the Odoo series) under `[workspaces]` in the user
+configuration (`~/.config/odx/config.toml`); comments and other settings
+there are kept. One sync runs per machine at a time: a second one prints
+`another odx sync is running; nothing to do` and exits `0`. Workspaces
+that are not reached before `max_duration` are reported as skipped.
+
+Each run writes `last_sync.json` (what happened per workspace) and appends
+to `sync.log` in the cache. A workspace that fails makes the run exit `1`;
+the others are still synced. The user configuration tunes it:
+
+```toml
+# ~/.config/odx/config.toml
+[sync]
+jobs = 2              # parallel fetches per workspace
+max_duration = "20m"  # default
+
+[cache]
+max_size = "20GB"     # the limit `odx cache gc` works towards
+```
+
+### Inspecting and trimming the cache
+
+```console
+$ odx cache info                 # location, size, repositories, last sync
+$ odx cache gc --dry-run         # what would be removed
+$ odx cache gc                   # remove repositories no registered workspace uses
+$ odx cache gc --max-size 10GB   # only as many as needed to get under 10 GB
+```
+
+A repository is in use when a registered workspace (or the project in the
+current directory) aggregates it or locks a package from it. `odx cache gc`
+removes unused repositories, least recently fetched first; with a size
+limit (`--max-size` or `[cache] max_size`) it stops once the cache fits.
+A repository another odx is fetching into is left alone.
+
 ## Using your local clones
 
 If you keep clones of the repositories you work on (for example every OCA

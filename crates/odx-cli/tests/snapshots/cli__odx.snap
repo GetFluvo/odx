@@ -32,7 +32,7 @@ Commands:
   promote        Copy exact pins (and optionally code) of modules or a feature between environments
   env            Compare environments
   bot            Upstream dashboard issue and actionable PRs (nightly CI)
-  sync           Prefetch repositories, PR refs, index metadata and wheels into the cache
+  sync           Prefetch the repositories and PR refs of workspaces into the cache
   daemon         Run sync continuously or install it as a user-level scheduled job
   cache          Inspect and garbage-collect the shared cache
   lint           Odoo-specific lint checks with project context

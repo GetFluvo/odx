@@ -1,0 +1,381 @@
+//! `odx sync` (prefetch registered workspaces into the shared cache) and
+//! `odx cache` (inspect it, collect unused repositories).
+
+use std::fmt::Write as _;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use odx_aggregate::{date, plan_config};
+use odx_config::Span;
+use odx_config::user::{self, UserConfig, load_user_config};
+use odx_core::Exit;
+use odx_git::{RepoLock, url_hash};
+use odx_sync::{
+    CachedRepo, SyncRecord, SyncedWorkspace, parse_size, register, to_collect, unregister,
+};
+
+use super::aggregate::{prepare, run_aggregate};
+use super::{Report, human, size};
+use crate::Context;
+use crate::cli::{AggregateArgs, CacheCommand, GlobalArgs, SyncArgs};
+
+fn failed(exit: Exit, message: impl std::fmt::Display) -> Report {
+    Report::error(exit, message.to_string())
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// The shared cache and the user configuration.
+fn shared(ctx: &Context<'_>) -> Result<(UserConfig, PathBuf), Report> {
+    let user = load_user_config(ctx.fs, ctx.env).map_err(|e| failed(Exit::Usage, e))?;
+    let cache = user::cache_dir(&user, ctx.env)
+        .ok_or_else(|| failed(Exit::Usage, "no shared cache directory; set ODX_CACHE_DIR"))?;
+    Ok((user, cache))
+}
+
+/// `odx sync`.
+pub(crate) fn run_sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
+    sync(args, global, ctx).unwrap_or_else(|report| report)
+}
+
+fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    if args.register || args.unregister {
+        return registry(args.register, global, ctx);
+    }
+    let (user, cache) = shared(ctx)?;
+    let settings = user.sync.clone().unwrap_or_default();
+    let max_duration = match &args.max_duration {
+        Some(text) => text
+            .parse::<Span>()
+            .map_err(|e| failed(Exit::Usage, e))?
+            .as_duration(),
+        None => settings
+            .max_duration
+            .map_or(Duration::from_mins(20), Span::as_duration),
+    };
+    let workspaces: Vec<PathBuf> = if args.all {
+        user.workspaces.keys().map(PathBuf::from).collect()
+    } else if args.workspace.is_empty() {
+        vec![ctx.dir.clone()]
+    } else {
+        args.workspace.iter().map(|dir| ctx.dir.join(dir)).collect()
+    };
+    let Ok(_lock) = RepoLock::acquire(&cache.join("locks").join("sync.lock"), Duration::ZERO)
+    else {
+        return Ok(Report {
+            out: "another odx sync is running; nothing to do\n".to_owned(),
+            ..Report::default()
+        });
+    };
+    let deadline = Instant::now() + max_duration;
+    let mut record = SyncRecord {
+        schema: 1,
+        started: now(),
+        ..SyncRecord::default()
+    };
+    let fetch = AggregateArgs {
+        fetch_only: true,
+        repo: None,
+        prefer_mirror: true,
+        keep_conflicts: false,
+        force: false,
+        bundle_dir: None,
+        locked: false,
+        update: false,
+    };
+    let quiet = GlobalArgs {
+        project_dir: None,
+        config: None,
+        jobs: settings.jobs.or(global.jobs).or(Some(2)),
+        offline: global.offline,
+        fresh: false,
+        no_refresh: false,
+        refresh_index: false,
+        json: false,
+        verbose: 0,
+        quiet: true,
+    };
+    for dir in &workspaces {
+        let path = dir.display().to_string();
+        let (status, detail) = if Instant::now() >= deadline {
+            ("skipped", "max_duration reached".to_owned())
+        } else {
+            let workspace = Context {
+                fs: ctx.fs,
+                env: ctx.env,
+                dir: dir.clone(),
+                config: None,
+            };
+            let report = run_aggregate(&fetch, &quiet, &workspace);
+            let first = |text: &str| text.lines().next().unwrap_or_default().to_owned();
+            match report.error {
+                None => ("synced", first(&report.out)),
+                Some(error) => ("failed", first(&error)),
+            }
+        };
+        record.workspaces.push(SyncedWorkspace {
+            path,
+            status: status.to_owned(),
+            detail,
+        });
+    }
+    record.finished = now();
+    let failures = keep(&record, &cache);
+    let mut report = Report::default();
+    if global.json {
+        report.out = format!("{}\n", serde_json::to_string(&record).unwrap_or_default());
+    } else {
+        for workspace in &record.workspaces {
+            let _ = writeln!(
+                report.out,
+                "{} {}: {}",
+                workspace.status, workspace.path, workspace.detail
+            );
+        }
+    }
+    if failures > 0 {
+        report.exit = Exit::Failure;
+    }
+    Ok(report)
+}
+
+/// Write `last_sync.json` and append to `sync.log`; how many workspaces
+/// failed.
+fn keep(record: &SyncRecord, cache: &Path) -> usize {
+    let _ = record.write(&cache.join("last_sync.json"));
+    let failures = record
+        .workspaces
+        .iter()
+        .filter(|w| w.status == "failed")
+        .count();
+    let mut log = format!(
+        "{} sync of {} workspaces, {failures} failed\n",
+        date(SystemTime::now()),
+        record.workspaces.len()
+    );
+    for workspace in &record.workspaces {
+        let _ = writeln!(
+            log,
+            "  {} {}: {}",
+            workspace.status, workspace.path, workspace.detail
+        );
+    }
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(cache.join("sync.log"))
+        .and_then(|mut file| file.write_all(log.as_bytes()));
+    failures
+}
+
+/// `odx sync --register` / `--unregister`: edit `[workspaces]` in the user
+/// configuration.
+fn registry(add: bool, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let prepared = prepare(global, ctx)?;
+    let root = prepared.project.root.display().to_string();
+    let file = user::config_dir(ctx.env)
+        .map(|dir| dir.join("config.toml"))
+        .ok_or_else(|| {
+            failed(
+                Exit::Usage,
+                "no user configuration directory; set ODX_CONFIG_DIR",
+            )
+        })?;
+    // The user configuration was read (and so is TOML) when the project was.
+    let mut doc: toml_edit::DocumentMut = std::fs::read_to_string(&file)
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or_default();
+    let changed = if add {
+        register(
+            &mut doc,
+            &root,
+            &date(SystemTime::now()),
+            &prepared.project.config.odoo_version,
+        );
+        true
+    } else {
+        unregister(&mut doc, &root)
+    };
+    file.parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&file, doc.to_string()))
+        .map_err(|e| failed(Exit::Failure, format!("{}: {e}", file.display())))?;
+    let out = match (add, changed) {
+        (true, _) => format!(
+            "registered {root} for `odx sync --all` in {}\n",
+            file.display()
+        ),
+        (false, true) => format!("unregistered {root}\n"),
+        (false, false) => format!("{root} was not registered\n"),
+    };
+    Ok(Report {
+        out,
+        ..Report::default()
+    })
+}
+
+/// `odx cache`.
+pub(crate) fn run_cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
+    cache(command, global, ctx).unwrap_or_else(|report| report)
+}
+
+/// The repositories in the cache, and whether a registered workspace (or
+/// the one here) uses them.
+fn repositories(
+    ctx: &Context<'_>,
+    global: &GlobalArgs,
+    user: &UserConfig,
+    cache: &Path,
+) -> Vec<CachedRepo> {
+    let mut wanted = Vec::new();
+    let dirs = user
+        .workspaces
+        .keys()
+        .map(PathBuf::from)
+        .chain(std::iter::once(ctx.dir.clone()));
+    for dir in dirs {
+        let workspace = Context {
+            fs: ctx.fs,
+            env: ctx.env,
+            dir,
+            config: None,
+        };
+        let Ok(prepared) = prepare(global, &workspace) else {
+            continue;
+        };
+        let config = &prepared.project.config;
+        let planned = plan_config(config, &prepared.project.root, None).unwrap_or_default();
+        wanted.extend(planned.iter().map(|repo| url_hash(&repo.url)));
+        wanted.extend(
+            prepared
+                .lock
+                .iter()
+                .flat_map(|lock| lock.packages.values())
+                .map(|package| url_hash(&package.url)),
+        );
+    }
+    let repos = cache.join("repos");
+    let mut found: Vec<CachedRepo> = std::fs::read_dir(&repos)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| {
+            let hash = entry.file_name().to_string_lossy().into_owned();
+            let used_at = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |since| since.as_secs());
+            CachedRepo {
+                referenced: wanted.contains(&hash),
+                size: size(&entry.path()),
+                used: used_at,
+                hash,
+            }
+        })
+        .collect();
+    found.sort_by(|a, b| a.hash.cmp(&b.hash));
+    found
+}
+
+fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let (user, cache) = shared(ctx)?;
+    let mut report = Report::default();
+    let repos = repositories(ctx, global, &user, &cache);
+    let total = size(&cache);
+    match command {
+        CacheCommand::Info => {
+            let last = SyncRecord::read(&cache.join("last_sync.json"));
+            if global.json {
+                report.out = format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "schema": 1,
+                        "dir": cache.display().to_string(),
+                        "size": total,
+                        "repositories": repos.len(),
+                        "unused": repos.iter().filter(|r| !r.referenced).count(),
+                        "last_sync": last.as_ref().map(|record| record.finished),
+                    })
+                );
+            } else {
+                let _ = writeln!(report.out, "cache: {}", cache.display());
+                let _ = writeln!(report.out, "size: {}", human(total));
+                let _ = writeln!(
+                    report.out,
+                    "repositories: {} ({} unused by registered workspaces)",
+                    repos.len(),
+                    repos.iter().filter(|r| !r.referenced).count()
+                );
+                let _ = writeln!(
+                    report.out,
+                    "last sync: {}",
+                    last.map_or_else(
+                        || "never".to_owned(),
+                        |record| {
+                            let finished = UNIX_EPOCH + Duration::from_secs(record.finished);
+                            format!(
+                                "{} ({} workspaces)",
+                                date(finished),
+                                record.workspaces.len()
+                            )
+                        }
+                    )
+                );
+            }
+        }
+        CacheCommand::Gc { max_size, dry_run } => {
+            let limit = match max_size
+                .clone()
+                .or_else(|| user.cache.as_ref().and_then(|c| c.max_size.clone()))
+            {
+                Some(text) => Some(parse_size(&text).ok_or_else(|| {
+                    failed(
+                        Exit::Usage,
+                        format!("invalid size {text:?}: expected e.g. 20GB"),
+                    )
+                })?),
+                None => None,
+            };
+            let mut freed = 0;
+            for repo in to_collect(&repos, total, limit) {
+                let dir = cache.join("repos").join(&repo.hash);
+                let url_file = cache.join("repos").join(format!("{}.url", repo.hash));
+                let url = std::fs::read_to_string(&url_file)
+                    .map_or_else(|_| repo.hash.clone(), |url| url.trim().to_owned());
+                let lock = cache.join("locks").join(format!("{}.lock", repo.hash));
+                // A repository another odx is fetching into is left alone.
+                let removed = *dry_run
+                    || RepoLock::acquire(&lock, Duration::ZERO)
+                        .is_ok_and(|_held| std::fs::remove_dir_all(&dir).is_ok());
+                if removed {
+                    if !*dry_run {
+                        let _ = std::fs::remove_file(&url_file);
+                    }
+                    freed += repo.size;
+                    let _ = writeln!(
+                        report.out,
+                        "{} {url} ({})",
+                        if *dry_run { "would remove" } else { "removed" },
+                        human(repo.size)
+                    );
+                }
+            }
+            let _ = writeln!(
+                report.out,
+                "{} {}",
+                if *dry_run { "would free" } else { "freed" },
+                human(freed)
+            );
+        }
+    }
+    Ok(report)
+}

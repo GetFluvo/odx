@@ -1,7 +1,6 @@
 //! `odx doctor`: the local setup in one list, with a fix for each problem.
 
 use std::fmt::Write as _;
-use std::path::Path;
 
 use odx_aggregate::mergiraf_program;
 use odx_config::schema::{MergirafMode, RefStyle};
@@ -12,8 +11,8 @@ use odx_forge::{
 };
 use odx_platform::{profile, profile_name, provided_set};
 
-use super::Report;
 use super::aggregate::{Prepared, prepare, uv_program};
+use super::{Report, human, size};
 use crate::Context;
 use crate::cli::GlobalArgs;
 
@@ -327,33 +326,4 @@ fn vault(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<Che
         ),
     });
     checks
-}
-
-/// Bytes under `dir`.
-fn size(dir: &Path) -> u64 {
-    std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| match entry.file_type() {
-            Ok(kind) if kind.is_dir() => size(&entry.path()),
-            _ => entry.metadata().map(|m| m.len()).unwrap_or_default(),
-        })
-        .sum()
-}
-
-#[expect(clippy::cast_precision_loss, reason = "a size for people to read")]
-fn human(bytes: u64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < units.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", units.get(unit).copied().unwrap_or("TB"))
-    }
 }

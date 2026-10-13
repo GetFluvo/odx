@@ -2,7 +2,7 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Remove least recently used data above the configured size
+Remove repositories no registered workspace uses, least recently used first
 
 Usage: odx cache gc [OPTIONS]
 
@@ -10,8 +10,14 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --max-size <SIZE>
+          Keep the cache under this size (default: `[cache] max_size`; without one, remove every unused repository)
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --dry-run
+          Show what would be removed
 
   -j, --jobs <N>
           Override the number of parallel jobs

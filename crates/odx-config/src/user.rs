@@ -6,14 +6,15 @@
 //! (repositories, packages, environments) are rejected so a project cannot
 //! be reconfigured from here.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use odx_core::{Env, FileSystem};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
-use crate::ConfigError;
 use crate::error::line_column;
+use crate::{ConfigError, Span};
 
 /// The user configuration file.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -23,18 +24,49 @@ pub struct UserConfig {
     pub cache: Option<UserCache>,
     /// Local clones the cache can borrow objects from.
     pub clones: Option<Clones>,
-    /// Background sync (not interpreted yet).
-    pub sync: Option<IgnoredAny>,
+    /// Background sync.
+    pub sync: Option<SyncSettings>,
     /// Forge access defaults (not interpreted yet).
     pub http: Option<IgnoredAny>,
     /// Upstream mirrors (not interpreted yet).
     pub mirrors: Option<IgnoredAny>,
-    /// Registered workspaces (not interpreted yet).
-    pub workspaces: Option<IgnoredAny>,
+    /// Workspaces registered for `odx sync --all`, by path.
+    #[serde(default)]
+    pub workspaces: BTreeMap<String, Workspace>,
     /// The verdict repository (not interpreted yet).
     pub verdicts: Option<IgnoredAny>,
     /// Projects whose shell hooks may run without `--allow-shell`.
     pub trust: Option<Trust>,
+}
+
+/// `[sync]` of the user configuration.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncSettings {
+    /// Whether background sync is installed (`odx daemon install` sets it).
+    pub enabled: Option<bool>,
+    /// Time between background syncs.
+    pub interval: Option<Span>,
+    /// Longest run of one sync.
+    pub max_duration: Option<Span>,
+    /// Share of the remaining API quota per host a sync may use.
+    pub api_budget: Option<f64>,
+    /// Concurrent fetches during a sync.
+    pub jobs: Option<usize>,
+    /// Low CPU and IO priority.
+    pub nice: Option<bool>,
+    /// Skip syncs on battery power (not interpreted yet).
+    pub pause_on_battery: Option<bool>,
+}
+
+/// A registered workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Workspace {
+    /// When it was registered (`YYYY-MM-DD`).
+    pub registered: Option<String>,
+    /// Its Odoo series.
+    pub series: Option<String>,
 }
 
 /// `[trust]` of the user configuration.

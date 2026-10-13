@@ -114,6 +114,8 @@ fn execute(
         Command::Lock(args) => cmd::aggregate::run_lock(args, &cli.global, ctx).emit(out, err),
         Command::Verify(args) => cmd::verify::run_verify(args, &cli.global, ctx).emit(out, err),
         Command::Auth(command) => cmd::auth::run_auth(command, &cli.global, ctx).emit(out, err),
+        Command::Sync(args) => cmd::sync::run_sync(args, &cli.global, ctx).emit(out, err),
+        Command::Cache(command) => cmd::sync::run_cache(command, &cli.global, ctx).emit(out, err),
         Command::Doctor => cmd::doctor::run_doctor(&cli.global, ctx).emit(out, err),
         Command::Dev(args) => cmd::dev::run_dev(args, &cli.global, ctx).emit(out, err),
         Command::Build(args) => cmd::build::run_build(args, &cli.global, ctx).emit(out, err),

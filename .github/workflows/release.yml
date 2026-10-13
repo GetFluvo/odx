@@ -177,4 +177,4 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         # Published library crates first; cargo orders the packages itself.
-        run: cargo publish --locked -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p odx-dev -p git-aggregate-rs -p odx-cli
+        run: cargo publish --locked -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p odx-dev -p odx-sync -p git-aggregate-rs -p odx-cli
