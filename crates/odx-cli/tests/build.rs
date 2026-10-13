@@ -383,6 +383,9 @@ fn build_failures() {
 #[test]
 fn build_errors_without_uv() {
     let mut project = Project::new();
+    // Locking ran no uv, and recorded no wheel yet.
+    assert!(!project.log.exists());
+    assert!(!project.read("odx.lock").contains("[wheels."));
     project.env = project.env.clone().with("ODX_UV", "git");
     let (exit, _, err) = project.odx(&["build", "--addon", "pos_x"]);
     assert_eq!(exit, Exit::Failure);
