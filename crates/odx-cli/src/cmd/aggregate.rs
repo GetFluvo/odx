@@ -58,22 +58,22 @@ pub(crate) fn cache_dir(
 }
 
 /// The project, its lockfile and where and how to fetch.
-struct Prepared {
-    project: Project,
-    lock_path: PathBuf,
-    lock: Option<Lockfile>,
-    cache: Cache,
+pub(crate) struct Prepared {
+    pub(crate) project: Project,
+    pub(crate) lock_path: PathBuf,
+    pub(crate) lock: Option<Lockfile>,
+    pub(crate) cache: Cache,
     clones: Clones,
     limits: Limits,
 }
 
 impl Prepared {
-    fn locked(&self) -> &[LockedRepository] {
+    pub(crate) fn locked(&self) -> &[LockedRepository] {
         self.lock.as_ref().map_or(&[], |lock| &lock.repositories)
     }
 }
 
-fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared, Report> {
+pub(crate) fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared, Report> {
     let project = match discover(ctx.fs, &ctx.dir, ctx.config) {
         Ok(Source::Pyproject(project)) => project,
         Ok(Source::ReposYaml { file, .. }) => {
@@ -390,6 +390,9 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
             "odx lock --auto-update: not implemented yet (roadmap phase 5)".to_owned(),
         ));
     }
+    if args.migrate {
+        return migrate(ctx);
+    }
     let prepared = prepare(global, ctx)?;
     let mut planned = plan_config(
         &prepared.project.config,
@@ -479,6 +482,42 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         return Ok(summary.report(global.json, false, warnings));
     }
     Ok(summary.report(global.json, false, warnings))
+}
+
+/// `odx lock --migrate`: rewrite `odx.lock` in the current format.
+fn migrate(ctx: &Context<'_>) -> Result<Report, Report> {
+    let project = match discover(ctx.fs, &ctx.dir, ctx.config) {
+        Ok(Source::Pyproject(project)) => project,
+        Ok(Source::ReposYaml { file, .. }) => {
+            return Err(Report::error(
+                Exit::Usage,
+                format!("{}: repos.yaml projects have no odx.lock", file.display()),
+            ));
+        }
+        Err(e) => return Err(Report::error(Exit::Usage, e.to_string())),
+    };
+    let path = project.root.join(project.config.lockfile());
+    let text = ctx
+        .fs
+        .read(&path)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", path.display())))?;
+    let lock = Lockfile::migrate(&text)
+        .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", path.display())))?;
+    let rendered = lock.render();
+    if rendered == text {
+        return Ok(Report {
+            out: format!("{} is already in the current format\n", path.display()),
+            ..Report::default()
+        });
+    }
+    ctx.fs
+        .write(&path, rendered.as_bytes())
+        .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", path.display())))?;
+    Ok(Report {
+        out: format!("rewrote {} in the current format\n", path.display()),
+        ..Report::default()
+    })
 }
 
 /// Build in scratch working trees inside the cache, never in the project.

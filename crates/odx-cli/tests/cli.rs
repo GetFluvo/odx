@@ -22,7 +22,6 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 const STUBS: &[(&[&str], u8)] = &[
     (&["vendor"], 5),
     (&["build"], 5),
-    (&["verify"], 4),
     (&["dev"], 6),
     (&["dashboard"], 7),
     (&["status"], 7),
@@ -87,6 +86,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "add", "OCA/pos#1"][..], "add", 1),
         (&["odx", "drop", "OCA/pos#1"][..], "drop", 1),
         (&["odx", "lock"][..], "lock", 4),
+        (&["odx", "verify"][..], "verify", 4),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));

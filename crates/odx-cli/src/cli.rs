@@ -203,6 +203,9 @@ pub struct LockArgs {
     /// Only this repository (its `name`, or its URL when unnamed).
     #[arg(long, value_name = "NAME")]
     pub repo: Option<String>,
+    /// Rewrite odx.lock in the current format and stop.
+    #[arg(long, conflicts_with_all = ["check", "update"])]
+    pub migrate: bool,
     /// Fail if odx.lock would change.
     #[arg(long, conflicts_with = "update")]
     pub check: bool,

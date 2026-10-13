@@ -8,11 +8,12 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 
 use odx_config::Problem;
-use odx_core::Exit;
+use odx_core::{Exit, redact};
 
 pub(crate) mod aggregate;
 pub(crate) mod compat;
 pub(crate) mod edit;
+pub(crate) mod verify;
 
 /// What a command produced.
 #[derive(Debug, Default)]
@@ -46,8 +47,9 @@ impl Report {
         if let Some(error) = &self.error {
             let _ = writeln!(diagnostics, "error: {error}");
         }
-        err.write_all(diagnostics.as_bytes())?;
-        out.write_all(self.out.as_bytes())?;
+        // Credentials in URLs never leave odx.
+        err.write_all(redact(&diagnostics).as_bytes())?;
+        out.write_all(redact(&self.out).as_bytes())?;
         Ok(self.exit)
     }
 }
