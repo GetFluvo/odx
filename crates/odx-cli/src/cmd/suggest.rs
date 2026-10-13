@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +16,7 @@ use odx_index::{AddonIndex, series_key};
 use odx_port::analysis::{Class, Group, Query, Settings, analyse};
 use odx_port::blacklist::{self, Blacklist};
 use odx_port::git::Repo;
+use odx_verdicts::{Entry, Standing};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -23,12 +25,28 @@ use crate::Context;
 use crate::cli::{GlobalArgs, SuggestArgs};
 
 /// Suggestions for one addon from one source series.
-struct Found {
-    addon: String,
-    target: String,
-    source: String,
-    url: String,
-    groups: Vec<Group>,
+pub(crate) struct Found {
+    pub(crate) addon: String,
+    pub(crate) target: String,
+    pub(crate) source: String,
+    /// The repository the addon lives in on the source series.
+    pub(crate) url: String,
+    /// The repository of the target series.
+    pub(crate) target_url: String,
+    /// The cache repository the analysis ran in, and its target ref.
+    pub(crate) repo_dir: PathBuf,
+    pub(crate) target_ref: String,
+    pub(crate) groups: Vec<Group>,
+}
+
+impl Found {
+    /// The id of `files` on the target series now, for re-checks.
+    pub(crate) fn tree(&self, files: &[String]) -> Option<String> {
+        let runner = OsRunner;
+        Repo::new(&runner, &self.repo_dir)
+            .tree_of(&self.target_ref, files)
+            .ok()
+    }
 }
 
 /// `odx suggest`.
@@ -210,7 +228,10 @@ impl Scan<'_> {
             addon: addon.to_owned(),
             target: target.to_owned(),
             source: source.to_owned(),
-            url: location.url,
+            url: location.url.clone(),
+            target_url: target_url.to_owned(),
+            repo_dir: prepared.cache.repo_dir(&location.url),
+            target_ref,
             groups,
         }))
     }
@@ -218,6 +239,26 @@ impl Scan<'_> {
 
 fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
+    let mut report = Report::default();
+    let found = collect(args, global, ctx, &prepared, &mut report.warnings)?;
+    let entries = super::verdict::entries(ctx, &prepared, global, &mut report.warnings);
+    let judged = judge(&found, &entries, args.env.as_deref());
+    report.out = if global.json {
+        format!("{}\n", json(&judged))
+    } else {
+        text(&judged, args.show_muted)
+    };
+    Ok(report)
+}
+
+/// The suggestions for `args`, before verdicts and mutes.
+pub(crate) fn collect(
+    args: &SuggestArgs,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    warnings: &mut Vec<Problem>,
+) -> Result<Vec<Found>, Report> {
     let config = &prepared.project.config;
     let port = config.port.as_ref();
     let settings = Settings::new(
@@ -225,8 +266,7 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         port.and_then(|port| port.repo_wide_threshold),
     )
     .map_err(|e| Report::error(Exit::Usage, e))?;
-    let mut report = Report::default();
-    let addons: Vec<_> = addons(ctx, &prepared)
+    let addons: Vec<_> = addons(ctx, prepared)
         .into_iter()
         .filter(|addon| addon.kind != Kind::Own)
         .filter(|addon| {
@@ -242,9 +282,9 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         .ok()
         .filter(|_| !global.offline)
         .map(|http| http as &dyn Http);
-    let targets = targets(args, &prepared)?;
+    let targets = targets(args, prepared)?;
     // Every series involved, for renames and the index.
-    let all = involved(args, &prepared, &targets);
+    let all = involved(args, prepared, &targets);
     let lowest = all
         .iter()
         .min_by_key(|series| series_key(series))
@@ -255,13 +295,7 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         .max_by_key(|series| series_key(series))
         .cloned()
         .unwrap_or_default();
-    let known = renames(
-        ctx,
-        &prepared,
-        online,
-        &steps(&lowest, &highest),
-        &mut report.warnings,
-    );
+    let known = renames(ctx, prepared, online, &steps(&lowest, &highest), warnings);
     let names: Vec<String> = addons.iter().map(|addon| addon.name.clone()).collect();
     let wanted: Vec<(String, Vec<String>)> = all
         .iter()
@@ -269,15 +303,15 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         .collect();
     let index = addon_index(
         ctx,
-        &prepared,
+        prepared,
         online,
         known,
         &wanted,
         global.refresh_index,
-        &mut report.warnings,
+        warnings,
     );
     let scan = Scan {
-        prepared: &prepared,
+        prepared,
         offline: global.offline,
         settings: &settings,
         index: &index,
@@ -293,7 +327,7 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             else {
                 continue;
             };
-            for source in sources(args, &prepared, target) {
+            for source in sources(args, prepared, target) {
                 let answer = scan.one(
                     &addon.name,
                     addon.url.as_deref(),
@@ -304,7 +338,7 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
                 match answer {
                     Ok(Some(item)) => found.push(item),
                     Ok(None) => {}
-                    Err(message) => report.warnings.push(Problem {
+                    Err(message) => warnings.push(Problem {
                         key: format!("{} on {source}", addon.name),
                         message,
                     }),
@@ -312,83 +346,154 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             }
         }
     }
-    report.out = if global.json {
-        format!("{}\n", json(&found))
-    } else {
-        text(&found, args.show_muted)
-    };
-    Ok(report)
+    Ok(found)
 }
 
-fn text(found: &[Found], show_suppressed: bool) -> String {
+/// A suggestion with the verdict or mute that concerns it, if any.
+struct Judged<'a> {
+    found: &'a Found,
+    group: &'a Group,
+    verdict: Option<(&'a Entry, Standing)>,
+}
+
+impl Judged<'_> {
+    /// Hidden unless suppressed ones are asked for: blacklisted upstream,
+    /// or covered by a verdict or mute in force.
+    fn hidden(&self) -> bool {
+        self.group.class == Class::Blacklisted
+            || self
+                .verdict
+                .is_some_and(|(_, standing)| standing == Standing::Applies)
+    }
+}
+
+/// Match every suggestion with the first verdict or mute in force for it.
+fn judge<'a>(
+    found: &'a [Found],
+    entries: &'a [(PathBuf, Entry)],
+    env: Option<&str>,
+) -> Vec<Judged<'a>> {
+    let today = odx_aggregate::date(std::time::SystemTime::now());
+    found
+        .iter()
+        .flat_map(|item| item.groups.iter().map(move |group| (item, group)))
+        .map(|(item, group)| {
+            let verdict = entries
+                .iter()
+                .map(|(_, entry)| entry)
+                .find(|entry| {
+                    entry.concerns(&group.key, &group.patch_ids, &item.addon, &item.target)
+                        && entry.in_force(&today, env)
+                })
+                .map(|entry| {
+                    let tree = entry
+                        .recheck
+                        .as_ref()
+                        .and_then(|recheck| item.tree(&recheck.files));
+                    (entry, entry.standing(tree.as_deref()))
+                });
+            Judged {
+                found: item,
+                group,
+                verdict,
+            }
+        })
+        .collect()
+}
+
+fn text(judged: &[Judged<'_>], show_suppressed: bool) -> String {
     let mut out = String::new();
-    let (mut shown, mut suppressed) = (0, 0);
+    let (mut shown, mut blacklisted, mut suppressed) = (0, 0, 0);
     let mut heading = String::new();
-    for item in found {
-        let groups: Vec<&Group> = item
-            .groups
-            .iter()
-            .filter(|group| {
-                let hidden = group.class == Class::Blacklisted;
-                if hidden {
-                    suppressed += 1;
-                }
-                show_suppressed || !hidden
-            })
-            .collect();
-        if groups.is_empty() {
+    for item in judged {
+        if item.group.class == Class::Blacklisted {
+            blacklisted += 1;
+        } else if item.hidden() {
+            suppressed += 1;
+        }
+        if item.hidden() && !show_suppressed {
             continue;
         }
-        let title = format!("{} on {}", item.addon, item.target);
+        let title = format!("{} on {}", item.found.addon, item.found.target);
         if title != heading {
             let _ = writeln!(out, "{title}:");
             heading = title;
         }
-        for group in groups {
-            shown += 1;
-            let commits = group.commits.len();
-            let author = group
-                .commits
-                .last()
-                .map(|c| c.author.as_str())
-                .unwrap_or_default();
-            let _ = write!(
-                out,
-                "  {} from {}: {} - {} ({commits} commits, {author})",
-                group.key,
-                item.source,
-                group.class.name(),
-                group.title
-            );
-            if let Some(reason) = &group.reason {
-                let _ = write!(out, "; {reason}");
-            }
-            out.push('\n');
+        shown += 1;
+        let group = item.group;
+        let commits = group.commits.len();
+        let author = group
+            .commits
+            .last()
+            .map(|c| c.author.as_str())
+            .unwrap_or_default();
+        let _ = write!(
+            out,
+            "  {} from {}: {} - {} ({commits} commits, {author})",
+            group.key,
+            item.found.source,
+            group.class.name(),
+            group.title
+        );
+        if let Some(reason) = &group.reason {
+            let _ = write!(out, "; {reason}");
         }
+        match item.verdict {
+            Some((entry, Standing::Applies)) => {
+                let _ = write!(
+                    out,
+                    "; suppressed by {} ({}): {}",
+                    entry.id,
+                    entry.kind.name(),
+                    entry.reason
+                );
+            }
+            Some((entry, Standing::Stale)) => {
+                let _ = write!(
+                    out,
+                    "; previously declined ({}): {} (target code changed since {})",
+                    entry.kind.name(),
+                    entry.reason,
+                    entry.date
+                );
+            }
+            None => {}
+        }
+        out.push('\n');
     }
     let _ = writeln!(
         out,
-        "{shown} suggestions ({suppressed} blacklisted upstream)"
+        "{shown} suggestions ({blacklisted} blacklisted upstream, {suppressed} suppressed by verdicts and mutes)"
     );
     out
 }
 
-fn json(found: &[Found]) -> serde_json::Value {
+fn json(judged: &[Judged<'_>]) -> serde_json::Value {
     serde_json::json!({
         "schema": 1,
-        "suggestions": found.iter().flat_map(|item| item.groups.iter().map(move |group| serde_json::json!({
-            "addon": item.addon,
-            "target": item.target,
-            "source": item.source,
-            "repository": item.url,
-            "key": group.key,
-            "pr": group.pr,
-            "title": group.title,
-            "class": group.class.name(),
-            "reason": group.reason,
-            "commits": group.commits.iter().map(|c| serde_json::json!({
-                "sha": c.sha, "subject": c.subject, "author": c.author, "date": c.date,
-            })).collect::<Vec<_>>(),
-        }))).collect::<Vec<_>>(),
+        "suggestions": judged.iter().map(|item| {
+            let group = item.group;
+            serde_json::json!({
+                "addon": item.found.addon,
+                "target": item.found.target,
+                "source": item.found.source,
+                "repository": item.found.url,
+                "key": group.key,
+                "pr": group.pr,
+                "title": group.title,
+                "class": group.class.name(),
+                "reason": group.reason,
+                "patch_ids": group.patch_ids,
+                "verdict": item.verdict.map(|(entry, standing)| serde_json::json!({
+                    "id": entry.id,
+                    "kind": entry.kind.name(),
+                    "reason": entry.reason,
+                    "stale": standing == Standing::Stale,
+                })),
+                "commits": group.commits.iter().map(|c| serde_json::json!({
+                    "sha": c.sha, "subject": c.subject, "author": c.author, "date": c.date,
+                })).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
     })
 }

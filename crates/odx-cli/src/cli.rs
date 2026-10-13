@@ -480,28 +480,57 @@ pub enum VerdictScope {
     Organisation,
 }
 
+/// Arguments of `odx verdict add`.
+#[derive(Debug, Args)]
+pub struct VerdictAddArgs {
+    /// The suggestion: `<owner>/<repo>#<n>` or `orphaned_commits`.
+    pub change: String,
+    /// The addon it is about.
+    #[arg(long)]
+    pub addon: String,
+    /// The series it is judged for (default: the project's).
+    #[arg(long, value_name = "SERIES")]
+    pub target: Option<String>,
+    /// The series the suggestion came from, when several have it.
+    #[arg(long, value_name = "SERIES", value_delimiter = ',')]
+    pub from: Vec<String>,
+    /// Kind of verdict.
+    #[arg(long, value_enum)]
+    pub kind: VerdictKind,
+    /// Why; mandatory.
+    #[arg(long)]
+    pub reason: String,
+    /// Scope; the default depends on the kind.
+    #[arg(long, value_enum)]
+    pub scope: Option<VerdictScope>,
+    /// Environments of an environment-scope mute.
+    #[arg(long = "env", value_name = "ENV")]
+    pub environments: Vec<String>,
+    /// Expiry date (YYYY-MM-DD).
+    #[arg(long, value_name = "DATE")]
+    pub until: Option<String>,
+    /// Do not resurface when the target code changes.
+    #[arg(long)]
+    pub no_recheck: bool,
+}
+
 /// `odx verdict` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum VerdictCommand {
-    /// Record a verdict or mute.
-    Add {
-        /// Suggestion or change id, as shown by `odx dashboard`.
-        id: String,
-        /// Kind of verdict.
-        #[arg(long, value_enum)]
-        kind: VerdictKind,
-        /// Why; mandatory.
-        #[arg(long)]
-        reason: String,
-        /// Scope; the default depends on the kind.
-        #[arg(long, value_enum)]
-        scope: Option<VerdictScope>,
-        /// Expiry date (YYYY-MM-DD) for deferred verdicts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-    },
+    /// Record a verdict or mute about a suggestion of `odx suggest`.
+    Add(VerdictAddArgs),
     /// List verdicts and mutes.
-    List,
+    List {
+        /// Only those for this target series.
+        #[arg(long, value_name = "SERIES")]
+        series: Option<String>,
+        /// Only those for this addon.
+        #[arg(long)]
+        addon: Option<String>,
+        /// Only those whose target code changed since.
+        #[arg(long)]
+        stale: bool,
+    },
     /// Show one verdict.
     Show {
         /// Verdict id.
@@ -509,6 +538,14 @@ pub enum VerdictCommand {
     },
     /// Revoke a verdict (recorded, never deleted).
     Revoke {
+        /// Verdict id.
+        id: String,
+        /// Why; mandatory.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Keep a stale verdict after reviewing the changed target code.
+    Confirm {
         /// Verdict id.
         id: String,
     },

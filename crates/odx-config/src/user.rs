@@ -36,8 +36,8 @@ pub struct UserConfig {
     /// Workspaces registered for `odx sync --all`, by path.
     #[serde(default)]
     pub workspaces: BTreeMap<String, Workspace>,
-    /// The verdict repository (not interpreted yet).
-    pub verdicts: Option<IgnoredAny>,
+    /// The private verdict repository.
+    pub verdicts: Option<Verdicts>,
     /// Projects whose shell hooks may run without `--allow-shell`.
     pub trust: Option<Trust>,
 }
@@ -105,6 +105,14 @@ pub fn mirror_for<'a>(
         })
         .max_by_key(|(key, _)| key.len())
         .map(|(_, mirror)| mirror)
+}
+
+/// `[verdicts]` of the user configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Verdicts {
+    /// URL of the private repository of verdicts and project mutes.
+    pub repo: Option<String>,
 }
 
 /// A registered workspace.

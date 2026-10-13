@@ -25,6 +25,7 @@ odx-forge = { path = "crates/odx-forge", version = "0.0.4" }
 odx-analyze = { path = "crates/odx-analyze", version = "0.0.4" }
 odx-index = { path = "crates/odx-index", version = "0.0.4" }
 odx-port = { path = "crates/odx-port", version = "0.0.4" }
+odx-verdicts = { path = "crates/odx-verdicts", version = "0.0.4" }
 odx-platform = { path = "crates/odx-platform", version = "0.0.4" }
 odx-vendor = { path = "crates/odx-vendor", version = "0.0.4" }
 odx-dev = { path = "crates/odx-dev", version = "0.0.4" }

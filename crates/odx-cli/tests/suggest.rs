@@ -211,7 +211,7 @@ fn suggestions_from_the_series_below_and_above() {
              orphaned_commits from 16.0: migration commit - [MIG] pos_x: 16.0 (1 commits, Jane)\n  \
              {url}#9 from 18.0: portable - [IMP] pos_x: d (1 commits, Jane)\n  \
              orphaned_commits from 18.0: migration commit - [MIG] pos_x: 18.0 (1 commits, Jane)\n\
-             4 suggestions (1 blacklisted upstream)\n"
+             4 suggestions (1 blacklisted upstream, 0 suppressed by verdicts and mutes)\n"
         )
     );
     let (_, out, _) = project.odx(&[
@@ -234,12 +234,18 @@ fn suggestions_from_the_series_below_and_above() {
     let (_, out, err) = project.odx(&["--offline", "suggest"]);
     assert!(out.contains("pos_x on 18.0:\n"), "{out}{err}");
     let (_, out, _) = project.odx(&["suggest", "--addon", "nothing_*"]);
-    assert_eq!(out, "0 suggestions (0 blacklisted upstream)\n");
+    assert_eq!(
+        out,
+        "0 suggestions (0 blacklisted upstream, 0 suppressed by verdicts and mutes)\n"
+    );
     // Nothing new on the series itself.
     let (_, out, _) = project.odx(&[
         "suggest", "--series", "17.0", "--from", "17.0", "--addon", "pos_x",
     ]);
-    assert_eq!(out, "0 suggestions (0 blacklisted upstream)\n");
+    assert_eq!(
+        out,
+        "0 suggestions (0 blacklisted upstream, 0 suppressed by verdicts and mutes)\n"
+    );
 }
 
 #[test]
@@ -284,7 +290,9 @@ fn suggest_failures() {
     .unwrap();
     let (_, out, _) = project.odx(&["suggest"]);
     assert!(
-        out.ends_with("2 suggestions (1 blacklisted upstream)\n"),
+        out.ends_with(
+            "2 suggestions (1 blacklisted upstream, 0 suppressed by verdicts and mutes)\n"
+        ),
         "{out}"
     );
 }

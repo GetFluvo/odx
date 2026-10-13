@@ -4,7 +4,7 @@ expression: cmd.render_long_help().to_string()
 ---
 Revoke a verdict (recorded, never deleted)
 
-Usage: odx verdict revoke [OPTIONS] <ID>
+Usage: odx verdict revoke [OPTIONS] --reason <REASON> <ID>
 
 Arguments:
   <ID>
@@ -13,6 +13,9 @@ Arguments:
 Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
+
+      --reason <REASON>
+          Why; mandatory
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use

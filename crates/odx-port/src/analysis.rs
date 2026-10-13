@@ -92,6 +92,10 @@ pub struct Group {
     pub class: Class,
     /// The blacklist's reason, when blacklisted.
     pub reason: Option<String>,
+    /// The patch-ids of its commits (relative to the addon), in order.
+    pub patch_ids: Vec<String>,
+    /// The files its commits change in the addon, relative to it, sorted.
+    pub files: Vec<String>,
 }
 
 /// What to compare.
@@ -161,7 +165,9 @@ fn translation(file: &str) -> bool {
             .is_some_and(|ext| ext == "po" || ext == "pot")
 }
 
-fn classify(repo: &Repo<'_>, commits: &[Commit], dir: &str, settings: &Settings) -> Class {
+/// The class of a group whose commits change `files` (all of them, per
+/// commit).
+fn classify(commits: &[Commit], files: &[Vec<String>], dir: &str, settings: &Settings) -> Class {
     if commits.iter().any(|commit| {
         settings
             .migration
@@ -170,10 +176,6 @@ fn classify(repo: &Repo<'_>, commits: &[Commit], dir: &str, settings: &Settings)
     }) {
         return Class::Migration;
     }
-    let files: Vec<Vec<String>> = commits
-        .iter()
-        .map(|commit| repo.files(&commit.sha).unwrap_or_default())
-        .collect();
     let mine: Vec<Vec<&str>> = files.iter().map(|files| within(files, dir)).collect();
     if mine.iter().flatten().all(|file| translation(file)) {
         return Class::Translations;
@@ -237,15 +239,32 @@ pub fn analyse(
                 commits: vec![commit],
                 class: Class::Portable,
                 reason: None,
+                patch_ids: Vec::new(),
+                files: Vec::new(),
             }),
         }
     }
     for group in &mut groups {
+        let files: Vec<Vec<String>> = group
+            .commits
+            .iter()
+            .map(|commit| repo.files(&commit.sha).unwrap_or_default())
+            .collect();
+        let mine: BTreeSet<&str> = files
+            .iter()
+            .flat_map(|files| within(files, query.source_dir))
+            .collect();
+        group.files = mine.into_iter().map(str::to_owned).collect();
+        group.patch_ids = group
+            .commits
+            .iter()
+            .filter_map(|commit| ids.get(&commit.sha).cloned())
+            .collect();
         group.reason = query.blacklist.reason(&group.key).map(str::to_owned);
         group.class = if group.reason.is_some() {
             Class::Blacklisted
         } else {
-            classify(repo, &group.commits, query.source_dir, settings)
+            classify(&group.commits, &files, query.source_dir, settings)
         };
     }
     Ok(groups)
@@ -405,6 +424,8 @@ mod tests {
             ]
         );
         assert_eq!(groups[0].reason.as_deref(), Some("not wanted on 17.0"));
+        assert_eq!(groups[0].files, ["report.py"]);
+        assert_eq!(groups[0].patch_ids.len(), 1);
         assert_eq!(groups[4].pr, Some(3));
         assert_eq!(groups[5].commits[0].author, "Jane");
         assert_eq!(groups[6].pr, None);
@@ -430,6 +451,15 @@ mod tests {
         };
         assert!(analyse(&repo, &bad, &settings).is_err());
         assert!(repo.files("nope").is_err());
+        let files = ["pos_y/models.py".to_owned()];
+        let tree = repo.tree_of("17.0", &files).unwrap();
+        assert_eq!(tree.len(), 40);
+        assert_ne!(
+            repo.tree_of("16.0", &["pos_x/models.py".to_owned()])
+                .unwrap(),
+            tree
+        );
+        assert!(repo.tree_of("nope", &files).is_err());
         let failing = odx_core::fake::ScriptedRunner::default();
         failing.push(Err(std::io::ErrorKind::NotFound.into()));
         assert!(Repo::new(&failing, dir).files("x").is_err());

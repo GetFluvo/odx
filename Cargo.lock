@@ -1826,6 +1826,7 @@ dependencies = [
  "odx-port",
  "odx-sync",
  "odx-vendor",
+ "odx-verdicts",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1972,6 +1973,12 @@ dependencies = [
 [[package]]
 name = "odx-verdicts"
 version = "0.0.4"
+dependencies = [
+ "serde",
+ "tempfile",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit",
+]
 
 [[package]]
 name = "once_cell"

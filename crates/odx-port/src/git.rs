@@ -166,6 +166,20 @@ impl<'a> Repo<'a> {
             .map(|message| message.trim().to_owned())
     }
 
+    /// An id of `files` as they are at `rev`: the git object id of their
+    /// `ls-tree` listing, so it changes exactly when one of them does.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot read `rev`.
+    pub fn tree_of(&self, rev: &str, files: &[String]) -> Result<String, String> {
+        let listing = self.output(&self.git().args(["ls-tree", "-r", rev, "--"]).args(files))?;
+        let id = self
+            .output(&self.git().args(["hash-object", "--stdin"]).stdin(listing))
+            .unwrap_or_default();
+        Ok(String::from_utf8_lossy(&id).trim().to_owned())
+    }
+
     /// The content of `path` at `rev`, if it exists.
     #[must_use]
     pub fn show(&self, rev: &str, path: &str) -> Option<String> {
