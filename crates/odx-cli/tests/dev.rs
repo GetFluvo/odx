@@ -169,6 +169,8 @@ fn editable_installs() {
     let (exit, _, err) = project.odx(&["dev"]);
     assert_eq!(exit, Exit::Failure);
     assert!(err.contains("git pip install failed"), "{err}");
+    // Nothing ran a stand-in for uv yet.
+    assert!(!project.tmp.path().join("uv.log").exists());
     let (exit, out, _) = project.odx(&["dev", "--dry-run", "--venv", "env"]);
     assert_eq!(exit, Exit::Success);
     assert!(
