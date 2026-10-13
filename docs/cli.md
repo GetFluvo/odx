@@ -321,3 +321,21 @@ the current format after an odx upgrade changed it.
 
 Credentials written into URLs (`https://user:token@host/…`) are replaced by
 `***` in everything odx prints.
+
+## Lines of code
+
+```console
+$ odx stats                        # the project's own addons, per language
+$ odx stats --include-vendor       # also the vendored groups and aggregated repositories
+$ odx stats --per-addon            # one row per addon
+$ odx stats --json                 # tokei's per-language structure, with a total
+```
+
+`odx stats` counts the addon directories (directories with a
+`__manifest__.py`) under `[tool.odx.groups] project_addons` (default: the
+project root) with [tokei](https://github.com/XAMPPRocky/tokei), so the
+numbers match running `tokei` on the same addon directories: `.gitignore`,
+`.ignore` and `.tokeignore` are respected, hidden files are skipped, and
+code embedded in another language (CSS in HTML, code blocks in Markdown)
+counts with its host language. `--include-vendor` adds the dependency group
+directories and every repository's `target_dir`.

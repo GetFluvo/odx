@@ -124,7 +124,7 @@ pub enum Command {
     /// List database migration scripts introduced by merges.
     Sniff,
     /// Lines of code per language.
-    Stats,
+    Stats(StatsArgs),
     /// Module availability and code readiness for the next Odoo series.
     Upgrade(UpgradeArgs),
 
@@ -263,6 +263,17 @@ pub struct VerifyArgs {
     /// Check the platform requirements file against the provided-package set.
     #[arg(long)]
     pub requirements: bool,
+}
+
+/// Arguments of `odx stats`.
+#[derive(Debug, Args)]
+pub struct StatsArgs {
+    /// Also count the aggregated and vendored addons.
+    #[arg(long)]
+    pub include_vendor: bool,
+    /// One row per addon instead of per language.
+    #[arg(long)]
+    pub per_addon: bool,
 }
 
 /// Arguments of `odx dev`.
@@ -631,7 +642,7 @@ impl Command {
             Self::Verdict(_) => "verdict",
             Self::CheckDeps => "check-deps",
             Self::Sniff => "sniff",
-            Self::Stats => "stats",
+            Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
             Self::Port(_) => "port",
             Self::Promote(_) => "promote",
@@ -654,7 +665,7 @@ impl Command {
             Self::Add(_) | Self::Drop(_) | Self::Import(_) | Self::Export(_) => 1,
             Self::Aggregate(_) | Self::GitAggregate(_) => 3,
             Self::Lock(_) | Self::Verify(_) => 4,
-            Self::Vendor(_) | Self::Build(_) | Self::Stats | Self::Sniff => 5,
+            Self::Vendor(_) | Self::Build(_) | Self::Stats(_) | Self::Sniff => 5,
             Self::Dev(_)
             | Self::Sync
             | Self::Daemon(_)

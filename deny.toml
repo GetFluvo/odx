@@ -4,6 +4,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # term_size is unmaintained; tokei depends on it unconditionally but only
+  # its command-line binary calls it, never the library odx uses.
+  { id = "RUSTSEC-2020-0163", reason = "only used by the tokei binary, not by its library" },
+]
 
 [licenses]
 version = 2
