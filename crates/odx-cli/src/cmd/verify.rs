@@ -92,7 +92,8 @@ fn repositories(prepared: &Prepared, lock: &Lockfile, problems: &mut Vec<String>
             .strip_prefix(root)
             .unwrap_or(&repo.target_dir)
             .display()
-            .to_string();
+            .to_string()
+            .replace('\\', "/");
         let Some(entry) = locked_entry(repo, &lock.repositories) else {
             problems.push(format!(
                 "{}: not locked as configured; run `odx lock`",
