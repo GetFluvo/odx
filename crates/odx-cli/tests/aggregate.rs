@@ -884,9 +884,51 @@ fn vault_visibility_is_checked_on_the_forge() {
     );
     let (_, _, err) = run(&project, &["lock"]);
     assert!(
-        err.contains("GitLab protects tags, not custom refs"),
+        err.contains("the vault protects tags, not custom refs"),
         "{err}"
     );
+
+    // A missing vault is created, private and with protected tags.
+    let creating = forge_server(&[
+        ("/api/v1/version", 200, "{}"),
+        ("/api/v1/repos/odoo/vault/tag_protections", 201, "{}"),
+        ("/api/v1/repos/odoo/vault", 404, ""),
+        ("/api/v1/orgs/odoo/repos", 201, "{}"),
+    ]);
+    let _ = std::fs::remove_file(project.root.join("odx.lock"));
+    vault_config(
+        &project,
+        &format!("url = \"{creating}/odoo/vault.git\"\nauto_create = true\nref_style = \"refs\"\n"),
+    );
+    let (_, out, err) = run(&project, &["lock"]);
+    assert!(out.contains("created the private vault"), "{out}{err}");
+    assert!(err.contains("the vault protects tags"), "{err}");
+    let refusing = forge_server(&[
+        ("/api/v1/version", 200, "{}"),
+        ("/api/v1/repos/odoo/vault", 404, ""),
+        ("/api/v1/orgs/odoo/repos", 403, ""),
+    ]);
+    vault_config(
+        &project,
+        &format!("url = \"{refusing}/odoo/vault.git\"\nauto_create = true\n"),
+    );
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("answered HTTP 403"), "{err}");
+
+    let unprotected = forge_server(&[
+        ("/api/v1/version", 200, "{}"),
+        ("/api/v1/repos/odoo/vault/tag_protections", 403, ""),
+        ("/api/v1/repos/odoo/vault", 404, ""),
+        ("/api/v1/orgs/odoo/repos", 201, "{}"),
+    ]);
+    vault_config(
+        &project,
+        &format!("url = \"{unprotected}/odoo/vault.git\"\nauto_create = true\n"),
+    );
+    let (exit, _, err) = run(&project, &["lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("answered HTTP 403"), "{err}");
 
     let nothing = forge_server(&[]);
     vault_config(&project, &format!("url = \"{nothing}/odoo/vault.git\"\n"));

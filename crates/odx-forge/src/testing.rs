@@ -34,6 +34,16 @@ impl Scripted {
 }
 
 impl Http for Scripted {
+    /// Recorded with the method and the body after the URL.
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        self.get(&format!("POST {url} {body}"), headers)
+    }
+
     fn get(&self, url: &str, headers: &[(&str, String)]) -> Result<HttpResponse, ForgeError> {
         self.seen
             .lock()

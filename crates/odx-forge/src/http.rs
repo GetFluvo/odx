@@ -25,7 +25,7 @@ impl HttpResponse {
     }
 }
 
-/// HTTP GET, so forge clients can be tested without a network.
+/// HTTP, so forge clients can be tested without a network.
 pub trait Http: fmt::Debug + Send + Sync {
     /// GET `url` with `headers`.
     ///
@@ -33,6 +33,18 @@ pub trait Http: fmt::Debug + Send + Sync {
     ///
     /// [`ForgeError::Http`] when no response arrives (DNS, TLS, connection).
     fn get(&self, url: &str, headers: &[(&str, String)]) -> Result<HttpResponse, ForgeError>;
+
+    /// POST `body` as JSON to `url` with `headers`.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::Http`] when no response arrives (DNS, TLS, connection).
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError>;
 }
 
 /// [`Http`] over `reqwest` with rustls, verifying certificates against the
@@ -71,13 +83,14 @@ impl From<reqwest::Error> for ForgeError {
     }
 }
 
-impl Http for ReqwestHttp {
-    fn get(&self, url: &str, headers: &[(&str, String)]) -> Result<HttpResponse, ForgeError> {
-        let request = headers
-            .iter()
-            .fold(self.client.get(url), |request, (name, value)| {
-                request.header(*name, value)
-            });
+impl ReqwestHttp {
+    fn execute(
+        request: reqwest::blocking::RequestBuilder,
+        headers: &[(&str, String)],
+    ) -> Result<HttpResponse, ForgeError> {
+        let request = headers.iter().fold(request, |request, (name, value)| {
+            request.header(*name, value)
+        });
         let response = request.send().map_err(ForgeError::from)?;
         let status = response.status().as_u16();
         let headers = response
@@ -96,6 +109,21 @@ impl Http for ReqwestHttp {
             headers,
             body,
         })
+    }
+}
+
+impl Http for ReqwestHttp {
+    fn get(&self, url: &str, headers: &[(&str, String)]) -> Result<HttpResponse, ForgeError> {
+        Self::execute(self.client.get(url), headers)
+    }
+
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        Self::execute(self.client.post(url).json(body), headers)
     }
 }
 

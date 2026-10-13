@@ -25,7 +25,9 @@ use odx_config::user::{self, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Project, Source, discover};
 use odx_core::system::OsRunner;
 use odx_core::{Env, Exit, Invocation, ProcessRunner, repo_key};
-use odx_forge::{CachedHttp, CiState, ForgeClient, ForgeKind, RepoUrl, ReqwestHttp, Visibility};
+use odx_forge::{
+    CachedHttp, CiState, ForgeClient, ForgeError, ForgeKind, RepoUrl, ReqwestHttp, Visibility,
+};
 use odx_git::{
     Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
     Outcome, StepOutcome, SystemGit, VaultRefs, Via, bundle, url_hash, vault,
@@ -935,7 +937,13 @@ fn vault_lock(
     {
         return Ok(());
     }
-    let refs = vault_refs(ctx, prepared.cache.root(), mirror, warnings)?;
+    let refs = vault_refs(
+        ctx,
+        prepared.cache.root(),
+        mirror,
+        warnings,
+        &mut summary.notes,
+    )?;
     let git = SystemGit::new(Arc::new(OsRunner));
     for entry in lock
         .repositories
@@ -997,6 +1005,7 @@ fn vault_refs(
     cache: &Path,
     mirror: &odx_config::schema::Mirror,
     warnings: &mut Vec<odx_config::Problem>,
+    notes: &mut Vec<String>,
 ) -> Result<VaultRefs, Report> {
     let refuse = |message: String| {
         Report::error(
@@ -1004,19 +1013,32 @@ fn vault_refs(
             format!("{message}; run `odx lock --no-push` to lock without vaulting"),
         )
     };
-    let gitlab = match RepoUrl::parse(&mirror.url) {
+    let auto_create = mirror.auto_create == Some(true);
+    let protected_tags = match RepoUrl::parse(&mirror.url) {
         Some(repo) => {
-            let (kind, visibility) = ReqwestHttp::new()
+            let (kind, visibility, created) = ReqwestHttp::new()
                 .and_then(|http| {
                     let http = CachedHttp::new(http, cache.join("http"));
                     let sleep = std::thread::sleep;
                     let client = ForgeClient::new(&http, ctx.env, &OsRunner, &sleep);
                     let kind = client.kind(&repo)?;
-                    client
-                        .visibility(&repo, kind)
-                        .map(|visibility| (kind, visibility))
+                    match client.visibility(&repo, kind) {
+                        Err(ForgeError::NotVisible(_)) if auto_create => {
+                            client.create_private(&repo, kind)?;
+                            client.protect_vault_tags(&repo, kind)?;
+                            Ok((kind, Visibility::Private, true))
+                        }
+                        other => other.map(|visibility| (kind, visibility, false)),
+                    }
                 })
                 .map_err(|e| refuse(e.to_string()))?;
+            if created {
+                notes.push(format!(
+                    "created the private vault {} on {} with protected odx/* tags",
+                    mirror.url,
+                    kind.name()
+                ));
+            }
             if visibility == Visibility::Public && mirror.allow_public != Some(true) {
                 return Err(refuse(format!(
                     "{} is public on {}; odx vaults commits only in private repositories (allow_public = true overrides)",
@@ -1024,16 +1046,18 @@ fn vault_refs(
                     kind.name()
                 )));
             }
-            kind == ForgeKind::Gitlab
+            // GitLab protects tags, not custom refs; an auto-created vault
+            // protects tags everywhere.
+            kind == ForgeKind::Gitlab || auto_create
         }
         None => false,
     };
-    Ok(match (gitlab, mirror.ref_style) {
+    Ok(match (protected_tags, mirror.ref_style) {
         (true, Some(RefStyle::Refs)) => {
             warnings.push(odx_config::Problem {
                 key: "tool.odx.mirror.ref_style".to_owned(),
                 message:
-                    "GitLab protects tags, not custom refs; vaulting under refs/tags/odx instead"
+                    "the vault protects tags, not custom refs; vaulting under refs/tags/odx instead"
                         .to_owned(),
             });
             VaultRefs::Tags
@@ -1066,6 +1090,7 @@ struct Summary {
     vaulted: Vec<(String, usize)>,
     kept: Vec<Kept>,
     bundled: Vec<(String, usize, String)>,
+    notes: Vec<String>,
     rewritten: bool,
     failures: Vec<String>,
     /// Built in scratch working trees (`odx lock`): directories are not
@@ -1113,6 +1138,7 @@ impl Summary {
             vaulted: Vec::new(),
             kept: Vec::new(),
             bundled: Vec::new(),
+            notes: Vec::new(),
             rewritten: false,
             failures: Vec::new(),
             scratch,
@@ -1205,6 +1231,9 @@ impl Summary {
         }
         for keep in &self.kept {
             let _ = writeln!(report.out, "{}", describe_kept(keep));
+        }
+        for note in &self.notes {
+            let _ = writeln!(report.out, "{note}");
         }
         for (name, commits) in &self.vaulted {
             let _ = writeln!(report.out, "vaulted {name}: {commits} commits");
@@ -1301,6 +1330,7 @@ impl Summary {
             .collect();
         value.insert("kept".to_owned(), serde_json::Value::Array(kept));
         value.insert("rewritten".to_owned(), serde_json::json!(self.rewritten));
+        value.insert("notes".to_owned(), serde_json::json!(self.notes));
         let bundled: Vec<serde_json::Value> = self
             .bundled
             .iter()
