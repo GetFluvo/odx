@@ -102,6 +102,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "suggest"][..], "suggest", 7),
         (&["odx", "verdict", "sync"][..], "verdict", 7),
         (&["odx", "dashboard"][..], "dashboard", 7),
+        (&["odx", "migrate", "--abort"][..], "migrate", 8),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));

@@ -482,6 +482,44 @@ per series in the cache's `index/` directory for `[tool.odx.index] ttl`
 (default 7 days); `--refresh-index` asks again, `--offline` uses what is
 cached.
 
+## Migrating an addon
+
+```console
+$ odx migrate addon my_addon --to 19.0          # from 18.0, on branch 19.0-mig-my_addon
+$ odx migrate addon my_addon --to 19.0 --from 17.0 --remote oca
+$ odx migrate --continue                         # after resolving a conflict
+$ odx migrate --abort                            # back to where you were
+```
+
+`odx migrate addon` runs in a clone of the addon's repository and follows
+the OCA migration guide on a new branch `<to>-mig-<addon>` made from the
+target series:
+
+1. When an open pull request on the remote's forge already migrates the
+   addon (`[MIG]` and the addon's name in its title), odx stops and names
+   it: the work belongs there. `--force` migrates anyway; `--offline` does
+   not ask.
+2. The addon's history from the source series is replayed with `git
+   format-patch --keep-subject | git am -3 --keep`: only the commits that
+   touch the addon, with their authors and dates.
+3. `[IMP] <addon>: pre-commit auto fixes`: the repository's pre-commit hooks
+   on the addon's files, when it has a `.pre-commit-config.yaml`
+   (`--no-pre-commit` leaves this out; `ODX_PRE_COMMIT` names the program).
+4. `[MIG] <addon>: Migration to <to>`: odoo-lint's upgrade fixes for every
+   step between the series, unsafe ones included (`odl upgrade-check --fix
+   --unsafe-fixes --bump-version`, `ODX_ODL` names the program), the
+   manifest version set to `<to>.1.0.0`, the old `migrations/` scripts
+   removed, and pre-commit run again.
+
+odx then lists what odoo-lint leaves to fix by hand. Nothing is pushed: you
+review the branch, finish the migration, run the tests and open the pull
+request. Both series are fetched from `--remote` (default `upstream` when
+the clone has it, else `origin`); `--from` defaults to the series before
+`--to`. A conflict while replaying the history stops at git's own `am`
+state: resolve it, `git add` the files, then `odx migrate --continue`.
+`odx migrate --abort` checks out what was checked out before and deletes
+the branch.
+
 ## Locking
 
 ```console

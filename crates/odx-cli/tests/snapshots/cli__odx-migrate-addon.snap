@@ -1,0 +1,63 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Migrate one addon on the branch `<to>-mig-<addon>`: its history from the source series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the `[MIG]` commit
+
+Usage: odx migrate addon [OPTIONS] --to <SERIES> <ADDON>
+
+Arguments:
+  <ADDON>
+          Addon name
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --to <SERIES>
+          Target series
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --from <SERIES>
+          Source series [default: the series before --to]
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --remote <NAME>
+          The remote both series come from [default: `upstream` when it exists, else `origin`]
+
+      --no-pre-commit
+          Leave out the repository's pre-commit fixes
+
+      --offline
+          Serve forge and index data from the cache only
+
+      --force
+          Migrate even when an open pull request already migrates the addon
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
