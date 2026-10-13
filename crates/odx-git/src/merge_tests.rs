@@ -748,10 +748,19 @@ fn steps_that_cannot_be_rebased_are_merged() {
     git(&up, &["checkout", "--quiet", "-b", "pr", "base"]);
     fs::write(up.join("f.txt"), "y\n").unwrap();
     git(&up, &["commit", "--quiet", "-am", "y"]);
+    // The merge stops on the conflict; the commit below concludes it.
     let _ = Command::new("git")
         .current_dir(&up)
         .args(["merge", "--quiet", "x"])
+        .env("GIT_AUTHOR_NAME", "odx")
+        .env("GIT_AUTHOR_EMAIL", "odx@example.com")
+        .env("GIT_COMMITTER_NAME", "odx")
+        .env("GIT_COMMITTER_EMAIL", "odx@example.com")
         .output();
+    assert_eq!(
+        git(&up, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).len(),
+        40
+    );
     fs::write(up.join("f.txt"), "xy\n").unwrap();
     git(&up, &["commit", "--quiet", "-am", "resolved"]);
     git(&up, &["checkout", "--quiet", "-b", "other", "base"]);
