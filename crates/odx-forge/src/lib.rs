@@ -6,19 +6,21 @@
 //! and who can read it. Rate limits are waited out a bounded number of
 //! times; tokens are sent only to their own host and never appear in
 //! errors.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod admin;
 mod cache;
 mod ci;
 mod client;
 mod http;
+pub mod secrets;
 #[cfg(test)]
 mod testing;
 mod url;
 
 pub use cache::CachedHttp;
 pub use ci::{CiReport, CiState};
-pub use client::{ForgeClient, ForgeKind, Visibility, token};
+pub use client::{ForgeClient, ForgeKind, Visibility, token, token_source};
 pub use http::{Http, HttpResponse, ReqwestHttp};
 pub use url::RepoUrl;
 

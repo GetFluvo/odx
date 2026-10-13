@@ -612,6 +612,26 @@ provided set, the cache and packages left in develop mode. It exits with
 With `--offline` the vault is not checked; `--json` gives the same list as
 data.
 
+## Forge tokens
+
+```console
+$ odx auth login forge.example.com < token.txt   # the token comes on standard input
+$ odx auth status                                # per host of the project: where its token comes from
+forge.example.com: token from the system keyring
+github.com: token from GITHUB_TOKEN
+$ odx auth logout forge.example.com
+```
+
+odx looks for a host's token in this order: `ODX_TOKEN_<HOST>` (the host in
+capitals, other characters as `_`), the forge's usual variables
+(`GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `GITEA_TOKEN`,
+`FORGEJO_TOKEN`), `gh auth token` for GitHub, and finally the token `odx
+auth login` stored in the system keyring (Keychain on macOS, Credential
+Manager on Windows, the Secret Service on Linux). Tokens are never written
+to `pyproject.toml` or the user configuration. On a machine without a
+keyring, `ODX_SECRETS_FILE` names a file to keep them in instead, readable
+only by its owner.
+
 ## Development workspace
 
 ```console

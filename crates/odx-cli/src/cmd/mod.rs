@@ -12,6 +12,7 @@ use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner, redact};
 
 pub(crate) mod aggregate;
+pub(crate) mod auth;
 pub(crate) mod autoupdate;
 pub(crate) mod build;
 pub(crate) mod compat;

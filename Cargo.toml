@@ -44,6 +44,7 @@ toml_edit = "0.25"
 tokei = { version = "15", default-features = false }
 pep440_rs = "0.7"
 sha2 = "0.10"
+keyring-core = "1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Test-only.

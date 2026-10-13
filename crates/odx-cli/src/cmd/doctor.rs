@@ -181,7 +181,7 @@ fn project(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<C
         .chain(config.mirror.iter().map(|mirror| mirror.url.as_str()))
         .filter_map(RepoUrl::parse)
         .map(|repo| {
-            let kind = guess_kind(&repo.host);
+            let kind = ForgeKind::guess(&repo.host);
             (repo.host, kind)
         })
         .collect();
@@ -327,18 +327,6 @@ fn vault(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<Che
         ),
     });
     checks
-}
-
-/// The forge a host most likely runs, by name, for picking its token
-/// variables without asking the network; `ODX_TOKEN_<HOST>` works for any.
-fn guess_kind(host: &str) -> ForgeKind {
-    if host.contains("github") {
-        ForgeKind::Github
-    } else if host.contains("gitlab") {
-        ForgeKind::Gitlab
-    } else {
-        ForgeKind::Gitea
-    }
 }
 
 /// Bytes under `dir`.
