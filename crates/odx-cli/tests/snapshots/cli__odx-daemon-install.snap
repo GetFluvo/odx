@@ -10,8 +10,14 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --interval <DURATION>
+          Time between syncs (default: `[sync] interval`, else 30m)
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --dry-run
+          Print the job files and commands without installing anything
 
   -j, --jobs <N>
           Override the number of parallel jobs

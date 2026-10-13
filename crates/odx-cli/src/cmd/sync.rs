@@ -31,7 +31,7 @@ fn now() -> u64 {
 }
 
 /// The shared cache and the user configuration.
-fn shared(ctx: &Context<'_>) -> Result<(UserConfig, PathBuf), Report> {
+pub(crate) fn shared(ctx: &Context<'_>) -> Result<(UserConfig, PathBuf), Report> {
     let user = load_user_config(ctx.fs, ctx.env).map_err(|e| failed(Exit::Usage, e))?;
     let cache = user::cache_dir(&user, ctx.env)
         .ok_or_else(|| failed(Exit::Usage, "no shared cache directory; set ODX_CACHE_DIR"))?;
@@ -173,11 +173,12 @@ fn keep(record: &SyncRecord, cache: &Path) -> usize {
     failures
 }
 
-/// `odx sync --register` / `--unregister`: edit `[workspaces]` in the user
-/// configuration.
-fn registry(add: bool, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    let prepared = prepare(global, ctx)?;
-    let root = prepared.project.root.display().to_string();
+/// Apply `edit` to the user configuration file and write it back; its path
+/// and what `edit` returned.
+pub(crate) fn edit_user_config<T>(
+    ctx: &Context<'_>,
+    edit: impl FnOnce(&mut toml_edit::DocumentMut) -> T,
+) -> Result<(PathBuf, T), Report> {
     let file = user::config_dir(ctx.env)
         .map(|dir| dir.join("config.toml"))
         .ok_or_else(|| {
@@ -186,26 +187,52 @@ fn registry(add: bool, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report,
                 "no user configuration directory; set ODX_CONFIG_DIR",
             )
         })?;
-    // The user configuration was read (and so is TOML) when the project was.
+    // Callers loaded the user configuration first, so it is TOML.
     let mut doc: toml_edit::DocumentMut = std::fs::read_to_string(&file)
         .unwrap_or_default()
         .parse()
         .unwrap_or_default();
-    let changed = if add {
-        register(
-            &mut doc,
-            &root,
-            &date(SystemTime::now()),
-            &prepared.project.config.odoo_version,
-        );
-        true
-    } else {
-        unregister(&mut doc, &root)
-    };
+    let result = edit(&mut doc);
     file.parent()
         .map_or(Ok(()), std::fs::create_dir_all)
         .and_then(|()| std::fs::write(&file, doc.to_string()))
         .map_err(|e| failed(Exit::Failure, format!("{}: {e}", file.display())))?;
+    Ok((file, result))
+}
+
+/// The last sync, for people.
+pub(crate) fn last_sync(cache: &Path) -> String {
+    SyncRecord::read(&cache.join("last_sync.json")).map_or_else(
+        || "never".to_owned(),
+        |record| {
+            let finished = UNIX_EPOCH + Duration::from_secs(record.finished);
+            format!(
+                "{} ({} workspaces)",
+                date(finished),
+                record.workspaces.len()
+            )
+        },
+    )
+}
+
+/// `odx sync --register` / `--unregister`: edit `[workspaces]` in the user
+/// configuration.
+fn registry(add: bool, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let prepared = prepare(global, ctx)?;
+    let root = prepared.project.root.display().to_string();
+    let (file, changed) = edit_user_config(ctx, |doc| {
+        if add {
+            register(
+                doc,
+                &root,
+                &date(SystemTime::now()),
+                &prepared.project.config.odoo_version,
+            );
+            true
+        } else {
+            unregister(doc, &root)
+        }
+    })?;
     let out = match (add, changed) {
         (true, _) => format!(
             "registered {root} for `odx sync --all` in {}\n",
@@ -293,8 +320,8 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
     let total = size(&cache);
     match command {
         CacheCommand::Info => {
-            let last = SyncRecord::read(&cache.join("last_sync.json"));
             if global.json {
+                let last = SyncRecord::read(&cache.join("last_sync.json"));
                 report.out = format!(
                     "{}\n",
                     serde_json::json!({
@@ -315,21 +342,7 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
                     repos.len(),
                     repos.iter().filter(|r| !r.referenced).count()
                 );
-                let _ = writeln!(
-                    report.out,
-                    "last sync: {}",
-                    last.map_or_else(
-                        || "never".to_owned(),
-                        |record| {
-                            let finished = UNIX_EPOCH + Duration::from_secs(record.finished);
-                            format!(
-                                "{} ({} workspaces)",
-                                date(finished),
-                                record.workspaces.len()
-                            )
-                        }
-                    )
-                );
+                let _ = writeln!(report.out, "last sync: {}", last_sync(&cache));
             }
         }
         CacheCommand::Gc { max_size, dry_run } => {

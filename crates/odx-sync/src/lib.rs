@@ -9,6 +9,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, value};
 
+pub mod schedule;
+
 /// Register `path` under `[workspaces]` in `doc` (the user configuration),
 /// with its registration date and series; an existing entry is left as it
 /// is. A `workspaces` key that is no table is replaced.
@@ -32,6 +34,20 @@ pub fn unregister(doc: &mut DocumentMut, path: &str) -> bool {
     doc.get_mut("workspaces")
         .and_then(Item::as_table_like_mut)
         .is_some_and(|table| table.remove(path).is_some())
+}
+
+/// Set `[sync] enabled` in `doc` (the user configuration), and `interval`
+/// when given. A `sync` key that is no table is replaced.
+pub fn set_sync(doc: &mut DocumentMut, enabled: bool, interval: Option<&str>) {
+    let mut table = match doc.remove("sync") {
+        Some(Item::Table(table)) => table,
+        _ => Table::new(),
+    };
+    table.insert("enabled", value(enabled));
+    if let Some(interval) = interval {
+        table.insert("interval", value(interval));
+    }
+    doc.insert("sync", Item::Table(table));
 }
 
 /// A size written as a number and a unit: `"500MB"`, `"20GB"` (powers of
@@ -170,6 +186,24 @@ mod tests {
             odd.to_string().contains("\"/w\" = { registered = \"d\""),
             "{odd}"
         );
+    }
+
+    #[test]
+    fn sync_switch() {
+        let mut doc: DocumentMut = "[sync]\njobs = 1 # few\n\n[cache]\n".parse().unwrap();
+        set_sync(&mut doc, true, Some("15m"));
+        assert_eq!(
+            doc.to_string(),
+            "[sync]\njobs = 1 # few\nenabled = true\ninterval = \"15m\"\n\n[cache]\n"
+        );
+        set_sync(&mut doc, false, None);
+        assert!(
+            doc.to_string().contains("enabled = false\ninterval"),
+            "{doc}"
+        );
+        let mut odd: DocumentMut = "sync = 1\n".parse().unwrap();
+        set_sync(&mut odd, true, None);
+        assert_eq!(odd.to_string(), "[sync]\nenabled = true\n");
     }
 
     #[test]

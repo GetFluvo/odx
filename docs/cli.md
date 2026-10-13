@@ -102,6 +102,29 @@ max_duration = "20m"  # default
 max_size = "20GB"     # the limit `odx cache gc` works towards
 ```
 
+### Syncing on a schedule
+
+```console
+$ odx daemon install --dry-run        # show the job files and commands
+$ odx daemon install --interval 30m   # schedule `odx sync --all`
+$ odx daemon status
+$ odx daemon uninstall
+$ odx daemon run                      # the same loop in the foreground
+```
+
+`odx daemon install` schedules `odx sync --all` as a user-level job, so it
+needs no administrator rights: a systemd user timer on Linux
+(`~/.config/systemd/user/odx-sync.{service,timer}`, enabled with
+`systemctl --user`), a launchd agent on macOS
+(`~/Library/LaunchAgents/com.getfluvo.odx.sync.plist`), and a Task
+Scheduler task named `odx-sync` on Windows. The job runs at low CPU and IO
+priority unless `[sync] nice = false`; with `pause_on_battery = true` it
+does not start on battery power (systemd and Task Scheduler). Installing
+sets `[sync] enabled = true` and the interval in the user configuration;
+`odx daemon uninstall` stops the job, removes its files and sets `enabled =
+false`. `odx daemon status` shows whether the job is installed and active,
+the interval, the last sync and the cache size; `odx doctor` reports it too.
+
 ### Inspecting and trimming the cache
 
 ```console

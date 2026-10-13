@@ -228,11 +228,7 @@ fn project(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<C
         "cache",
         format!("{} ({})", cache.display(), human(size(cache))),
     ));
-    checks.push(check(
-        Level::Info,
-        "background sync",
-        "not installed (odx daemon install sets it up)",
-    ));
+    checks.push(background(ctx));
     let developing = ctx
         .fs
         .read(&root.join(".odx/develop.toml"))
@@ -251,6 +247,26 @@ fn project(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<C
         ));
     }
     checks
+}
+
+/// Whether `odx daemon install` set up the scheduled sync.
+fn background(ctx: &Context<'_>) -> Check {
+    super::daemon::installed(ctx).map_or_else(
+        || {
+            check(
+                Level::Info,
+                "background sync",
+                "not installed (odx daemon install sets it up)",
+            )
+        },
+        |scheduler| {
+            check(
+                Level::Ok,
+                "background sync",
+                format!("{} installed", scheduler.describe()),
+            )
+        },
+    )
 }
 
 /// The vault: private, and its lock refs protected.

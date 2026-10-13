@@ -631,11 +631,22 @@ pub enum BotCommand {
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Install the user-level scheduled sync job.
-    Install,
+    Install {
+        /// Time between syncs (default: `[sync] interval`, else 30m).
+        #[arg(long, value_name = "DURATION")]
+        interval: Option<String>,
+        /// Print the job files and commands without installing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the scheduled sync job.
     Uninstall,
     /// Run the sync loop in the foreground.
-    Run,
+    Run {
+        /// Time between syncs (default: `[sync] interval`, else 30m).
+        #[arg(long, value_name = "DURATION")]
+        interval: Option<String>,
+    },
     /// Show the scheduled job and last sync.
     Status,
 }
