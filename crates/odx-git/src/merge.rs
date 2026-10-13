@@ -345,7 +345,14 @@ impl Merger {
         let invocation = self
             .git(repo)
             // The committed bytes, without line-ending conversion.
-            .args(["-c", "core.autocrlf=false", "archive", "--format=zip", rev, "--"])
+            .args([
+                "-c",
+                "core.autocrlf=false",
+                "archive",
+                "--format=zip",
+                rev,
+                "--",
+            ])
             .args(path);
         self.run("archive", &invocation).map(|out| out.stdout)
     }
