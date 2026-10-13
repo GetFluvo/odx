@@ -1,7 +1,7 @@
 //! `odx verify`: whether a checkout is exactly what the lockfiles describe,
 //! without network access.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -10,15 +10,16 @@ use odx_config::deps::normalize_name;
 use odx_config::edit::PyprojectEdit;
 use odx_config::lock::Lockfile;
 use odx_config::packages::package_specs;
-use odx_config::uvlock::UvLock;
+use odx_config::schema::PlatformProfile;
+use odx_config::uvlock::{UvLock, UvPackage, UvWheel};
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner};
 use odx_forge::ReqwestHttp;
 use odx_git::Merger;
 use odx_platform::installed::{
-    modified_files, scan, site_packages, substituted, wheel_record, wheel_tags,
+    Distribution, modified_files, scan, site_packages, substituted, wheel_record, wheel_tags,
 };
-use odx_platform::requirements_path;
+use odx_platform::{profile, requirements_path};
 use odx_vendor::archive::{download_error, fetch};
 use odx_vendor::check;
 use odx_vendor::record::VendorRecord;
@@ -39,7 +40,8 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     let prepared = prepare(global, ctx)?;
     let lock = prepared.lock.clone().unwrap_or_default();
     let mut problems = Vec::new();
-    let checked = repositories(&prepared, &lock, &mut problems);
+    let submodules = submodules(&prepared.project.root, &mut problems);
+    let checked = repositories(&prepared, &lock, &submodules, &mut problems);
     let edit = PyprojectEdit::parse(&prepared.project.text).unwrap_or_default();
     packages(ctx, &prepared, edit.document(), &lock, &mut problems);
     stray_addons(&prepared, &mut problems);
@@ -97,7 +99,12 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
 /// Every configured repository is locked as configured, nothing else is
 /// locked, and every working tree is the locked result; returns how many
 /// working trees were checked.
-fn repositories(prepared: &Prepared, lock: &Lockfile, problems: &mut Vec<String>) -> usize {
+fn repositories(
+    prepared: &Prepared,
+    lock: &Lockfile,
+    submodules: &BTreeMap<String, String>,
+    problems: &mut Vec<String>,
+) -> usize {
     let config = &prepared.project.config;
     let root = &prepared.project.root;
     // The configuration was validated when it was loaded.
@@ -120,7 +127,17 @@ fn repositories(prepared: &Prepared, lock: &Lockfile, problems: &mut Vec<String>
             continue;
         };
         checked += 1;
-        if !repo.target_dir.exists() {
+        if let Some(gitlink) = submodules.get(&dir) {
+            // A submodule (Odoo.sh): its pinned commit must be the result.
+            let tree = merger.tree(&repo.target_dir, gitlink).unwrap_or_default();
+            if tree != entry.result_tree {
+                problems.push(format!(
+                    "{}: submodule {dir} pins {}, which is not the locked result; push the result and update the submodule",
+                    repo.name,
+                    gitlink.get(..12).unwrap_or(gitlink)
+                ));
+            }
+        } else if !repo.target_dir.exists() {
             problems.push(format!(
                 "{}: {dir} is missing; run `odx aggregate --locked`",
                 repo.name
@@ -149,6 +166,46 @@ fn repositories(prepared: &Prepared, lock: &Lockfile, problems: &mut Vec<String>
             }),
     );
     checked
+}
+
+/// The submodules of the project (path → pinned commit); a submodule in
+/// `.gitmodules` without a committed commit is reported as unpinned.
+fn submodules(root: &Path, problems: &mut Vec<String>) -> BTreeMap<String, String> {
+    let git = |args: &[&str]| {
+        OsRunner
+            .run(
+                &Invocation::new("git")
+                    .args(args.iter().copied())
+                    .current_dir(root),
+            )
+            .ok()
+            .filter(odx_core::Output::success)
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_default()
+    };
+    let mut pinned = BTreeMap::new();
+    let listing = git(&[
+        "config",
+        "-f",
+        ".gitmodules",
+        "--get-regexp",
+        "^submodule\\..*\\.path$",
+    ]);
+    for path in listing
+        .lines()
+        .filter_map(|line| line.split_once(' ').map(|(_, path)| path.trim()))
+    {
+        let entry = git(&["ls-tree", "HEAD", "--", path]);
+        match entry.split_whitespace().collect::<Vec<_>>().as_slice() {
+            ["160000", "commit", sha, _] => {
+                pinned.insert(path.to_owned(), (*sha).to_owned());
+            }
+            _ => problems.push(format!(
+                "{path}: submodule in .gitmodules without a committed commit; Odoo.sh deploys only pinned submodules"
+            )),
+        }
+    }
+    pinned
 }
 
 /// Every git package is locked as configured, nothing else is locked,
@@ -251,6 +308,23 @@ fn requirements(
         problems.push(format!(
             "{relative} is not what `odx vendor --requirements` writes; run it"
         ));
+    }
+    if profile(&prepared.project.config) == PlatformProfile::OdooSh {
+        problems.extend(
+            text.lines()
+                .filter(|line| {
+                    let line = line.split('#').next().unwrap_or_default();
+                    line.contains(" @ ")
+                        || line.contains("git+")
+                        || line.trim_start().starts_with('-')
+                })
+                .map(|line| {
+                    format!(
+                        "{relative}: `{}` is not a public PyPI package; Odoo.sh cannot install it",
+                        line.trim()
+                    )
+                }),
+        );
     }
     Ok(())
 }
@@ -387,49 +461,54 @@ fn installed(ctx: &Context<'_>, prepared: &Prepared, dir: &Path, problems: &mut 
             // A local directory or file: nothing locked to compare with.
             continue;
         }
-        let location = |wheel: &&odx_config::uvlock::UvWheel| {
-            wheel
-                .url
-                .as_deref()
-                .or(wheel.path.as_deref())
-                .unwrap_or_default()
-                .to_owned()
-        };
-        let Some(wheel) = package.wheels.iter().find(|wheel| {
-            wheel_tags(&location(wheel))
-                .iter()
-                .any(|tag| dist.tags.contains(tag))
-        }) else {
-            problems.push(format!(
-                "{} {}: no wheel in uv.lock matches what is installed",
-                dist.name, dist.version
-            ));
-            continue;
-        };
-        let url = location(&wheel);
-        let hash = wheel.hash.clone().unwrap_or_default();
-        let record = ReqwestHttp::new()
-            .map_err(download_error(&url))
-            .and_then(|http| fetch(&http, &cache, &url, &hash))
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| wheel_record(&bytes));
-        match record {
-            Ok(record) => {
-                let different = substituted(&record, &dist.record);
-                if let Some(first) = different.first() {
-                    problems.push(format!(
-                        "{} {}: not the locked wheel ({} files differ, such as {first})",
-                        dist.name,
-                        dist.version,
-                        different.len()
-                    ));
-                }
-            }
-            Err(e) => problems.push(format!(
-                "{}: cannot compare with the locked wheel: {e}",
-                dist.name
-            )),
+        problems.extend(compare_with_wheel(package, &dist, &cache));
+    }
+}
+
+/// Whether `dist` holds the files of the locked wheel of `package` for its
+/// tags; a problem when it does not or the wheel cannot be had.
+fn compare_with_wheel(package: &UvPackage, dist: &Distribution, cache: &Path) -> Option<String> {
+    let location = |wheel: &&UvWheel| {
+        wheel
+            .url
+            .as_deref()
+            .or(wheel.path.as_deref())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let Some(wheel) = package.wheels.iter().find(|wheel| {
+        wheel_tags(&location(wheel))
+            .iter()
+            .any(|tag| dist.tags.contains(tag))
+    }) else {
+        return Some(format!(
+            "{} {}: no wheel in uv.lock matches what is installed",
+            dist.name, dist.version
+        ));
+    };
+    let url = location(&wheel);
+    let hash = wheel.hash.clone().unwrap_or_default();
+    let record = ReqwestHttp::new()
+        .map_err(download_error(&url))
+        .and_then(|http| fetch(&http, cache, &url, &hash))
+        .map_err(|e| e.to_string())
+        .and_then(|bytes| wheel_record(&bytes));
+    match record {
+        Ok(record) => {
+            let different = substituted(&record, &dist.record);
+            different.first().map(|first| {
+                format!(
+                    "{} {}: not the locked wheel ({} files differ, such as {first})",
+                    dist.name,
+                    dist.version,
+                    different.len()
+                )
+            })
         }
+        Err(e) => Some(format!(
+            "{}: cannot compare with the locked wheel: {e}",
+            dist.name
+        )),
     }
 }
 

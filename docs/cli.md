@@ -365,6 +365,20 @@ is not odx's, and when `uv.lock` or `odx.lock` moved on since `odx vendor`.
 the deployment repository before a push. The `generic-wheels` profile
 installs wheels instead, so `odx vendor` only writes its requirements there.
 
+## Odoo.sh
+
+Odoo.sh deploys the repository as it is: addons come from committed
+directories or git submodules, and Python packages only from public PyPI
+through `requirements.txt` at the root. With `profile = "odoo-sh"`:
+
+- `odx vendor --requirements` writes `requirements.txt` at the root;
+- `odx verify` checks every submodule: one that `.gitmodules` names
+  without a committed commit is unpinned, and a submodule at a locked
+  repository's `target_dir` must pin a commit whose tree is the locked
+  result (push the aggregated branch and update the submodule);
+- `odx verify --requirements` also refuses lines Odoo.sh cannot install
+  (`name @ git+...`, `-e`, other options).
+
 ## Installed wheels
 
 ```console

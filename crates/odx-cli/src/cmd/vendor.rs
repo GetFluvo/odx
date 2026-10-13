@@ -53,7 +53,10 @@ pub(crate) fn run_vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'
 
 fn vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
-    let install = profile(&prepared.project.config) != PlatformProfile::GenericWheels;
+    let config = &prepared.project.config;
+    // Requirements alone are fine for a project that vendors nothing.
+    let install = profile(config) != PlatformProfile::GenericWheels
+        && !(args.requirements.is_some() && config.group_dirs().is_empty());
     if !install && args.requirements.is_none() {
         return Err(Report::error(
             Exit::Usage,
