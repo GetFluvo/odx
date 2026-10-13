@@ -1427,6 +1427,7 @@ version = "0.0.4"
 name = "odx-platform"
 version = "0.0.4"
 dependencies = [
+ "odx-analyze",
  "odx-config",
  "pep440_rs",
  "serde",

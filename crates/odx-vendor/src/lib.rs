@@ -18,7 +18,9 @@ use odx_analyze::manifest::parse_manifest;
 use odx_forge::Http;
 
 use crate::archive::{extract, fetch, subdirectory_entry, wheel_entry};
-use crate::content::{bump, hash_files, read_tree, set_manifest_version, tree_hash};
+use odx_analyze::manifest::set_manifest_version;
+
+use crate::content::{bump, hash_files, read_tree, tree_hash};
 
 const MANIFEST: &str = "__manifest__.py";
 use crate::plan::{Item, ItemSource};

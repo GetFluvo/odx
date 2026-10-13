@@ -5,6 +5,7 @@
 //! what the platform already installs, so the requirements odx writes leave
 //! it out.
 
+pub mod autoupdate;
 pub mod export;
 pub mod installed;
 pub mod provided;

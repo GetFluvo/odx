@@ -329,6 +329,22 @@ impl Parser {
     }
 }
 
+/// `text` (a `__manifest__.py`) with the string after the `version` key
+/// replaced by `version`; `None` when there is no such string.
+pub fn set_manifest_version(text: &str, version: &str) -> Option<String> {
+    ["\"version\"", "'version'"].iter().find_map(|key| {
+        let (before, after) = text.split_once(key)?;
+        let (gap, value) = after.split_once(':')?;
+        let (lead, quoted) = value.split_at(value.find(['"', '\''])?);
+        let quote = if quoted.starts_with('"') { '"' } else { '\'' };
+        let (_, inner) = quoted.split_at(1);
+        let (_, rest) = inner.split_once(quote)?;
+        Some(format!(
+            "{before}{key}{gap}:{lead}{quote}{version}{quote}{rest}"
+        ))
+    })
+}
+
 /// Import names in `external_dependencies["python"]` that differ from the
 /// distribution that provides them; manifests written for pip already use
 /// distribution names, which pass through unchanged.
@@ -506,6 +522,23 @@ b",
         ] {
             assert_eq!(parse_manifest(text).unwrap_err(), error, "{text:?}");
         }
+    }
+
+    #[test]
+    fn manifest_versions_are_replaced_in_place() {
+        let text = "{\n    \"name\": \"X\",\n    \"version\": \"17.0.1.2.0\",  # bumped\n}\n";
+        assert_eq!(
+            set_manifest_version(text, "17.0.1.2.1").unwrap(),
+            "{\n    \"name\": \"X\",\n    \"version\": \"17.0.1.2.1\",  # bumped\n}\n"
+        );
+        assert_eq!(
+            set_manifest_version("{'version' : '1.0'}", "1.1").unwrap(),
+            "{'version' : '1.1'}"
+        );
+        assert_eq!(set_manifest_version("{'name': 'x'}", "1"), None);
+        assert_eq!(set_manifest_version("{'version'", "1"), None);
+        assert_eq!(set_manifest_version("{'version': 1}", "1"), None);
+        assert_eq!(set_manifest_version("{'version': '1", "1"), None);
     }
 
     #[test]

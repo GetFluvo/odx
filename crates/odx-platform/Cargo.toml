@@ -16,6 +16,7 @@ categories.workspace = true
 workspace = true
 
 [dependencies]
+odx-analyze.workspace = true
 odx-config.workspace = true
 pep440_rs.workspace = true
 serde.workspace = true
