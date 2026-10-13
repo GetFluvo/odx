@@ -489,6 +489,8 @@ $ odx migrate addon my_addon --to 19.0          # from 18.0, on branch 19.0-mig-
 $ odx migrate addon my_addon --to 19.0 --from 17.0 --remote oca
 $ odx migrate --continue                         # after resolving a conflict
 $ odx migrate --abort                            # back to where you were
+$ odx migrate pr                                 # push the branch, open a draft PR
+$ odx migrate addon my_addon --to 19.0 --open-pr # all at once
 ```
 
 `odx migrate addon` runs in a clone of the addon's repository and follows
@@ -512,13 +514,21 @@ target series:
    removed, and pre-commit run again.
 
 odx then lists what odoo-lint leaves to fix by hand. Nothing is pushed: you
-review the branch, finish the migration, run the tests and open the pull
-request. Both series are fetched from `--remote` (default `upstream` when
+review the branch, finish the migration and run the tests. Both series are fetched from `--remote` (default `upstream` when
 the clone has it, else `origin`); `--from` defaults to the series before
 `--to`. A conflict while replaying the history stops at git's own `am`
 state: resolve it, `git add` the files, then `odx migrate --continue`.
 `odx migrate --abort` checks out what was checked out before and deletes
 the branch.
+
+`odx migrate pr`, on the migration branch, pushes it and opens the pull
+request `[<to>][MIG] <addon>: Migration to <to>` against the target series:
+to the migrated remote when your token may push there (a company
+repository), else to your fork, which odx finds or creates (an OCA
+repository); `--push-remote <name>` pushes to a remote of your choice. The
+pull request is a draft (`--ready` opens it for review), and its
+description lists what odoo-lint still finds as a checklist. `odx migrate
+addon --open-pr` does this right after the migration.
 
 ## Locking
 

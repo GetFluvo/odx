@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::{ForgeClient, ForgeError, ForgeKind, HttpResponse, RepoUrl};
 
 /// The REST API root of `repo`'s forge.
-fn api(repo: &RepoUrl, kind: ForgeKind) -> String {
+pub(crate) fn api(repo: &RepoUrl, kind: ForgeKind) -> String {
     match (kind, repo.host.as_str()) {
         (ForgeKind::Github, "github.com") => "https://api.github.com".to_owned(),
         (ForgeKind::Github, _) => format!("{}/api/v3", repo.origin()),

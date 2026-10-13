@@ -164,9 +164,18 @@ fn usage_and_refusals() {
         err.contains("odx migrate addon <addon> --to <series>"),
         "{err}"
     );
-    let (exit, _, err) = odx(&work, &env, &["migrate", "addon", "my_addon", "--to", "x"]);
-    assert_eq!(exit, Exit::Usage);
-    assert!(err.contains("cannot tell the series before x"), "{err}");
+    for series in ["x", "x.0"] {
+        let (exit, _, err) = odx(
+            &work,
+            &env,
+            &["migrate", "addon", "my_addon", "--to", series],
+        );
+        assert_eq!(exit, Exit::Usage);
+        assert!(
+            err.contains(&format!("cannot tell the series before {series};")),
+            "{err}"
+        );
+    }
     let (exit, _, err) = odx(
         &work,
         &env,
@@ -260,7 +269,8 @@ esac
 
 type Routes = Arc<Mutex<HashMap<String, (u16, String)>>>;
 
-/// A server on localhost answering from `routes` by path, 404 otherwise.
+/// A server on localhost answering from `routes` by method and path, or
+/// path alone, 404 otherwise.
 fn serve(routes: &Routes) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -277,14 +287,18 @@ fn serve(routes: &Routes) -> String {
                 }
             }
             let text = String::from_utf8_lossy(&request);
-            let target = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
+            let mut words = text.split_whitespace();
+            let method = words.next().unwrap_or("GET").to_owned();
+            let target = words.next().unwrap_or("/").to_owned();
             let path = target.split('?').next().unwrap_or(&target).to_owned();
-            let (status, body) = routes
-                .lock()
-                .unwrap()
-                .get(&path)
-                .cloned()
-                .unwrap_or((404, String::new()));
+            let (status, body) = {
+                let routes = routes.lock().unwrap();
+                routes
+                    .get(&format!("{method} {path}"))
+                    .or_else(|| routes.get(&path))
+                    .cloned()
+                    .unwrap_or((404, String::new()))
+            };
             let _ = write!(
                 stream,
                 "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -295,20 +309,44 @@ fn serve(routes: &Routes) -> String {
     base
 }
 
-/// The binary, with the forge URL of the remote redirected to the upstream
-/// directory for git.
+/// The binary, with the forge URLs of the upstream and of the fork
+/// (`fork` next to `up`) redirected to their directories for git, and
+/// SSH-style URLs on the forge's host to its HTTP ones.
 fn binary(work: &Path, up: &Path, api: &str, args: &[&str]) -> (bool, String, String) {
+    binary_with(work, up, api, "odx-test-no-such-program", args)
+}
+
+fn binary_with(
+    work: &Path,
+    up: &Path,
+    api: &str,
+    odl: &str,
+    args: &[&str],
+) -> (bool, String, String) {
+    let fork = up.with_file_name("fork");
     let out = Command::new(env!("CARGO_BIN_EXE_odx"))
         .current_dir(work)
         .args(args)
-        .env("ODX_ODL", "odx-test-no-such-program")
+        .env("ODX_ODL", odl)
         .env("ODX_PRE_COMMIT", "odx-test-no-such-program")
-        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_COUNT", "4")
         .env(
             "GIT_CONFIG_KEY_0",
             format!("url.{}.insteadOf", file_url(up)),
         )
         .env("GIT_CONFIG_VALUE_0", format!("{api}/OCA/repo.git"))
+        .env(
+            "GIT_CONFIG_KEY_1",
+            format!("url.{}.insteadOf", file_url(&fork)),
+        )
+        .env("GIT_CONFIG_VALUE_1", format!("{api}/me/repo.git"))
+        .env("GIT_CONFIG_KEY_2", format!("url.{api}/.insteadOf"))
+        .env("GIT_CONFIG_VALUE_2", "git@127.0.0.1:")
+        .env(
+            "GIT_CONFIG_KEY_3",
+            format!("url.{}.insteadOf", file_url(&fork)),
+        )
+        .env("GIT_CONFIG_VALUE_3", "git@127.0.0.1:me/repo.git")
         .output()
         .unwrap();
     (
@@ -388,4 +426,220 @@ fn an_open_migration_pull_request_comes_first() {
     forced.push("--force");
     let (ok, _, err) = binary(&work, &up, &api, &forced);
     assert!(ok, "{err}");
+}
+
+/// The fixture with its remote on a local forge that may be pushed to,
+/// and an empty bare repository for the user's fork.
+struct Forge {
+    tmp: tempfile::TempDir,
+    up: PathBuf,
+    work: PathBuf,
+    api: String,
+    routes: Routes,
+}
+
+impl Forge {
+    fn new() -> Self {
+        let (tmp, up, work) = fixture();
+        git(tmp.path(), &["init", "--quiet", "--bare", "fork"]);
+        let routes: Routes = Arc::default();
+        let api = serve(&routes);
+        let forge = Self {
+            tmp,
+            up,
+            work,
+            api,
+            routes,
+        };
+        forge.route("/api/v3/meta", 200, "{}");
+        forge.route("GET /api/v3/repos/OCA/repo/pulls", 200, "[]");
+        forge.route(
+            "GET /api/v3/repos/OCA/repo",
+            200,
+            r#"{"permissions":{"push":true}}"#,
+        );
+        forge.route(
+            "POST /api/v3/repos/OCA/repo/pulls",
+            201,
+            &format!(
+                r#"{{"number":9,"html_url":"{}/OCA/repo/pull/9"}}"#,
+                forge.api
+            ),
+        );
+        forge.route("GET /api/v3/user", 200, r#"{"login":"me"}"#);
+        forge.route(
+            "POST /api/v3/repos/OCA/repo/forks",
+            202,
+            &format!(r#"{{"html_url":"{}/me/repo"}}"#, forge.api),
+        );
+        let url = format!("{}/OCA/repo.git", forge.api);
+        git(&forge.work, &["remote", "set-url", "origin", &url]);
+        forge
+    }
+
+    fn route(&self, key: &str, status: u16, body: &str) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), (status, body.to_owned()));
+    }
+
+    fn odx(&self, args: &[&str]) -> (bool, String, String) {
+        binary(&self.work, &self.up, &self.api, args)
+    }
+
+    #[cfg(unix)]
+    fn odx_with(&self, odl: &str, args: &[&str]) -> (bool, String, String) {
+        binary_with(&self.work, &self.up, &self.api, odl, args)
+    }
+
+    /// Without push permission on the remote: through the user's fork.
+    fn no_push(&self) {
+        self.route(
+            "GET /api/v3/repos/OCA/repo",
+            200,
+            r#"{"permissions":{"push":false}}"#,
+        );
+    }
+}
+
+#[test]
+fn pull_requests_from_the_branch_or_a_fork() {
+    let forge = Forge::new();
+    let api = &forge.api;
+    // Migrated and proposed in one go, to the repository itself.
+    let (ok, out, err) = forge.odx(&["migrate", "addon", "my_addon", "--to", "19.0", "--open-pr"]);
+    assert!(ok, "{err}");
+    assert!(
+        out.ends_with(&format!(
+            "pushed to origin\nopened {api}/OCA/repo/pull/9 as a draft\n"
+        )),
+        "{out}"
+    );
+    git(
+        &forge.up,
+        &["rev-parse", "--verify", "--quiet", "19.0-mig-my_addon"],
+    );
+
+    // Later, ready for review, from a fork the user does not have yet.
+    forge.no_push();
+    let (ok, out, err) = forge.odx(&["--json", "migrate", "pr", "--ready"]);
+    assert!(ok, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["pushed_to"], format!("{api}/me/repo.git"));
+    assert_eq!(
+        (value["number"].as_u64(), &value["draft"]),
+        (Some(9), &false.into())
+    );
+    git(
+        &forge.tmp.path().join("fork"),
+        &["rev-parse", "--verify", "--quiet", "19.0-mig-my_addon"],
+    );
+
+    // An SSH remote: the fork is pushed to over SSH too.
+    git(
+        &forge.work,
+        &["remote", "set-url", "origin", "git@127.0.0.1:OCA/repo.git"],
+    );
+    let (ok, out, err) = forge.odx(&["migrate", "pr"]);
+    assert!(ok, "{err}");
+    assert!(
+        out.starts_with("pushed to git@127.0.0.1:me/repo.git\n"),
+        "{out}"
+    );
+
+    // A remote of the user's choice.
+    git(
+        &forge.work,
+        &["remote", "add", "mine", &format!("{api}/me/repo.git")],
+    );
+    let (ok, out, err) = forge.odx(&["migrate", "pr", "--push-remote", "mine", "--ready"]);
+    assert!(ok, "{err}");
+    assert_eq!(
+        out,
+        format!("pushed to mine\nopened {api}/OCA/repo/pull/9\n")
+    );
+}
+
+#[test]
+fn pull_request_failures() {
+    let forge = Forge::new();
+    let (ok, _, err) = forge.odx(&["migrate", "addon", "my_addon", "--to", "19.0"]);
+    assert!(ok, "{err}");
+    let failure = |expected: &str, args: &[&str]| {
+        let (ok, _, err) = forge.odx(args);
+        assert!(!ok);
+        assert!(err.contains(expected), "{err}");
+    };
+    // A remote off the forges.
+    git(&forge.work, &["remote", "add", "local", "/nowhere"]);
+    failure(
+        "the remote local is not on a forge",
+        &["migrate", "pr", "--push-remote", "local"],
+    );
+    // A refused pull request.
+    forge.route("POST /api/v3/repos/OCA/repo/pulls", 422, "{}");
+    failure("answered HTTP 422", &["migrate", "pr"]);
+    // A fork that cannot be pushed to, or made.
+    forge.no_push();
+    forge.route(
+        "POST /api/v3/repos/OCA/repo/forks",
+        202,
+        &format!(r#"{{"html_url":"{}/me/missing"}}"#, forge.api),
+    );
+    failure("git push failed", &["migrate", "pr"]);
+    forge.route("GET /api/v3/user", 401, "");
+    failure("needs a token", &["migrate", "pr"]);
+    // A forge that does not answer, or is none.
+    forge.route("GET /api/v3/repos/OCA/repo", 500, "");
+    failure("answered HTTP 500", &["migrate", "pr"]);
+    forge.route("/api/v3/meta", 404, "");
+    failure("does not look like GitHub", &["migrate", "pr"]);
+}
+
+#[test]
+fn pull_requests_need_a_migration_branch_on_a_forge() {
+    let (_tmp, _up, work) = fixture();
+    let env = env();
+    let (exit, _, err) = odx(&work, &env, &["migrate", "pr"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("\"19.0\" is no migration branch"), "{err}");
+    git(&work, &["checkout", "--quiet", "-b", "19.0-mig-x"]);
+    let (exit, _, err) = odx(&work, &env, &["migrate", "pr"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("the remote origin is not on a forge"), "{err}");
+    // With --open-pr, the migration is kept when the pull request fails.
+    git(&work, &["checkout", "--quiet", "19.0"]);
+    let (exit, out, err) = odx(
+        &work,
+        &env,
+        &["migrate", "addon", "my_addon", "--to", "19.0", "--open-pr"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        out.starts_with("migrated on branch 19.0-mig-my_addon"),
+        "{out}"
+    );
+    assert!(err.contains("the remote origin is not on a forge"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn pull_requests_list_the_findings() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let forge = Forge::new();
+    let odl = forge.tmp.path().join("odl");
+    std::fs::write(
+        &odl,
+        "#!/bin/sh\necho '{\"modules\":[{\"violations\":[{\"file_path\":\"my_addon/data.xml\",\"line\":3,\"code\":\"U1908\",\"message\":\"by hand\"}]}]}'\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&odl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let odl = odl.display().to_string();
+    let (ok, out, err) = forge.odx_with(
+        &odl,
+        &["migrate", "addon", "my_addon", "--to", "19.0", "--open-pr"],
+    );
+    assert!(ok, "{err}");
+    assert!(out.contains("1 finding(s) left to fix by hand"), "{out}");
 }

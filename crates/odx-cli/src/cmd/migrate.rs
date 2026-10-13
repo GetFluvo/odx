@@ -1,18 +1,19 @@
 //! `odx migrate addon <addon> --to <series>`: an addon's migration to
 //! another series on a branch of the repository, the OCA way; `odx migrate
-//! --continue` and `--abort` after a conflict in its history.
+//! --continue` and `--abort` after a conflict in its history; `odx migrate
+//! pr` to push the branch and open its pull request.
 
 use std::fmt::Write as _;
 
 use odx_config::Problem;
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation};
-use odx_forge::{ForgeClient, Http, RepoUrl, ReqwestHttp};
-use odx_port::migrate::{Outcome, Plan, Summary, Tools, Worktree};
+use odx_forge::{ForgeClient, ForgeError, Http, Opened, Proposal, RepoUrl, ReqwestHttp};
+use odx_port::migrate::{Finding, Outcome, Plan, Summary, Tools, Worktree};
 
 use super::{Report, output_of};
 use crate::Context;
-use crate::cli::{GlobalArgs, MigrateAddonArgs, MigrateArgs, MigrateCommand};
+use crate::cli::{GlobalArgs, MigrateAddonArgs, MigrateArgs, MigrateCommand, MigratePrArgs};
 
 /// Run `odx migrate`.
 pub(crate) fn run_migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
@@ -57,6 +58,17 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             });
         }
         (_, true, _) => tree.resume(&tools),
+        (Some(MigrateCommand::Pr(pr)), _, _) => {
+            let opened = open_pr(ctx, &tools, pr)?;
+            return Ok(Report {
+                out: if global.json {
+                    format!("{}\n", opened_json(&opened))
+                } else {
+                    opened_text(&opened)
+                },
+                ..Report::default()
+            });
+        }
         (Some(MigrateCommand::Addon(addon)), _, _) => {
             let plan = plan(addon, ctx)?;
             if !addon.force && !global.offline {
@@ -73,21 +85,7 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     };
     let outcome = outcome.map_err(|e| Report::error(Exit::Failure, e))?;
     Ok(match outcome {
-        Outcome::Done(summary) => {
-            warnings.extend(summary.warnings.iter().map(|message| Problem {
-                key: "migrate".to_owned(),
-                message: message.clone(),
-            }));
-            Report {
-                out: if global.json {
-                    json(&summary)
-                } else {
-                    text(&summary)
-                },
-                warnings,
-                ..Report::default()
-            }
-        }
+        Outcome::Done(summary) => finished(args, global, ctx, &tools, &summary, warnings),
         Outcome::Stopped(message) => Report {
             exit: Exit::Failure,
             out: if global.json {
@@ -104,6 +102,53 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     })
 }
 
+/// The report of a finished migration, after opening its pull request when
+/// `--open-pr` asks for it.
+fn finished(
+    args: &MigrateArgs,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+    tools: &Tools,
+    summary: &Summary,
+    mut warnings: Vec<Problem>,
+) -> Report {
+    warnings.extend(summary.warnings.iter().map(|message| Problem {
+        key: "migrate".to_owned(),
+        message: message.clone(),
+    }));
+    let wanted = matches!(&args.command, Some(MigrateCommand::Addon(addon)) if addon.open_pr);
+    let pr = wanted.then(|| {
+        let defaults = MigratePrArgs {
+            push_remote: None,
+            ready: false,
+        };
+        open_pr(ctx, tools, &defaults)
+    });
+    let (opened, error) = match pr {
+        Some(Ok(opened)) => (Some(opened), None),
+        Some(Err(report)) => (None, report.error),
+        None => (None, None),
+    };
+    let mut out = if global.json {
+        json(summary, opened.as_ref())
+    } else {
+        text(summary)
+    };
+    if let Some(opened) = opened.as_ref().filter(|_| !global.json) {
+        out.push_str(&opened_text(opened));
+    }
+    Report {
+        exit: if error.is_some() {
+            Exit::Failure
+        } else {
+            Exit::Success
+        },
+        out,
+        warnings,
+        error,
+    }
+}
+
 /// The plan for `args`, with the defaults filled in.
 fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
     let Some(from) = args.from.clone().or_else(|| previous(&args.to)) else {
@@ -115,11 +160,7 @@ fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
             ),
         ));
     };
-    let remotes = output_of(&git(ctx).arg("remote")).unwrap_or_default();
-    let remote = args.remote.clone().unwrap_or_else(|| {
-        let upstream = remotes.lines().any(|remote| remote == "upstream");
-        if upstream { "upstream" } else { "origin" }.to_owned()
-    });
+    let remote = args.remote.clone().unwrap_or_else(|| default_remote(ctx));
     Ok(Plan {
         addon: args.addon.clone(),
         from,
@@ -133,21 +174,31 @@ fn git(ctx: &Context<'_>) -> Invocation {
     Invocation::new("git").arg("-C").arg(ctx.dir.as_os_str())
 }
 
+/// `upstream` when the clone has it, else `origin`.
+fn default_remote(ctx: &Context<'_>) -> String {
+    let remotes = output_of(&git(ctx).arg("remote")).unwrap_or_default();
+    let upstream = remotes.lines().any(|remote| remote == "upstream");
+    if upstream { "upstream" } else { "origin" }.to_owned()
+}
+
+/// The repository `remote` points at, when it is on a forge: the URL git
+/// uses, or as configured when `insteadOf` turns it into something that is
+/// not on a forge.
+fn forge_repo(ctx: &Context<'_>, remote: &str) -> Option<RepoUrl> {
+    let key = format!("remote.{remote}.url");
+    let urls = [
+        git(ctx).args(["remote", "get-url", remote]),
+        git(ctx).args(["config", "--get", &key]),
+    ];
+    urls.iter()
+        .find_map(|query| RepoUrl::parse(&output_of(query).unwrap_or_default()))
+}
+
 /// Refuse when an open pull request on the remote's forge already migrates
 /// the addon: the work goes there instead. A forge that cannot be asked is
 /// a warning.
 fn migration_pr(ctx: &Context<'_>, plan: &Plan, warnings: &mut Vec<Problem>) -> Result<(), Report> {
-    // The URL git uses, or as configured when `insteadOf` turns it into
-    // something that is not on a forge.
-    let key = format!("remote.{}.url", plan.remote);
-    let urls = [
-        git(ctx).args(["remote", "get-url", &plan.remote]),
-        git(ctx).args(["config", "--get", &key]),
-    ];
-    let Some(repo) = urls
-        .iter()
-        .find_map(|query| RepoUrl::parse(&output_of(query).unwrap_or_default()))
-    else {
+    let Some(repo) = forge_repo(ctx, &plan.remote) else {
         return Ok(());
     };
     let sleep = std::thread::sleep;
@@ -212,18 +263,201 @@ fn text(summary: &Summary) -> String {
     out
 }
 
-fn json(summary: &Summary) -> String {
+fn json(summary: &Summary, opened: Option<&Pushed>) -> String {
     #[derive(serde::Serialize)]
     struct Done<'a> {
         status: &'static str,
         #[serde(flatten)]
         summary: &'a Summary,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pull_request: Option<serde_json::Value>,
     }
     let done = Done {
         status: "done",
         summary,
+        pull_request: opened.map(opened_json),
     };
     format!("{}\n", serde_json::to_string(&done).unwrap_or_default())
+}
+
+/// A pushed branch and the pull request opened for it.
+#[derive(Debug)]
+struct Pushed {
+    /// Where the branch went: a remote or a URL.
+    to: String,
+    opened: Opened,
+    draft: bool,
+}
+
+fn opened_text(pushed: &Pushed) -> String {
+    let draft = if pushed.draft { " as a draft" } else { "" };
+    format!(
+        "pushed to {}\nopened {}{draft}\n",
+        pushed.to, pushed.opened.url
+    )
+}
+
+fn opened_json(pushed: &Pushed) -> serde_json::Value {
+    serde_json::json!({
+        "status": "opened",
+        "pushed_to": pushed.to,
+        "number": pushed.opened.number,
+        "url": pushed.opened.url,
+        "draft": pushed.draft,
+    })
+}
+
+/// Where to push a branch for a fork: like the remote's URL, SSH or HTTPS.
+fn push_url(remote_url: &str, fork: &RepoUrl) -> String {
+    if remote_url.starts_with("git@") || remote_url.starts_with("ssh://") {
+        format!("git@{}:{}.git", fork.host, fork.path)
+    } else {
+        format!("{}/{}.git", fork.origin(), fork.path)
+    }
+}
+
+/// The pull request's description.
+fn body(addon: &str, from: &str, to: &str, findings: &[Finding]) -> String {
+    let mut body = format!(
+        "Migration of `{addon}` from {from} to {to}, made with odx:\n\n\
+         - the history of `{addon}` on {from}, authors kept\n\
+         - the repository's pre-commit fixes\n\
+         - odoo-lint's upgrade fixes and the version {to}.1.0.0\n\n"
+    );
+    if findings.is_empty() {
+        body.push_str("odoo-lint finds nothing left to fix by hand.\n");
+    } else {
+        body.push_str("### Left to fix by hand\n\n");
+        for finding in findings {
+            let _ = writeln!(
+                body,
+                "- [ ] `{}:{}` {} {}",
+                finding.file, finding.line, finding.code, finding.message
+            );
+        }
+    }
+    let _ = write!(
+        body,
+        "\n<!-- odx:migrate addon {addon} --to {to} --from {from} -->\n"
+    );
+    body
+}
+
+/// A forge error as the report that ends the command.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "`map_err` hands the error over by value"
+)]
+fn failure(e: ForgeError) -> Report {
+    Report::error(Exit::Failure, e.to_string())
+}
+
+/// Push the migration branch checked out and open its pull request.
+fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pushed, Report> {
+    let branch = output_of(&git(ctx).args(["branch", "--show-current"])).unwrap_or_default();
+    let Some((to, addon)) = branch.split_once("-mig-") else {
+        return Err(Report::error(
+            Exit::Usage,
+            format!("{branch:?} is no migration branch (`<series>-mig-<addon>`)"),
+        ));
+    };
+    let config = |key: &str| {
+        output_of(&git(ctx).args(["config", "--get", &format!("branch.{branch}.{key}")])).ok()
+    };
+    let from = config("odxMigrateFrom")
+        .or_else(|| previous(to))
+        .unwrap_or_default();
+    let remote = config("odxMigrateRemote").unwrap_or_else(|| default_remote(ctx));
+    let Some(upstream) = forge_repo(ctx, &remote) else {
+        return Err(Report::error(
+            Exit::Failure,
+            format!("the remote {remote} is not on a forge"),
+        ));
+    };
+    let sleep = std::thread::sleep;
+    let branch = Branch {
+        name: &branch,
+        addon,
+        from: &from,
+        to,
+        remote: &remote,
+        upstream: &upstream,
+    };
+    ReqwestHttp::new().map_err(failure).and_then(|http| {
+        let client = ForgeClient::new(&http as &dyn Http, ctx.env, &OsRunner, &sleep);
+        push_and_open(ctx, tools, args, &client, &branch)
+    })
+}
+
+/// A migration branch and where it comes from.
+struct Branch<'a> {
+    name: &'a str,
+    addon: &'a str,
+    from: &'a str,
+    to: &'a str,
+    remote: &'a str,
+    upstream: &'a RepoUrl,
+}
+
+/// Push `branch` and open its pull request through `client`.
+fn push_and_open(
+    ctx: &Context<'_>,
+    tools: &Tools,
+    args: &MigratePrArgs,
+    client: &ForgeClient<'_>,
+    branch: &Branch<'_>,
+) -> Result<Pushed, Report> {
+    let Branch {
+        name,
+        addon,
+        from,
+        to,
+        remote,
+        upstream,
+    } = *branch;
+    let kind = client.kind(upstream).map_err(failure)?;
+    let (target, head) = if let Some(other) = &args.push_remote {
+        let head = forge_repo(ctx, other).ok_or_else(|| {
+            Report::error(
+                Exit::Failure,
+                format!("the remote {other} is not on a forge"),
+            )
+        })?;
+        (other.clone(), head)
+    } else if client.can_push(upstream, kind).map_err(failure)? {
+        (remote.to_owned(), upstream.clone())
+    } else {
+        let fork = client.fork(upstream, kind).map_err(failure)?;
+        let url = output_of(&git(ctx).args(["config", "--get", &format!("remote.{remote}.url")]))
+            .unwrap_or_default();
+        (push_url(&url, &fork), fork)
+    };
+    let refspec = format!("HEAD:refs/heads/{name}");
+    super::run_checked(
+        &git(ctx).args(["push", "--quiet", &target, &refspec]),
+        "git push",
+    )
+    .map_err(|e| Report::error(Exit::Failure, e))?;
+    let findings = Worktree::new(&OsRunner, &ctx.dir).findings(addon, to, tools);
+    let title = format!("[{to}][MIG] {addon}: Migration to {to}");
+    let body = body(addon, from, to, &findings);
+    let draft = !args.ready;
+    let proposal = Proposal {
+        head: &head,
+        branch: name,
+        base: to,
+        title: &title,
+        body: &body,
+        draft,
+    };
+    let opened = client
+        .open_pull_request(upstream, kind, &proposal)
+        .map_err(failure)?;
+    Ok(Pushed {
+        to: target,
+        opened,
+        draft,
+    })
 }
 
 #[cfg(test)]
@@ -236,5 +470,42 @@ mod tests {
         assert_eq!(previous("0.0"), None);
         assert_eq!(previous("x.0"), None);
         assert_eq!(previous("19"), None);
+    }
+
+    #[test]
+    fn fork_push_urls_follow_the_remote() {
+        let fork = RepoUrl::parse("https://github.com/me/pos").unwrap();
+        assert_eq!(
+            push_url("git@github.com:OCA/pos.git", &fork),
+            "git@github.com:me/pos.git"
+        );
+        assert_eq!(
+            push_url("ssh://git@github.com/OCA/pos", &fork),
+            "git@github.com:me/pos.git"
+        );
+        assert_eq!(
+            push_url("https://github.com/OCA/pos", &fork),
+            "https://github.com/me/pos.git"
+        );
+    }
+
+    #[test]
+    fn descriptions_list_the_work_left() {
+        let finding = Finding {
+            file: "pos_x/models/a.py".to_owned(),
+            line: 3,
+            code: "U1908".to_owned(),
+            message: "use `Domain`".to_owned(),
+        };
+        assert_eq!(
+            body("pos_x", "18.0", "19.0", &[finding]),
+            "Migration of `pos_x` from 18.0 to 19.0, made with odx:\n\n\
+             - the history of `pos_x` on 18.0, authors kept\n\
+             - the repository's pre-commit fixes\n\
+             - odoo-lint's upgrade fixes and the version 19.0.1.0.0\n\n\
+             ### Left to fix by hand\n\n\
+             - [ ] `pos_x/models/a.py:3` U1908 use `Domain`\n\n\
+             <!-- odx:migrate addon pos_x --to 19.0 --from 18.0 -->\n"
+        );
     }
 }
