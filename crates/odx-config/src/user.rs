@@ -1,8 +1,9 @@
 //! The user configuration: machine-wide settings that never live in a
 //! project (`~/.config/odx/config.toml` on Linux).
 //!
-//! Only `[cache]`, `[clones]` and `[trust]` are interpreted so far; the other
-//! documented tables are accepted and ignored. Project settings
+//! `[cache]`, `[clones]`, `[sync]`, `[mirrors]`, `[workspaces]` and
+//! `[trust]` are interpreted; the other documented tables are accepted and
+//! ignored. Project settings
 //! (repositories, packages, environments) are rejected so a project cannot
 //! be reconfigured from here.
 
@@ -28,8 +29,10 @@ pub struct UserConfig {
     pub sync: Option<SyncSettings>,
     /// Forge access defaults (not interpreted yet).
     pub http: Option<IgnoredAny>,
-    /// Upstream mirrors (not interpreted yet).
-    pub mirrors: Option<IgnoredAny>,
+    /// Private mirrors that serve commits of upstream repositories, keyed
+    /// by host, optionally with a path prefix (`"github.com/OCA"`).
+    #[serde(default)]
+    pub mirrors: BTreeMap<String, UserMirror>,
     /// Workspaces registered for `odx sync --all`, by path.
     #[serde(default)]
     pub workspaces: BTreeMap<String, Workspace>,
@@ -55,8 +58,53 @@ pub struct SyncSettings {
     pub jobs: Option<usize>,
     /// Low CPU and IO priority.
     pub nice: Option<bool>,
-    /// Skip syncs on battery power (not interpreted yet).
+    /// Skip scheduled syncs on battery power, where the scheduler can.
     pub pause_on_battery: Option<bool>,
+}
+
+/// A private mirror of `[mirrors]`: a repository holding commits of every
+/// upstream repository it is keyed for (like a project's vault).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserMirror {
+    /// The mirror's URL.
+    pub url: String,
+    /// Fetch commits from the mirror before upstream; otherwise the mirror
+    /// only serves commits upstream no longer has.
+    pub prefer: Option<bool>,
+}
+
+/// The mirror of `mirrors` for the repository at `url`: the one whose key
+/// (host, optionally with a path prefix) matches it most specifically.
+///
+/// ```
+/// use std::collections::BTreeMap;
+/// use odx_config::user::{UserMirror, mirror_for};
+///
+/// let mirror = |url: &str| UserMirror { url: url.to_owned(), prefer: None };
+/// let mirrors = BTreeMap::from([
+///     ("github.com".to_owned(), mirror("https://m/all.git")),
+///     ("GitHub.com/OCA".to_owned(), mirror("https://m/oca.git")),
+/// ]);
+/// let url = |repo: &str| mirror_for(&mirrors, repo).map(|m| m.url.as_str());
+/// assert_eq!(url("https://github.com/OCA/pos.git"), Some("https://m/oca.git"));
+/// assert_eq!(url("git@github.com:acme/x"), Some("https://m/all.git"));
+/// assert_eq!(url("https://github.community/x"), None);
+/// ```
+pub fn mirror_for<'a>(
+    mirrors: &'a BTreeMap<String, UserMirror>,
+    url: &str,
+) -> Option<&'a UserMirror> {
+    let repo = odx_core::repo_key(url);
+    mirrors
+        .iter()
+        .map(|(key, mirror)| (odx_core::repo_key(key), mirror))
+        .filter(|(key, _)| {
+            repo.strip_prefix(key.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|(key, _)| key.len())
+        .map(|(_, mirror)| mirror)
 }
 
 /// A registered workspace.
@@ -97,9 +145,9 @@ pub fn trusted(user: &UserConfig, root: &Path, env: &dyn Env) -> bool {
 pub struct UserCache {
     /// Cache directory.
     pub dir: Option<PathBuf>,
-    /// Size cap (not interpreted yet).
+    /// Size `odx cache gc` works towards, e.g. `"20GB"`.
     pub max_size: Option<String>,
-    /// Register workspaces for background sync (not interpreted yet).
+    /// Register workspaces for `odx sync --all` when they are aggregated.
     pub register_workspaces: Option<bool>,
     /// Partial-fetch filter, e.g. `"blob:none"` (not interpreted yet).
     pub filter: Option<String>,

@@ -173,6 +173,12 @@ fn registered_workspaces_are_synced() {
     drop(held);
     let (_, out, _) = machine.odx(&a, &["cache", "gc"]);
     assert!(out.starts_with("removed file://"), "{out}");
+    let stamps = std::fs::read_dir(machine.cache().join("repos"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "fetched"))
+        .count();
+    assert_eq!(stamps, 1);
     let (_, out, _) = machine.odx(&a, &["cache", "info"]);
     assert!(out.contains("repositories: 1 (0 unused"), "{out}");
 }
@@ -200,6 +206,12 @@ fn sync_failures() {
         )
     );
     drop(held);
+    // A foreground command keeps the sync waiting until max_duration.
+    let foreground = odx_sync::Presence::enter(&machine.cache()).unwrap();
+    let (exit, out, _) = machine.odx(&a, &["sync", "--max-duration", "1s"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(out.starts_with("skipped "), "{out}");
+    drop(foreground);
     // A user configuration that is not TOML.
     std::fs::create_dir_all(machine.tmp.path().join("config")).unwrap();
     std::fs::write(machine.tmp.path().join("config/config.toml"), "[cache\n").unwrap();
@@ -301,4 +313,30 @@ fn registry_without_a_workspace_or_configuration_directory() {
         "{}",
         String::from_utf8_lossy(&out)
     );
+}
+
+#[test]
+fn workspaces_register_themselves_when_asked() {
+    let machine = Machine::new();
+    let a = machine.workspace("a");
+    std::fs::create_dir_all(machine.tmp.path().join("config")).unwrap();
+    std::fs::write(
+        machine.tmp.path().join("config/config.toml"),
+        "[cache]\nregister_workspaces = true\n",
+    )
+    .unwrap();
+    let (exit, _, err) = machine.odx(&a, &["aggregate", "--fetch-only"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    let config = std::fs::read_to_string(machine.tmp.path().join("config/config.toml")).unwrap();
+    assert!(
+        config.starts_with("[cache]\nregister_workspaces = true\n\n[workspaces]\n"),
+        "{config}"
+    );
+    assert_eq!(config.matches("series = \"17.0\"").count(), 1, "{config}");
+    // Registered once.
+    machine.odx(&a, &["aggregate", "--fetch-only"]);
+    let again = std::fs::read_to_string(machine.tmp.path().join("config/config.toml")).unwrap();
+    assert_eq!(again, config);
+    let (_, out, _) = machine.odx(machine.tmp.path(), &["sync", "--all"]);
+    assert!(out.starts_with("synced "), "{out}");
 }

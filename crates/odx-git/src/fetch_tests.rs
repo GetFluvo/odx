@@ -102,6 +102,7 @@ fn fetches_branches_pull_requests_and_commits() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     let shas: Vec<&str> = fetched.iter().map(|f| f.sha.as_str()).collect();
@@ -142,6 +143,7 @@ fn gitlab_and_gitea_layouts() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitlab, WAIT).unwrap()[0].sha,
@@ -154,6 +156,7 @@ fn gitlab_and_gitea_layouts() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitea, WAIT).unwrap()[0].sha,
@@ -205,6 +208,7 @@ fn one_fetch_per_remote_url() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let backend = Counting {
         inner: system(),
@@ -232,6 +236,7 @@ fn errors() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("git fetch failed: "), "{err}");
@@ -291,6 +296,7 @@ fn unresolved_sources_are_errors() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let err = fetch(&cache, &Hollow, &plan, Duration::ZERO).unwrap_err();
     assert_eq!(
@@ -311,6 +317,7 @@ fn url_file_write_errors_are_reported() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     fs::create_dir_all(cache.url_file(&plan.url)).unwrap();
     assert!(matches!(
@@ -349,6 +356,7 @@ fn resolve_failures_propagate() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let err = fetch(&Cache::new(tmp.path()), &Broken, &plan, Duration::ZERO).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git"), "{err}");
@@ -389,6 +397,7 @@ fn locked_commits_come_from_the_mirror_first() {
         mirror: Some(file_url(&mirror)),
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let backend = Counting {
         inner: system(),
@@ -415,6 +424,7 @@ fn cached_commits_are_not_fetched_again() {
         mirror: Some(file_url(&mirror)),
         fallback: None,
         clone: None,
+        max_age: None,
     };
     fetch(&cache, &system(), &plan, WAIT).unwrap();
     let backend = Counting {
@@ -424,6 +434,62 @@ fn cached_commits_are_not_fetched_again() {
     let fetched = fetch(&cache, &backend, &plan, WAIT).unwrap();
     assert_eq!(fetched[0].via, Via::Cache);
     assert!(backend.urls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn recently_fetched_refs_are_served_from_the_cache() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let cache = Cache::new(tmp.path().join("cache"));
+    let plan = FetchPlan {
+        max_age: Some(Duration::from_secs(600)),
+        ..pos_plan(&up, None)
+    };
+    let counted = |plan: &FetchPlan| {
+        let backend = Counting {
+            inner: system(),
+            urls: Mutex::new(Vec::new()),
+        };
+        let fetched = fetch(&cache, &backend, plan, WAIT).unwrap();
+        let urls = backend.urls.lock().unwrap().len();
+        (fetched, urls)
+    };
+    // No stamp yet: fetched, and stamped.
+    let (fetched, urls) = counted(&plan);
+    assert_eq!((fetched[0].via, urls), (Via::Upstream, 1));
+    let stamp = cache.fetched_file(&plan.url);
+    assert!(stamp.is_file());
+    // Fresh: no network, same commits.
+    let (again, urls) = counted(&plan);
+    assert_eq!(urls, 0);
+    assert!(again.iter().all(|f| f.via == Via::Cache));
+    assert_eq!(
+        again.iter().map(|f| &f.sha).collect::<Vec<_>>(),
+        fetched.iter().map(|f| &f.sha).collect::<Vec<_>>()
+    );
+    // A source the cache does not hold yet is fetched.
+    git(&up.dir, &["branch", "17.0-new"]);
+    let more = FetchPlan {
+        sources: vec![(None, Source::Branch("17.0-new".into()))],
+        ..plan.clone()
+    };
+    assert_eq!(counted(&more).1, 1);
+    // Always fetching, a stale stamp, a stamp from the future or one that
+    // is no number all mean fetching.
+    assert_eq!(
+        counted(&FetchPlan {
+            max_age: None,
+            ..plan.clone()
+        })
+        .1,
+        1
+    );
+    for text in ["0\n", "99999999999\n", "soon\n"] {
+        fs::write(&stamp, text).unwrap();
+        assert_eq!(counted(&plan).1, 1, "{text}");
+    }
+    fs::remove_file(&stamp).unwrap();
+    assert_eq!(counted(&plan).1, 1);
 }
 
 #[test]
@@ -440,6 +506,7 @@ fn commits_gone_upstream_come_from_the_vault() {
         mirror: None,
         fallback: Some(file_url(&mirror)),
         clone: None,
+        max_age: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     assert_eq!(
@@ -483,6 +550,7 @@ fn commits_the_mirror_lacks_come_from_upstream() {
         mirror: Some(file_url(&mirror)),
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     assert_eq!(fetched[0].via, Via::Upstream);
@@ -534,6 +602,7 @@ fn pos_plan(up: &Upstream, clone: Option<LocalClone>) -> FetchPlan {
         mirror: None,
         fallback: None,
         clone,
+        max_age: None,
     }
 }
 

@@ -48,6 +48,14 @@ impl Cache {
         self.root.join("repos").join(url_hash(url))
     }
 
+    /// The file recording when a repository was last fetched (seconds
+    /// since the epoch).
+    pub fn fetched_file(&self, url: &str) -> PathBuf {
+        self.root
+            .join("repos")
+            .join(format!("{}.fetched", url_hash(url)))
+    }
+
     /// The file recording which URL a repository belongs to.
     pub fn url_file(&self, url: &str) -> PathBuf {
         self.root

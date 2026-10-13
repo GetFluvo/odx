@@ -96,6 +96,7 @@ fn fetches_over_the_git_protocol() {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     };
     let backend = SystemGit::new(Arc::new(OsRunner));
     let fetched = fetch(

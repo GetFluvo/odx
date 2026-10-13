@@ -69,6 +69,30 @@ else the platform cache directory (`$XDG_CACHE_HOME/odx` or
 `%LOCALAPPDATA%\odx\cache` on Windows). Concurrent odx processes take
 turns per repository through an advisory lock.
 
+A repository fetched less than `[tool.odx.cache] ttl.refs` ago (default
+15 minutes) that already holds every ref a run needs is served from the
+cache without network; the summary then says `(N already cached)`.
+`--fresh` fetches regardless, `--no-refresh` (and `--offline`) use whatever
+the cache holds. `odx lock`, `odx aggregate --update` and `odx sync` always
+fetch.
+
+```toml
+[tool.odx.cache]
+ttl = { refs = "15m" }
+```
+
+Private mirrors in the user configuration serve commits of upstream
+repositories for every project on the machine, like a project's vault.
+They are keyed by host, optionally with a path prefix; the most specific
+key wins. With `prefer = true` commits come from the mirror first;
+otherwise the mirror only serves commits upstream no longer has.
+
+```toml
+# ~/.config/odx/config.toml
+[mirrors]
+"github.com" = { url = "https://forge.example/odoo/vault.git", prefer = true }
+```
+
 ### Prefetching in the background
 
 ```console
@@ -87,6 +111,12 @@ configuration (`~/.config/odx/config.toml`); comments and other settings
 there are kept. One sync runs per machine at a time: a second one prints
 `another odx sync is running; nothing to do` and exits `0`. Workspaces
 that are not reached before `max_duration` are reported as skipped.
+
+With `[cache] register_workspaces = true` in the user configuration, every
+workspace registers itself the first time `odx aggregate` or `odx lock`
+runs in it. A sync waits while a foreground `odx aggregate`, `lock`, `dev`,
+`build` or `vendor` uses the same cache (each announces itself with a file
+under `active/` in the cache), up to `max_duration`.
 
 Each run writes `last_sync.json` (what happened per workspace) and appends
 to `sync.log` in the cache. A workspace that fails makes the run exit `1`;

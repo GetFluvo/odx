@@ -21,8 +21,8 @@ use odx_config::lock::{
 use odx_config::packages::{PackageSpec, package_specs};
 use odx_config::schema::OnHeadChange;
 use odx_config::schema::RefStyle;
-use odx_config::user::{self, UserConfig, expand_home, load_user_config};
-use odx_config::{ConfigError, OdxConfig, Project, Source, discover};
+use odx_config::user::{self, UserConfig, UserMirror, expand_home, load_user_config, mirror_for};
+use odx_config::{ConfigError, OdxConfig, Project, Source, Span, discover};
 use odx_core::system::OsRunner;
 use odx_core::{Env, Exit, Invocation, ProcessRunner, repo_key};
 use odx_forge::{
@@ -46,6 +46,9 @@ use crate::cli::{AggregateArgs, GlobalArgs, LockArgs};
 
 /// How long to wait for another odx process's repository lock.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How old fetched refs may be by default (`[tool.odx.cache] ttl.refs`).
+const REFS_TTL: Duration = Duration::from_mins(15);
 
 /// The cache directory: `cache_dir` from the project configuration
 /// (relative to the project root, `~/` expanded), else the shared cache
@@ -71,6 +74,14 @@ pub(crate) struct Prepared {
     pub(crate) cache: Cache,
     clones: Clones,
     limits: Limits,
+    /// How old fetched refs may be before they are fetched again; `None`
+    /// fetches every time.
+    pub(crate) max_age: Option<Duration>,
+    /// `[mirrors]` of the user configuration.
+    mirrors: BTreeMap<String, UserMirror>,
+    /// Register the workspace for `odx sync --all` (`[cache]
+    /// register_workspaces`, and not registered yet).
+    pub(crate) register: bool,
 }
 
 impl Prepared {
@@ -112,7 +123,33 @@ pub(crate) fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared
             .map_or(6, usize::from),
         lock_timeout: LOCK_TIMEOUT,
     };
+    let max_age = if global.fresh {
+        None
+    } else if global.no_refresh || global.offline {
+        Some(Duration::MAX)
+    } else {
+        Some(
+            project
+                .config
+                .cache
+                .as_ref()
+                .and_then(|cache| cache.ttl.as_ref())
+                .and_then(|ttl| ttl.refs)
+                .map_or(REFS_TTL, Span::as_duration),
+        )
+    };
+    let register = user
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.register_workspaces)
+        .unwrap_or(false)
+        && !user
+            .workspaces
+            .contains_key(&project.root.display().to_string());
     Ok(Prepared {
+        max_age,
+        mirrors: user.mirrors.clone(),
+        register,
         clones: local_clones(&user, ctx.env),
         project: *project,
         lock_path,
@@ -182,6 +219,13 @@ fn build(
     let mut plans = fetch_plans(planned, vault.filter(|_| prefer_mirror), vault);
     for plan in &mut plans {
         plan.plan.clone = prepared.clones.find(&plan.plan.url).cloned();
+        plan.plan.max_age = prepared.max_age;
+        if let Some(mirror) = mirror_for(&prepared.mirrors, &plan.plan.url) {
+            plan.plan.fallback.get_or_insert_with(|| mirror.url.clone());
+            if mirror.prefer.unwrap_or(false) {
+                plan.plan.mirror.get_or_insert_with(|| mirror.url.clone());
+            }
+        }
         // A bundle of the locked commits comes before any network.
         let bundle = bundles.map(|dir| dir.join(format!("{}.bundle", url_hash(&plan.plan.url))));
         if let Some(bundle) = bundle.filter(|bundle| bundle.is_file()) {
@@ -321,7 +365,12 @@ fn aggregate(
     global: &GlobalArgs,
     ctx: &Context<'_>,
 ) -> Result<Report, Report> {
-    let prepared = prepare(global, ctx)?;
+    let mut prepared = prepare(global, ctx)?;
+    if args.update {
+        // Updating means taking what upstream has now.
+        prepared.max_age = None;
+    }
+    super::sync::auto_register(&prepared, ctx);
     let mut planned = plan_config(
         &prepared.project.config,
         &prepared.project.root,
@@ -449,7 +498,10 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     if args.migrate {
         return migrate(ctx);
     }
-    let prepared = prepare(global, ctx)?;
+    let mut prepared = prepare(global, ctx)?;
+    // A lock records what upstream has now, never what was cached earlier.
+    prepared.max_age = None;
+    super::sync::auto_register(&prepared, ctx);
     let mut planned = plan_config(
         &prepared.project.config,
         &prepared.project.root,

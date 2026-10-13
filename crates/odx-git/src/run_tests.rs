@@ -45,6 +45,7 @@ fn plan(url: &str) -> FetchPlan {
         mirror: None,
         fallback: None,
         clone: None,
+        max_age: None,
     }
 }
 
