@@ -1,7 +1,10 @@
-//! `odx vendor`: the platform requirements file (`--requirements`).
+//! `odx vendor`: the addon directories of every dependency group, the
+//! vendor manifest, and the platform requirements file (`--requirements`).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use odx_aggregate::plan_config;
 use odx_analyze::manifest::{parse_manifest, python_requirement};
@@ -12,12 +15,19 @@ use odx_config::schema::PlatformProfile;
 use odx_config::uvlock::{UvLock, UvPackage, UvRequirement};
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner};
+use odx_forge::ReqwestHttp;
+use odx_git::Merger;
 use odx_platform::export::filter_export;
 use odx_platform::provided::ProvidedSet;
 use odx_platform::requirements::{
     Conflict, Declared, PlatformRequirements, build, edited, is_odoo, render, with_header,
 };
 use odx_platform::{profile, profile_name, provided_set, requirements_path};
+use odx_vendor::VendorError;
+use odx_vendor::archive::download_error;
+use odx_vendor::plan::plan;
+use odx_vendor::record::VendorRecord;
+use odx_vendor::{Options, Vendored};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare, uv_program};
@@ -42,26 +52,212 @@ pub(crate) fn run_vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'
 }
 
 fn vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    let Some(target) = &args.requirements else {
+    let prepared = prepare(global, ctx)?;
+    let install = profile(&prepared.project.config) != PlatformProfile::GenericWheels;
+    if !install && args.requirements.is_none() {
         return Err(Report::error(
             Exit::Usage,
-            "odx vendor: installing addon directories is not implemented yet (roadmap phase 5); \
-             `odx vendor --requirements` writes the platform requirements file"
+            "the generic-wheels profile ships wheels, not addon directories: \
+             `odx vendor --requirements` writes the platform requirements, `odx build` the wheels"
                 .to_owned(),
         ));
-    };
-    let prepared = prepare(global, ctx)?;
+    }
+    let mut report = Report::default();
+    let mut json = serde_json::Map::new();
+    json.insert("schema".to_owned(), serde_json::json!(1));
+    if install {
+        install_addons(ctx, &prepared, &mut report, &mut json)?;
+    }
+    if let Some(target) = &args.requirements {
+        write_requirements(
+            ctx,
+            &prepared,
+            target.as_deref(),
+            args.strict,
+            &mut report,
+            &mut json,
+        )?;
+    }
+    if global.json {
+        report.out = format!("{}\n", serde_json::Value::Object(json));
+    }
+    Ok(report)
+}
+
+/// Replace every group directory with its locked addons and write the
+/// vendor manifest.
+fn install_addons(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    report: &mut Report,
+    json: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), Report> {
+    let config = &prepared.project.config;
     let root = &prepared.project.root;
-    let file = root.join(
-        target
-            .clone()
-            .unwrap_or_else(|| requirements_path(&prepared.project.config)),
-    );
-    let generated = generate(ctx, &prepared)?;
-    let mut report = Report {
-        warnings: generated.warnings.clone(),
-        ..Report::default()
+    let group_dirs: BTreeMap<String, PathBuf> = config
+        .group_dirs()
+        .into_iter()
+        .map(|(group, dir)| (group, root.join(dir)))
+        .collect();
+    if group_dirs.is_empty() {
+        return Err(Report::error(
+            Exit::Usage,
+            "no [tool.odx.groups] directories to vendor into".to_owned(),
+        ));
+    }
+    let uv_lock = read_uv_lock(ctx, root)?.ok_or_else(|| {
+        Report::error(
+            Exit::Failure,
+            format!(
+                "{} is missing; run `uv lock`",
+                root.join("uv.lock").display()
+            ),
+        )
+    })?;
+    let lock = prepared.lock.clone().unwrap_or_default();
+    let git_source = |dist: &str| {
+        lock.packages
+            .iter()
+            .find(|(name, _)| normalize_name(name) == normalize_name(dist))
+            .map(|(_, entry)| {
+                (
+                    entry.url.clone(),
+                    entry.sha.clone(),
+                    entry.subdirectory.clone(),
+                )
+            })
     };
+    let groups: Vec<String> = group_dirs.keys().cloned().collect();
+    let failed = |e: VendorError| Report::error(Exit::Failure, e.to_string());
+    let items = plan(&uv_lock, &groups, &git_source).map_err(failed)?;
+    let record_path = root.join(vendor_manifest(config));
+    let previous = match ctx.fs.read(&record_path) {
+        Ok(bytes) => VendorRecord::parse(&String::from_utf8_lossy(&bytes))
+            .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", record_path.display())))?,
+        Err(_) => VendorRecord::default(),
+    };
+    let vendor_config = config.vendor.as_ref();
+    let patterns = vendor_config
+        .and_then(|vendor| vendor.exclude.clone())
+        .unwrap_or_else(|| vec!["static/description/index.html".to_owned()]);
+    let exclude = |path: &str| {
+        patterns
+            .iter()
+            .any(|pattern| git_aggregate_rs::fnmatch(path, pattern))
+    };
+    let wheel_cache = prepared.cache.root().join("wheels");
+    let options = Options {
+        root,
+        group_dirs: &group_dirs,
+        wheel_cache: &wheel_cache,
+        previous: &previous,
+        bump: vendor_config
+            .and_then(|vendor| vendor.bump_on_content_change)
+            .unwrap_or(true),
+    };
+    let merger = Merger::new(Arc::new(OsRunner));
+    let archive = |url: &str, sha: &str, subdirectory: Option<&str>| {
+        merger
+            .archive(&prepared.cache.repo_dir(url), sha, subdirectory)
+            .map_err(|e| format!("commit {sha} of {url} is not in the cache ({e}); run `odx lock`"))
+    };
+    let vendored = ReqwestHttp::new()
+        .map_err(download_error("the package index"))
+        .and_then(|http| odx_vendor::vendor(&items, &options, &http, &archive, &exclude))
+        .map_err(failed)?;
+    record_path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&record_path, vendored.record.render()))
+        .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", record_path.display())))?;
+    describe_vendored(&vendored, &group_dirs, root, report, json);
+    Ok(())
+}
+
+/// Report what `odx vendor` wrote, as text and JSON.
+fn describe_vendored(
+    vendored: &Vendored,
+    group_dirs: &BTreeMap<String, PathBuf>,
+    root: &Path,
+    report: &mut Report,
+    json: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let mut vendored_json = Vec::new();
+    for (group, dir) in group_dirs {
+        let addons: Vec<&str> = vendored
+            .record
+            .addons
+            .iter()
+            .filter(|addon| &addon.group == group)
+            .map(|addon| addon.name.as_str())
+            .collect();
+        let _ = writeln!(
+            report.out,
+            "vendored {group}: {} addons into {}",
+            addons.len(),
+            relative(dir, root)
+        );
+        vendored_json.push(
+            serde_json::json!({ "group": group, "dir": relative(dir, root), "addons": addons }),
+        );
+    }
+    for bumped in &vendored.bumped {
+        let _ = writeln!(
+            report.out,
+            "bumped {} {} -> {}: content changed without a version change",
+            bumped.addon, bumped.from, bumped.to
+        );
+    }
+    report.warnings.extend(vendored.not_bumped.iter().map(|addon| Problem {
+        key: addon.clone(),
+        message: "content changed without a version change, and the version has no numeric last segment to bump".to_owned(),
+    }));
+    json.insert(
+        "vendored".to_owned(),
+        serde_json::Value::Array(vendored_json),
+    );
+    json.insert(
+        "bumped".to_owned(),
+        vendored
+            .bumped
+            .iter()
+            .map(|bumped| serde_json::json!({ "addon": bumped.addon, "from": bumped.from, "to": bumped.to }))
+            .collect(),
+    );
+}
+
+/// The vendor manifest path: `[tool.odx.vendor] manifest`, else
+/// `[tool.odx.layout] vendor_manifest`, else `.odx/vendor.lock`.
+pub(crate) fn vendor_manifest(config: &odx_config::OdxConfig) -> PathBuf {
+    config
+        .vendor
+        .as_ref()
+        .and_then(|vendor| vendor.manifest.clone())
+        .or_else(|| {
+            config
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.vendor_manifest.clone())
+        })
+        .unwrap_or_else(|| PathBuf::from(".odx/vendor.lock"))
+}
+
+/// Write the platform requirements file and report it.
+fn write_requirements(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    target: Option<&Path>,
+    strict: bool,
+    report: &mut Report,
+    json: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), Report> {
+    let root = &prepared.project.root;
+    let file = root.join(target.map_or_else(
+        || requirements_path(&prepared.project.config),
+        Path::to_path_buf,
+    ));
+    let generated = generate(ctx, prepared)?;
+    report.warnings.extend(generated.warnings.iter().cloned());
     let previous = ctx
         .fs
         .read(&file)
@@ -86,34 +282,31 @@ fn vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     }
     let found = &generated.requirements;
     report.warnings.extend(problems(found));
-    if global.json {
-        report.out = format!(
-            "{}\n",
-            serde_json::json!({
-                "schema": 1,
-                "file": relative(&file, root),
-                "lines": found.lines,
-                "omitted": found.omitted,
-                "conflicts": found.conflicts,
-                "unresolved": found.unresolved,
-            })
-        );
-    } else {
-        report.out = format!(
-            "wrote {}: {} requirements, {} provided by the platform left out\n",
-            relative(&file, root),
-            found.lines.len(),
-            found.omitted.len()
-        );
-    }
-    if args.strict && !found.conflicts.is_empty() {
+    json.insert(
+        "requirements".to_owned(),
+        serde_json::json!({
+            "file": relative(&file, root),
+            "lines": found.lines,
+            "omitted": found.omitted,
+            "conflicts": found.conflicts,
+            "unresolved": found.unresolved,
+        }),
+    );
+    let _ = writeln!(
+        report.out,
+        "wrote {}: {} requirements, {} provided by the platform left out",
+        relative(&file, root),
+        found.lines.len(),
+        found.omitted.len()
+    );
+    if strict && !found.conflicts.is_empty() {
         report.exit = Exit::Failure;
         report.error = Some(format!(
             "{} requirements conflict with the platform (--strict)",
             found.conflicts.len()
         ));
     }
-    Ok(report)
+    Ok(())
 }
 
 /// Warnings for conflicts and packages `uv.lock` does not pin.
@@ -156,14 +349,7 @@ pub(crate) fn generate(ctx: &Context<'_>, prepared: &Prepared) -> Result<Generat
     })
     .map_err(|e| Report::error(Exit::Usage, e))?;
     let uv_lock_path = root.join("uv.lock");
-    let uv_lock = match ctx.fs.read(&uv_lock_path) {
-        Ok(bytes) => Some(
-            UvLock::parse(&String::from_utf8_lossy(&bytes)).map_err(|e| {
-                Report::error(Exit::Usage, format!("{}: {e}", uv_lock_path.display()))
-            })?,
-        ),
-        Err(_) => None,
-    };
+    let uv_lock = read_uv_lock(ctx, root)?;
     let mut warnings = Vec::new();
     let declared = declared(prepared, uv_lock.as_ref(), &mut warnings);
     let mut requirements = build(
@@ -373,6 +559,16 @@ fn shipped_addon_dirs(prepared: &Prepared) -> Vec<PathBuf> {
     dirs.sort();
     dirs.dedup();
     dirs
+}
+
+/// `uv.lock` of the project, if there is one.
+fn read_uv_lock(ctx: &Context<'_>, root: &Path) -> Result<Option<UvLock>, Report> {
+    let path = root.join("uv.lock");
+    ctx.fs.read(&path).map_or(Ok(None), |bytes| {
+        UvLock::parse(&String::from_utf8_lossy(&bytes))
+            .map(Some)
+            .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", path.display())))
+    })
 }
 
 fn relative(path: &Path, root: &Path) -> String {

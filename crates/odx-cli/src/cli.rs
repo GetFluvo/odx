@@ -266,6 +266,9 @@ pub struct VerifyArgs {
     /// Check the platform requirements file against the provided-package set.
     #[arg(long)]
     pub requirements: bool,
+    /// Check the addon directories of a deployment checkout against the vendor manifest.
+    #[arg(long, value_name = "DIR")]
+    pub deployed: Option<PathBuf>,
 }
 
 /// Arguments of `odx stats`.

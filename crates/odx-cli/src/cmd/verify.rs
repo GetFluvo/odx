@@ -10,15 +10,18 @@ use odx_config::deps::normalize_name;
 use odx_config::edit::PyprojectEdit;
 use odx_config::lock::Lockfile;
 use odx_config::packages::package_specs;
+use odx_config::uvlock::UvLock;
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner};
 use odx_git::Merger;
 use odx_platform::requirements_path;
+use odx_vendor::check;
+use odx_vendor::record::VendorRecord;
 use toml_edit::{DocumentMut, Item};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
-use super::vendor::{describe_conflict, generate, provided_lines};
+use super::vendor::{describe_conflict, generate, provided_lines, vendor_manifest};
 use crate::Context;
 use crate::cli::{GlobalArgs, VerifyArgs};
 
@@ -28,10 +31,10 @@ pub(crate) fn run_verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'
 }
 
 fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    if args.vendored || args.installed {
+    if args.installed {
         return Err(Report::error(
             Exit::Usage,
-            "odx verify --vendored/--installed: not implemented yet (roadmap phase 5)".to_owned(),
+            "odx verify --installed: not implemented yet (roadmap phase 5)".to_owned(),
         ));
     }
     let prepared = prepare(global, ctx)?;
@@ -43,6 +46,15 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     stray_addons(&prepared, &mut problems);
     if args.requirements {
         requirements(ctx, &prepared, &mut problems)?;
+    }
+    if args.vendored || args.deployed.is_some() {
+        vendored(
+            ctx,
+            &prepared,
+            args.deployed.as_deref(),
+            &lock,
+            &mut problems,
+        )?;
     }
     if prepared.lock.is_none() && !problems.is_empty() {
         problems.insert(
@@ -237,6 +249,74 @@ fn requirements(
         problems.push(format!(
             "{relative} is not what `odx vendor --requirements` writes; run it"
         ));
+    }
+    Ok(())
+}
+
+/// The vendored addon directories (of the project, or of the deployment
+/// checkout `deployed`) are exactly what `odx vendor` wrote, and in the
+/// project the vendor manifest still matches the lockfiles.
+fn vendored(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    deployed: Option<&Path>,
+    lock: &Lockfile,
+    problems: &mut Vec<String>,
+) -> Result<(), Report> {
+    let config = &prepared.project.config;
+    let root = &prepared.project.root;
+    let relative = vendor_manifest(config);
+    let Ok(bytes) = ctx.fs.read(&root.join(&relative)) else {
+        problems.push(format!(
+            "{} is missing; run `odx vendor`",
+            relative.display().to_string().replace('\\', "/")
+        ));
+        return Ok(());
+    };
+    let record = VendorRecord::parse(&String::from_utf8_lossy(&bytes))
+        .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", relative.display())))?;
+    let base = deployed.map_or_else(|| root.clone(), |dir| ctx.dir.join(dir));
+    let group_dirs = config
+        .group_dirs()
+        .into_iter()
+        .map(|(group, dir)| (group, base.join(dir)))
+        .collect();
+    problems.extend(check(&record, &group_dirs, &base));
+    if deployed.is_some() {
+        return Ok(());
+    }
+    let uv_lock = ctx
+        .fs
+        .read(&root.join("uv.lock"))
+        .ok()
+        .and_then(|bytes| UvLock::parse(&String::from_utf8_lossy(&bytes)).ok())
+        .unwrap_or_default();
+    for addon in &record.addons {
+        let current = addon.source.strip_prefix("git ").map_or_else(
+            || {
+                uv_lock
+                    .packages_named(&addon.package)
+                    .iter()
+                    .any(|package| {
+                        package
+                            .wheels
+                            .iter()
+                            .any(|candidate| candidate.hash == addon.wheel)
+                    })
+            },
+            |sha| {
+                lock.packages
+                    .iter()
+                    .find(|(dist, _)| normalize_name(dist) == normalize_name(&addon.package))
+                    .is_none_or(|(_, entry)| entry.sha == sha)
+            },
+        );
+        if !current {
+            problems.push(format!(
+                "{}: vendored from {} {}, which the lockfiles no longer pin; run `odx vendor`",
+                addon.name, addon.package, addon.source
+            ));
+        }
     }
     Ok(())
 }
