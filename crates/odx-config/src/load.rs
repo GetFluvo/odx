@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use odx_core::FileSystem;
 use serde::Deserialize;
@@ -154,7 +154,20 @@ pub fn discover(
 /// [`ConfigError::NotFound`] when there is none, and the errors of
 /// [`parse_pyproject`] for a file that cannot be read or is invalid.
 pub fn find_pyproject(fs: &dyn FileSystem, start: &Path) -> Result<Project, ConfigError> {
-    for dir in start.ancestors() {
+    // `a/../b` is `b`: walking its ancestors must not pass through `a`.
+    // Other paths stay as given, separators included.
+    let mut normal = start.to_path_buf();
+    if start.components().any(|part| part == Component::ParentDir) {
+        normal.clear();
+        for part in start.components() {
+            if part == Component::ParentDir {
+                normal.pop();
+            } else {
+                normal.push(part);
+            }
+        }
+    }
+    for dir in normal.ancestors() {
         let file = dir.join("pyproject.toml");
         if fs.exists(&file)
             && let Some(project) = load_file(fs, &file)?
@@ -535,6 +548,15 @@ environment = "staging"
         let project = source.project().unwrap();
         assert_eq!(project.root, Path::new("/w"));
         assert_eq!(project.file, Path::new("/w/pyproject.toml"));
+    }
+
+    #[test]
+    fn discover_does_not_walk_through_parent_components() {
+        let fs = fs_with(&[("/w/a/pyproject.toml", ODX)]);
+        let err = discover(&fs, Path::new("/w/a/../b"), None).unwrap_err();
+        assert!(err.to_string().starts_with("no pyproject.toml"), "{err}");
+        let source = discover(&fs, Path::new("/w/b/../a/./x"), None).unwrap();
+        assert_eq!(source.project().unwrap().root, Path::new("/w/a"));
     }
 
     #[test]

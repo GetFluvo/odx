@@ -54,6 +54,14 @@ impl Unit {
 }
 
 impl Span {
+    /// A span of whole minutes.
+    pub const fn minutes(amount: u64) -> Self {
+        Self {
+            amount,
+            unit: Unit::Minutes,
+        }
+    }
+
     /// The span as a standard [`Duration`], saturating on overflow.
     pub const fn as_duration(self) -> Duration {
         Duration::from_secs(self.amount.saturating_mul(self.unit.seconds()))

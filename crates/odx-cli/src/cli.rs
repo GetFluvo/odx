@@ -142,8 +142,8 @@ pub enum Command {
     /// Upstream dashboard issue and actionable PRs (nightly CI).
     #[command(subcommand)]
     Bot(BotCommand),
-    /// Prefetch repositories, PR refs, index metadata and wheels into the cache.
-    Sync,
+    /// Prefetch the repositories and PR refs of workspaces into the cache.
+    Sync(SyncArgs),
     /// Run sync continuously or install it as a user-level scheduled job.
     #[command(subcommand)]
     Daemon(DaemonCommand),
@@ -631,11 +631,22 @@ pub enum BotCommand {
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Install the user-level scheduled sync job.
-    Install,
+    Install {
+        /// Time between syncs (default: `[sync] interval`, else 30m).
+        #[arg(long, value_name = "DURATION")]
+        interval: Option<String>,
+        /// Print the job files and commands without installing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the scheduled sync job.
     Uninstall,
     /// Run the sync loop in the foreground.
-    Run,
+    Run {
+        /// Time between syncs (default: `[sync] interval`, else 30m).
+        #[arg(long, value_name = "DURATION")]
+        interval: Option<String>,
+    },
     /// Show the scheduled job and last sync.
     Status,
 }
@@ -645,8 +656,35 @@ pub enum DaemonCommand {
 pub enum CacheCommand {
     /// Show cache location, size and freshness.
     Info,
-    /// Remove least recently used data above the configured size.
-    Gc,
+    /// Remove repositories no registered workspace uses, least recently used first.
+    Gc {
+        /// Keep the cache under this size (default: `[cache] max_size`; without one, remove every unused repository).
+        #[arg(long, value_name = "SIZE")]
+        max_size: Option<String>,
+        /// Show what would be removed.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// Arguments of `odx sync`.
+#[derive(Debug, Args)]
+pub struct SyncArgs {
+    /// Register this workspace for `odx sync --all` and stop.
+    #[arg(long, conflicts_with_all = ["unregister", "all", "workspace"])]
+    pub register: bool,
+    /// Remove this workspace from the registry and stop.
+    #[arg(long, conflicts_with_all = ["all", "workspace"])]
+    pub unregister: bool,
+    /// Sync every registered workspace.
+    #[arg(long, conflicts_with = "workspace")]
+    pub all: bool,
+    /// Sync these workspaces (default: the one here).
+    #[arg(long, value_name = "DIR")]
+    pub workspace: Vec<PathBuf>,
+    /// Stop starting new workspaces after this long (default: `[sync] max_duration`, else 20m).
+    #[arg(long, value_name = "DURATION")]
+    pub max_duration: Option<String>,
 }
 
 /// Arguments of `odx lint`.
@@ -708,7 +746,7 @@ impl Command {
             Self::Promote(_) => "promote",
             Self::Env(_) => "env",
             Self::Bot(_) => "bot",
-            Self::Sync => "sync",
+            Self::Sync(_) => "sync",
             Self::Daemon(_) => "daemon",
             Self::Cache(_) => "cache",
             Self::Lint(_) => "lint",
@@ -727,7 +765,7 @@ impl Command {
             Self::Lock(_) | Self::Verify(_) => 4,
             Self::Vendor(_) | Self::Build(_) | Self::Stats(_) | Self::Sniff(_) => 5,
             Self::Dev(_)
-            | Self::Sync
+            | Self::Sync(_)
             | Self::Daemon(_)
             | Self::Cache(_)
             | Self::Doctor

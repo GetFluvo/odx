@@ -6,6 +6,7 @@
 
 use std::fmt::Write as _;
 use std::io::{self, Write};
+use std::path::Path;
 
 use odx_config::Problem;
 use odx_core::system::OsRunner;
@@ -16,12 +17,14 @@ pub(crate) mod auth;
 pub(crate) mod autoupdate;
 pub(crate) mod build;
 pub(crate) mod compat;
+pub(crate) mod daemon;
 pub(crate) mod dev;
 pub(crate) mod doctor;
 pub(crate) mod edit;
 pub(crate) mod hooks;
 pub(crate) mod sniff;
 pub(crate) mod stats;
+pub(crate) mod sync;
 pub(crate) mod vendor;
 pub(crate) mod verify;
 
@@ -36,6 +39,35 @@ pub(crate) fn run_checked(invocation: &Invocation, what: &str) -> Result<(), Str
         |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
     );
     Err(format!("{what} failed: {detail}"))
+}
+
+/// Bytes under `dir`.
+pub(crate) fn size(dir: &Path) -> u64 {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => size(&entry.path()),
+            _ => entry.metadata().map(|m| m.len()).unwrap_or_default(),
+        })
+        .sum()
+}
+
+#[expect(clippy::cast_precision_loss, reason = "a size for people to read")]
+pub(crate) fn human(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < units.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", units.get(unit).copied().unwrap_or("TB"))
+    }
 }
 
 /// What a command produced.

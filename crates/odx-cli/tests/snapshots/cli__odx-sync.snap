@@ -2,7 +2,7 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Prefetch repositories, PR refs, index metadata and wheels into the cache
+Prefetch the repositories and PR refs of workspaces into the cache
 
 Usage: odx sync [OPTIONS]
 
@@ -10,8 +10,17 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --register
+          Register this workspace for `odx sync --all` and stop
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --unregister
+          Remove this workspace from the registry and stop
+
+      --all
+          Sync every registered workspace
 
   -j, --jobs <N>
           Override the number of parallel jobs
@@ -19,8 +28,14 @@ Options:
       --offline
           Serve forge and index data from the cache only
 
+      --workspace <DIR>
+          Sync these workspaces (default: the one here)
+
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --max-duration <DURATION>
+          Stop starting new workspaces after this long (default: `[sync] max_duration`, else 20m)
 
       --no-refresh
           Use cached data even when stale

@@ -3,6 +3,8 @@
 //! This crate is the `odx` binary. [`run`] parses the command line and
 //! dispatches to the library crates; `main` only wires it to the process.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 pub mod cli;
 mod cmd;
 
@@ -13,7 +15,7 @@ use std::path::{Path, PathBuf};
 use clap::{CommandFactory, Parser};
 use odx_core::{Env, Exit, FileSystem};
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, DaemonCommand};
 
 /// What a command needs from its environment, so tests can supply fakes.
 #[derive(Debug)]
@@ -114,6 +116,14 @@ fn execute(
         Command::Lock(args) => cmd::aggregate::run_lock(args, &cli.global, ctx).emit(out, err),
         Command::Verify(args) => cmd::verify::run_verify(args, &cli.global, ctx).emit(out, err),
         Command::Auth(command) => cmd::auth::run_auth(command, &cli.global, ctx).emit(out, err),
+        Command::Sync(args) => cmd::sync::run_sync(args, &cli.global, ctx).emit(out, err),
+        Command::Cache(command) => cmd::sync::run_cache(command, &cli.global, ctx).emit(out, err),
+        Command::Daemon(DaemonCommand::Run { interval }) => {
+            cmd::daemon::run_forever(interval.as_ref(), &cli.global, ctx, out, err)
+        }
+        Command::Daemon(command) => {
+            cmd::daemon::run_daemon(command, &cli.global, ctx).emit(out, err)
+        }
         Command::Doctor => cmd::doctor::run_doctor(&cli.global, ctx).emit(out, err),
         Command::Dev(args) => cmd::dev::run_dev(args, &cli.global, ctx).emit(out, err),
         Command::Build(args) => cmd::build::run_build(args, &cli.global, ctx).emit(out, err),
