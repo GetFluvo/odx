@@ -30,11 +30,11 @@ pub(crate) fn run_port(args: &PortArgs, global: &GlobalArgs, ctx: &Context<'_>) 
     port(args, global, ctx).unwrap_or_else(|report| report)
 }
 
-fn usage(message: String) -> Report {
+pub(crate) fn usage(message: String) -> Report {
     Report::error(Exit::Usage, message)
 }
 
-fn failed(message: String) -> Report {
+pub(crate) fn failed(message: String) -> Report {
     Report::error(Exit::Failure, message)
 }
 
@@ -104,10 +104,8 @@ fn port(args: &PortArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
             _,
             _,
         ) => return add_blacklist(&tree, addon, entry, reason),
-        (Some(PortCommand::Sweep { .. }), _, _) => {
-            return Err(usage(
-                "odx port sweep: not implemented yet (roadmap phase 8)".to_owned(),
-            ));
+        (Some(PortCommand::Sweep(sweep)), _, _) => {
+            return super::sweep::run_sweep(sweep, global, ctx, &tree);
         }
         (None, _, _) => {
             return Err(usage(
@@ -412,6 +410,26 @@ fn pr_plan(ctx: &Context<'_>, pr: &str, options: &PortOptions) -> Result<PortPla
     })
 }
 
+/// `<owner>/<repo>` of `remote`, for blacklist keys.
+pub(crate) fn repository(ctx: &Context<'_>, remote: &str) -> String {
+    let url = output_of(&git(ctx).args(["remote", "get-url", remote])).unwrap_or_default();
+    forge_repo(ctx, remote).map_or_else(|| repository_name(&url), |repo| repo.path)
+}
+
+/// How commits are classified: `[tool.odx.port]` of a project around the
+/// clone, if any.
+pub(crate) fn settings(ctx: &Context<'_>) -> Result<Settings, Report> {
+    let project = odx_config::find_pyproject(ctx.fs, &ctx.dir).ok();
+    let port = project
+        .as_ref()
+        .and_then(|project| project.config.port.as_ref());
+    Settings::new(
+        port.and_then(|port| port.migration_commit_patterns.as_deref()),
+        port.and_then(|port| port.repo_wide_threshold),
+    )
+    .map_err(usage)
+}
+
 /// The plan for `odx port addon`, after writing what the analysis found to
 /// `out`; `None` when nothing is portable.
 fn addon_plan(
@@ -437,9 +455,7 @@ fn addon_plan(
         ],
     )
     .map_err(failed)?;
-    let url = output_of(&git(ctx).args(["remote", "get-url", &remote])).unwrap_or_default();
-    let repository =
-        forge_repo(ctx, &remote).map_or_else(|| repository_name(&url), |repo| repo.path);
+    let repository = repository(ctx, &remote);
     let runner = OsRunner;
     let repo = Repo::new(&runner, &ctx.dir);
     let blacklist = repo
@@ -454,16 +470,7 @@ fn addon_plan(
         repository: &repository,
         blacklist: &blacklist,
     };
-    // `[tool.odx.port]` of a project around the clone, if any.
-    let project = odx_config::find_pyproject(ctx.fs, &ctx.dir).ok();
-    let port = project
-        .as_ref()
-        .and_then(|project| project.config.port.as_ref());
-    let settings = Settings::new(
-        port.and_then(|port| port.migration_commit_patterns.as_deref()),
-        port.and_then(|port| port.repo_wide_threshold),
-    )
-    .map_err(usage)?;
+    let settings = settings(ctx)?;
     // Both branches were just fetched: git reads them.
     let groups = analyse(&repo, &query, &settings).unwrap_or_default();
     let portable: Vec<&Group> = groups

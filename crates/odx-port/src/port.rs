@@ -129,6 +129,28 @@ impl Worktree<'_> {
         self.port_fixes(&state, tools)
     }
 
+    /// Fetch series `to` from `remote` and check out a new branch `branch`
+    /// from it.
+    ///
+    /// # Errors
+    ///
+    /// When a port or migration is in progress, the worktree has
+    /// uncommitted changes, the series cannot be fetched, or the branch
+    /// cannot be created.
+    pub fn branch_from(&self, remote: &str, to: &str, branch: &str) -> Result<(), String> {
+        if self.port_state().is_some() || self.state().is_some() {
+            return Err(format!(
+                "a port or migration is in progress: finish it with `{PORT} --continue` or `{PORT} --abort` first"
+            ));
+        }
+        self.clean()?;
+        let target = format!("refs/remotes/{remote}/{to}");
+        self.fetch(remote, &[format!("+refs/heads/{to}:{target}")])?;
+        self.git(&["switch", "--quiet", "--no-track", "-c", branch, &target])
+            .map(drop)
+            .map_err(|e| format!("cannot create branch {branch}: {e}"))
+    }
+
     /// Add `entries` (key and reason) to `addon`'s oca-port blacklist in
     /// the worktree, written as oca-port writes it, and commit only that
     /// file as `[FW] <addon>: blacklist <n> port suggestion(s)`; the
@@ -513,17 +535,57 @@ mod tests {
             git(&work, &["cherry-pick", "--skip"]);
             let _ = Worktree::new(runner, &work).port_resume(&tools());
         };
+        let branching = |runner: &Faulty| {
+            let (_tmp, work, _fix) = fixture();
+            let _ = Worktree::new(runner, &work).branch_from("origin", "19.0", "19.0-sweep");
+        };
         let listing = |runner: &Faulty| {
             let (_tmp, work, _fix) = fixture();
             let entry = [("OCA/x#1".to_owned(), "r".to_owned())];
             let _ = Worktree::new(runner, &work).blacklist("my_addon", &entry);
         };
-        for scenario in [&start as &dyn Fn(&Faulty), &abort, &resume, &listing] {
+        for scenario in [
+            &start as &dyn Fn(&Faulty),
+            &abort,
+            &resume,
+            &listing,
+            &branching,
+        ] {
             scenario(&Faulty::new(0, true));
             for fail_at in 0..calls(scenario) {
                 scenario(&Faulty::new(fail_at, false));
             }
         }
+    }
+
+    #[test]
+    fn branches_from_the_target() {
+        let (_tmp, work, _fix) = fixture();
+        let tree = Worktree::new(&OsRunner, &work);
+        tree.branch_from("origin", "19.0", "19.0-sweep").unwrap();
+        assert_eq!(git(&work, &["branch", "--show-current"]), "19.0-sweep");
+        let error = tree
+            .branch_from("origin", "19.0", "19.0-sweep")
+            .unwrap_err();
+        assert!(
+            error.starts_with("cannot create branch 19.0-sweep: "),
+            "{error}"
+        );
+        write(&work.join("my_addon/data.xml"), "x\n");
+        assert!(
+            tree.branch_from("origin", "19.0", "b")
+                .unwrap_err()
+                .contains("uncommitted")
+        );
+        git(&work, &["checkout", "--quiet", "--", "."]);
+        let (_conflict_tmp, other, other_fix) = conflicting();
+        let busy = Worktree::new(&OsRunner, &other);
+        halted(busy.port(plan(&other_fix), &tools()));
+        assert!(
+            busy.branch_from("origin", "19.0", "b")
+                .unwrap_err()
+                .contains("in progress")
+        );
     }
 
     #[test]

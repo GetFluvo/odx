@@ -2,7 +2,7 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Sweep every addon of a repository against older series (maintainer mode)
+Check every addon of the target series against older series (maintainer mode): portable pull requests and false positives (migration commits, repo-wide changes, translations)
 
 Usage: odx port sweep [OPTIONS] --to <SERIES> --from <SERIES>
 
@@ -17,13 +17,16 @@ Options:
           The pyproject.toml or repos.yaml to use
 
       --from <SERIES>
-          Source series; repeatable
+          Source series, comma-separated or repeated
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
-      --write-blacklist
-          Write oca-port blacklist files for the false positives
+      --remote <NAME>
+          The remote the series come from [default: `upstream` when it exists, else `origin`]
+
+      --addon <GLOB>
+          Only the addons matching this glob
 
       --offline
           Serve forge and index data from the cache only
@@ -31,8 +34,17 @@ Options:
       --fresh
           Ignore cached data; refresh everything before answering
 
+      --write-blacklist
+          Blacklist the false positives (oca-port files) in commits on the branch `<to>-sweep`
+
       --no-refresh
           Use cached data even when stale
+
+      --open-pr
+          Then push the branch and open a draft pull request
+
+      --push-remote <NAME>
+          With --open-pr: push to this remote instead of the target or your fork
 
       --refresh-index
           Rebuild the addon index for the series involved

@@ -215,11 +215,6 @@ fn usage_and_refusals() {
     };
     refused(&["port"], Exit::Usage, "name what to port");
     refused(
-        &["port", "sweep", "--to", "19.0", "--from", "18.0"],
-        Exit::Usage,
-        "not implemented yet",
-    );
-    refused(
         &["port", "pr", "x#1", "--to", "19.0"],
         Exit::Usage,
         "<owner>/<repo>#<number>",
@@ -338,6 +333,244 @@ fn blacklist_entries() {
     }
 }
 
+#[test]
+fn sweeps_report_and_blacklist() {
+    let (tmp, _up, work, _fix) = fixture();
+    let sweep = ["port", "sweep", "--to", "19.0", "--from", "18.0"];
+    let (exit, out, err) = odx(&work, &sweep);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let name = tmp
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        out,
+        format!(
+            "my_addon\n  18.0  translations: orphaned_commits Translated using Weblate (Dutch)\n  \
+             18.0  portable: {name}/up#5 [FIX] my_addon: data\n\
+             1 portable, 1 false positive(s) from 18.0 against 19.0\n\
+             port them with `odx port addon <addon> --from <series> --to 19.0`\n"
+        )
+    );
+    let mut none = sweep.to_vec();
+    none.extend_from_slice(&["--addon", "other*", "--write-blacklist"]);
+    let (_, out, _) = odx(&work, &none);
+    assert_eq!(
+        out,
+        "0 portable, 0 false positive(s) from 18.0 against 19.0\n"
+    );
+    assert_eq!(git(&work, &["branch", "--show-current"]), "19.0");
+
+    // The false positives blacklisted on a branch of the target.
+    let mut write = vec!["--json"];
+    write.extend_from_slice(&sweep);
+    write.push("--write-blacklist");
+    let (exit, out, err) = odx(&work, &write);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["branch"], "19.0-sweep");
+    assert_eq!(
+        value["commits"],
+        serde_json::json!(["[FW] my_addon: blacklist 1 port suggestion(s)"])
+    );
+    assert_eq!(
+        value["addons"][0]["reason"],
+        "translations only; Weblate syncs them"
+    );
+    let text = git(
+        &work,
+        &["show", "19.0-sweep:.oca/oca-port/blacklist/my_addon.json"],
+    );
+    assert!(text.contains("orphaned_commits"), "{text}");
+    git(&work, &["checkout", "--quiet", "19.0"]);
+    let (exit, _, err) = odx(&work, &write[1..]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("cannot create branch 19.0-sweep"), "{err}");
+
+    // Once upstream, the blacklist hides them; a text run shows it.
+    git(&work, &["push", "--quiet", "origin", "19.0-sweep:19.0"]);
+    git(&work, &["branch", "-D", "19.0-sweep"]);
+    let mut text_write = sweep.to_vec();
+    text_write.push("--write-blacklist");
+    let (_, out, _) = odx(&work, &text_write);
+    assert!(out.contains("18.0  blacklisted: orphaned_commits"), "{out}");
+    assert!(out.contains("1 portable, 0 false positive(s)"), "{out}");
+    git(
+        &work,
+        &["commit", "--quiet", "--allow-empty", "-m", "unpushed"],
+    );
+
+    // Refusals.
+    for (args, exit, expected) in [
+        (
+            &["--from", "19.0"][..],
+            Exit::Usage,
+            "--from 19.0 is not older than --to 19.0",
+        ),
+        (
+            &["--from", "17.0"][..],
+            Exit::Failure,
+            "cannot fetch from origin",
+        ),
+        (
+            &[
+                "--from",
+                "18.0",
+                "--write-blacklist",
+                "--open-pr",
+                "--addon",
+                "my_*",
+            ][..],
+            Exit::Success,
+            "",
+        ),
+    ] {
+        let mut argv = vec!["port", "sweep", "--to", "19.0"];
+        argv.extend_from_slice(args);
+        let (code, _, err) = odx(&work, &argv);
+        assert_eq!(code, exit, "{err}");
+        assert!(err.contains(expected), "{err}");
+    }
+}
+
+#[test]
+fn sweeps_across_series_and_their_failures() {
+    let (_tmp, up, work, _fix) = fixture();
+    // 17.0 has its own translation update.
+    let first = git(&up, &["rev-list", "--max-parents=0", "18.0"]);
+    git(&up, &["checkout", "--quiet", "-b", "17.0", &first]);
+    write(&up.join("my_addon/i18n/de.po"), "msgid \"\"\n");
+    commit(&up, "Weblate", "Translated using Weblate (German)");
+    git(&up, &["checkout", "--quiet", "--detach"]);
+    let (exit, out, err) = odx(
+        &work,
+        &[
+            "port",
+            "sweep",
+            "--to",
+            "19.0",
+            "--from",
+            "18.0,17.0",
+            "--write-blacklist",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.contains("  17.0  translations: orphaned_commits"),
+        "{out}"
+    );
+    assert!(
+        out.contains("1 portable, 2 false positive(s) from 17.0, 18.0 against 19.0"),
+        "{out}"
+    );
+    // One entry per key and addon, whatever the series.
+    let text = git(
+        &work,
+        &["show", "HEAD:.oca/oca-port/blacklist/my_addon.json"],
+    );
+    assert_eq!(text.matches("orphaned_commits").count(), 1, "{text}");
+    git(&work, &["checkout", "--quiet", "19.0"]);
+    git(&work, &["branch", "-D", "19.0-sweep"]);
+
+    // The project's classification settings apply.
+    write(
+        &work.join("pyproject.toml"),
+        "[tool.odx]\nodoo_version = \"19.0\"\n\n[tool.odx.port]\nmigration_commit_patterns = [\"(\"]\n",
+    );
+    let sweep = [
+        "port",
+        "sweep",
+        "--to",
+        "19.0",
+        "--from",
+        "18.0",
+        "--write-blacklist",
+    ];
+    let (exit, _, err) = odx(&work, &sweep);
+    assert_eq!(exit, Exit::Usage, "{err}");
+    std::fs::remove_file(work.join("pyproject.toml")).unwrap();
+
+    // A target where the blacklist cannot be written.
+    std::fs::remove_dir_all(work.join(".oca")).unwrap();
+    write(&work.join(".oca"), "");
+    git(&work, &["add", "-A"]);
+    git(&work, &["commit", "--quiet", "-m", "no blacklists"]);
+    git(&work, &["push", "--quiet", "origin", "HEAD:19.0"]);
+    let (exit, _, err) = odx(&work, &sweep);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("blacklist"), "{err}");
+}
+
+#[test]
+fn sweeps_open_their_pull_request() {
+    let (_tmp, _up, work, _fix) = fixture();
+    // Off the forges, the blacklist is written but the pull request fails.
+    let (exit, out, err) = odx(
+        &work,
+        &[
+            "port",
+            "sweep",
+            "--to",
+            "19.0",
+            "--from",
+            "18.0",
+            "--write-blacklist",
+            "--open-pr",
+        ],
+    );
+    assert_eq!(exit, Exit::Failure, "{out}");
+    assert!(err.contains("the remote origin is not on a forge"), "{err}");
+    let forge = Forge::new();
+    let (ok, out, err) = forge.odx(
+        NO_ODL,
+        &[
+            "port",
+            "sweep",
+            "--to",
+            "19.0",
+            "--from",
+            "18.0",
+            "--write-blacklist",
+            "--open-pr",
+        ],
+    );
+    assert!(ok, "{err}");
+    assert!(
+        out.ends_with(&format!(
+            "blacklisted on branch 19.0-sweep:\n  [FW] my_addon: blacklist 1 port suggestion(s)\n\
+             pushed to origin\nopened {}/OCA/repo/pull/6 as a draft\n",
+            forge.api
+        )),
+        "{out}"
+    );
+    git(
+        &forge.up,
+        &["rev-parse", "--verify", "--quiet", "19.0-sweep"],
+    );
+    // A pull request the forge refuses.
+    git(&forge.work, &["checkout", "--quiet", "19.0"]);
+    git(&forge.work, &["branch", "-D", "19.0-sweep"]);
+    git(&forge.up, &["branch", "-D", "19.0-sweep"]);
+    forge.route("POST /api/v3/repos/OCA/repo/pulls", 422, "{}");
+    let (ok, _, err) = forge.odx(
+        NO_ODL,
+        &[
+            "port",
+            "sweep",
+            "--to",
+            "19.0",
+            "--from",
+            "18.0",
+            "--write-blacklist",
+            "--open-pr",
+        ],
+    );
+    assert!(!ok);
+    assert!(err.contains("answered HTTP 422"), "{err}");
+}
+
 type Routes = Arc<Mutex<HashMap<String, (u16, String)>>>;
 
 /// A server on localhost answering from `routes` by method and path, or
@@ -382,6 +615,10 @@ fn serve(routes: &Routes) -> String {
 
 /// The clone with its remote on a local forge that knows pull request #5.
 struct Forge {
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "the directory is only read on Unix")
+    )]
     tmp: tempfile::TempDir,
     up: PathBuf,
     work: PathBuf,
@@ -497,6 +734,17 @@ fn ports_a_pull_request_and_proposes_it() {
     let value: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(value["pull_request"]["number"], 6);
     assert_eq!(value["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn addons_on_a_forge_use_its_repository_names() {
+    let forge = Forge::new();
+    let (ok, out, err) = forge.odx(NO_ODL, ADDON);
+    assert!(ok, "{err}");
+    assert!(
+        out.contains("port: OCA/repo#5 [FIX] my_addon: data\n"),
+        "{out}"
+    );
 }
 
 #[test]
