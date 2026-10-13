@@ -223,6 +223,17 @@ fn packages(
     problems: &mut Vec<String>,
 ) {
     let (specs, _) = package_specs(doc, &prepared.project.config, &lock.packages);
+    // Packages switched to a local clone by `odx dev <package>`.
+    let developing: BTreeSet<String> = ctx
+        .fs
+        .read(&prepared.project.root.join(".odx/develop.toml"))
+        .ok()
+        .and_then(|bytes| odx_dev::DevelopState::parse(&String::from_utf8_lossy(&bytes)).ok())
+        .map(|state| state.packages.into_keys().collect())
+        .unwrap_or_default();
+    problems.extend(developing.iter().map(|dist| {
+        format!("{dist}: in develop mode (`odx dev`); run `odx dev --restore {dist}` before locking or deploying")
+    }));
     for spec in specs
         .iter()
         .filter(|spec| locked_package(spec, &lock.packages).is_none())
@@ -239,7 +250,10 @@ fn packages(
     problems.extend(
         lock.packages
             .keys()
-            .filter(|dist| !names.contains(&normalize_name(dist)))
+            .filter(|dist| {
+                !names.contains(&normalize_name(dist))
+                    && !developing.contains(&normalize_name(dist))
+            })
             .map(|dist| format!("{dist}: package locked but no longer configured; run `odx lock`")),
     );
     problems.extend(

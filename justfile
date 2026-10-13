@@ -2,6 +2,9 @@
 
 msrv := "1.97"
 
+# Tests that run uv keep its cache inside target/, away from the user's cache.
+export UV_CACHE_DIR := justfile_directory() / "target" / "uv-cache"
+
 # List the recipes.
 default:
     @just --list
@@ -77,7 +80,7 @@ commits:
 
 # Both distribution paths: crates.io and PyPI wheels.
 package:
-    cargo publish --dry-run --allow-dirty -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p git-aggregate-rs -p odx-cli
+    cargo publish --dry-run --allow-dirty -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p odx-dev -p git-aggregate-rs -p odx-cli
     uvx maturin build --release
     uvx maturin build --release -m crates/git-aggregate-rs/Cargo.toml
 

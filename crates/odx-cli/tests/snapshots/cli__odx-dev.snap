@@ -15,7 +15,10 @@ Options:
           Run as if started in DIR
 
       --restore
-          Restore the package to its locked version
+          Put the locked source back (one package, or every one in develop mode)
+
+      --branch <NAME>
+          Branch to create or switch to in the package's clone
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
@@ -23,11 +26,23 @@ Options:
   -j, --jobs <N>
           Override the number of parallel jobs
 
+      --no-editable
+          Do not install addons in editable mode
+
       --offline
           Serve forge and index data from the cache only
 
+      --venv <DIR>
+          The virtual environment for editable installs (default: `[tool.odx.dev] venv`, else `.venv`)
+
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --print-addons-path
+          Only print the addons path
+
+      --dry-run
+          Show what would change without changing anything
 
       --no-refresh
           Use cached data even when stale

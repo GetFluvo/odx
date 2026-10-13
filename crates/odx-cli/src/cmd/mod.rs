@@ -15,6 +15,7 @@ pub(crate) mod aggregate;
 pub(crate) mod autoupdate;
 pub(crate) mod build;
 pub(crate) mod compat;
+pub(crate) mod dev;
 pub(crate) mod edit;
 pub(crate) mod hooks;
 pub(crate) mod sniff;

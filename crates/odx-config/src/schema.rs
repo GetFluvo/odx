@@ -745,7 +745,7 @@ pub enum BotAction {
 }
 
 /// `[tool.odx.dev]`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dev {
     /// Virtual environment directory.

@@ -579,6 +579,35 @@ every repository it builds; `[tool.odx.sniff] fail_on_new = true` (or
 `--fail-on-new`) turns any script into a failure. The commits must be in the
 cache, which `odx aggregate` and `odx lock` take care of.
 
+## Development workspace
+
+```console
+$ odx dev                                   # addons path, odoo.conf, editable installs
+$ odx dev --print-addons-path               # just the addons path
+$ odx dev odoo-addon-pos_vouchers --branch fix-rounding
+$ odx dev --restore                         # every package back to its locked source
+```
+
+`odx dev` collects every directory that holds addons, in the order Odoo
+should search them: the project's own addons, packages in develop mode,
+the aggregated repositories, then the dependency groups. It writes the list
+to `[tool.odx.dev] addons_path_file` (default `.odx/addons-path`), prints
+it, and sets `addons_path` in the `[options]` section of `odoo_conf` when
+configured. Addons with their own `pyproject.toml` (project addons and the
+selected addons of aggregated repositories) are installed in editable mode
+into `venv` (default `.venv`) with `uv pip install -e`; `--no-editable` or
+`editable = false` skips that, `--dry-run` only shows what would happen.
+
+`odx dev <package>` switches a locked package to a local clone: the locked
+commit is cloned from the cache into `dev_dir` (default `.src`) with the
+remotes `upstream` and, when configured, `mirror`; `--branch` creates or
+switches to a branch. The package's `[tool.uv.sources]` entry then points
+at the clone (`{ path = ..., editable = true }`), and a direct reference in
+a group becomes the plain requirement; run `uv sync` to install it. `odx
+dev --restore [<package>]` puts `pyproject.toml` back exactly as it was
+(the clone stays). While a package is in develop mode, `odx verify` fails,
+so it cannot be locked or deployed by accident.
+
 ## Lines of code
 
 ```console
