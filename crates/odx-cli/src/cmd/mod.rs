@@ -26,6 +26,7 @@ pub(crate) mod hooks;
 pub(crate) mod sniff;
 pub(crate) mod stats;
 pub(crate) mod status;
+pub(crate) mod suggest;
 pub(crate) mod sync;
 pub(crate) mod upgrade;
 pub(crate) mod vendor;

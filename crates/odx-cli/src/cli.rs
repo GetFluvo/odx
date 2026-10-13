@@ -436,8 +436,17 @@ pub struct SuggestArgs {
     /// Environment whose series is used; defaults to all.
     #[arg(long, value_name = "ENV")]
     pub env: Option<String>,
-    /// Include suggestions suppressed by verdicts and mutes.
-    #[arg(long)]
+    /// Target series instead of the environments' (for example `18.0`).
+    #[arg(long, value_name = "SERIES", conflicts_with = "env")]
+    pub series: Option<String>,
+    /// Series to look on (default: `[tool.odx.port] default_from`, else the series below and above).
+    #[arg(long, value_name = "SERIES", value_delimiter = ',')]
+    pub from: Vec<String>,
+    /// Only addons matching this glob.
+    #[arg(long, value_name = "GLOB")]
+    pub addon: Option<String>,
+    /// Include suggestions suppressed by blacklists, verdicts and mutes.
+    #[arg(long, visible_alias = "show-suppressed")]
     pub show_muted: bool,
 }
 
