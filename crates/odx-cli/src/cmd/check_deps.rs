@@ -133,7 +133,13 @@ fn untracked(root: &Path, own: &[Scanned]) -> Vec<String> {
 }
 
 fn relative(root: &Path, dir: &Path) -> String {
-    dir.strip_prefix(root).unwrap_or(dir).display().to_string()
+    // Configured directories may be written with `/` on Windows too.
+    dir.strip_prefix(root)
+        .unwrap_or(dir)
+        .components()
+        .collect::<PathBuf>()
+        .display()
+        .to_string()
 }
 
 fn scan(dir: PathBuf) -> Scanned {
