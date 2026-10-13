@@ -185,6 +185,9 @@ pub struct AggregateArgs {
     /// Discard local changes in working trees and replace directories odx does not manage.
     #[arg(long)]
     pub force: bool,
+    /// Fetch locked commits from the git bundles `odx lock --bundle` wrote here first.
+    #[arg(long, value_name = "DIR")]
+    pub bundle_dir: Option<PathBuf>,
     /// Fail instead of resolving anything odx.lock does not pin; never write odx.lock.
     #[arg(long, conflicts_with = "update")]
     pub locked: bool,
@@ -215,6 +218,9 @@ pub struct LockArgs {
     /// Adopt this pull request's new head even when its CI is not green (`<repo>#<pr>`).
     #[arg(long, value_name = "REPO#PR")]
     pub follow: Vec<String>,
+    /// Also write one git bundle per repository with its locked commits into DIR.
+    #[arg(long, value_name = "DIR")]
+    pub bundle: Option<PathBuf>,
     /// Do not run `uv lock` after rewriting package sources.
     #[arg(long)]
     pub no_uv: bool,

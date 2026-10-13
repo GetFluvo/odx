@@ -37,23 +37,26 @@ Options:
       --fresh
           Ignore cached data; refresh everything before answering
 
+      --bundle <DIR>
+          Also write one git bundle per repository with its locked commits into DIR
+
       --no-refresh
           Use cached data even when stale
 
       --no-uv
           Do not run `uv lock` after rewriting package sources
 
-      --no-push
-          Do not push locked commits to the configured vault
-
       --refresh-index
           Rebuild the addon index for the series involved
 
-      --auto-update
-          Apply the configured lock auto-update policy to PyPI packages
-
       --json
           Machine-readable output on stdout
+
+      --no-push
+          Do not push locked commits to the configured vault
+
+      --auto-update
+          Apply the configured lock auto-update policy to PyPI packages
 
   -v, --verbose...
           Increase log verbosity (repeatable)

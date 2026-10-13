@@ -183,6 +183,8 @@ fn packages_and_the_core_are_locked() {
         before,
         "nothing to point at without a vault"
     );
+    let (_, out, _) = project.run(&["lock", "--bundle", "bundles"]);
+    assert!(out.contains("bundled 2 commits of "), "{out}");
 
     // Pinned until --update.
     let moved = project.push_pr("pr2");
@@ -455,4 +457,49 @@ fn verify_checks_packages_and_uv_lock() {
         err.contains("odoo-addon-fixed: package locked but no longer configured"),
         "{err}"
     );
+}
+
+/// With the real `uv`: the rewritten references resolve from the vault and
+/// `odx verify` agrees with the uv.lock uv wrote. Needs `uv` on `PATH`; CI
+/// runs it in the parity job.
+#[test]
+#[ignore = "needs uv; CI runs it with --ignored"]
+fn real_uv_locks_the_vaulted_commits() {
+    let mut project = Project::new();
+    for (addon, dist) in [("pos_x", "odoo-addon-pos_x"), ("other", "odoo-addon-other")] {
+        std::fs::write(
+            project.up.join(addon).join("pyproject.toml"),
+            format!("[project]\nname = \"{dist}\"\nversion = \"17.0.1.0.0\"\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n"),
+        )
+        .unwrap();
+    }
+    git(&project.up, &["add", "-A"]);
+    git(&project.up, &["commit", "--quiet", "-m", "packaging"]);
+    git(&project.up, &["tag", "--force", "v1"]);
+    project.push_pr("pr-packaged");
+    project.write(true, "");
+    // Only the packages uv can build: drop the test-only direct references.
+    let text = project
+        .read("pyproject.toml")
+        .lines()
+        .filter(|line| {
+            !line.contains("norev") && !line.contains("branchy") && !line.contains("fixed")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(project.root.join("pyproject.toml"), text + "\n").unwrap();
+    project.env = MapEnv::default().with(
+        "ODX_CACHE_DIR",
+        project
+            .root
+            .parent()
+            .unwrap()
+            .join("cache")
+            .display()
+            .to_string(),
+    );
+    let (exit, _, err) = project.run(&["lock"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let (exit, out, err) = project.run(&["verify"]);
+    assert_eq!(exit, Exit::Success, "{out}{err}");
 }

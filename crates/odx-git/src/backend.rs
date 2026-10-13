@@ -98,6 +98,34 @@ impl SystemGit {
 }
 
 impl SystemGit {
+    /// Apply `git update-ref --stdin` instructions to the repository at
+    /// `dir`, atomically.
+    ///
+    /// # Errors
+    ///
+    /// When git refuses an update.
+    pub fn update_refs(&self, dir: &Path, instructions: &str) -> Result<(), GitError> {
+        let invocation = self
+            .git(Some(dir))
+            .args(["update-ref", "--stdin"])
+            .stdin(instructions);
+        self.run("update-ref", &invocation).map(drop)
+    }
+
+    /// Write a git bundle of `refs` of the repository at `dir` to `file`.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot write it.
+    pub fn bundle(&self, dir: &Path, file: &Path, refs: &[String]) -> Result<(), GitError> {
+        let invocation = self
+            .git(Some(dir))
+            .args(["bundle", "create", "--quiet"])
+            .arg(file.as_os_str())
+            .args(refs);
+        self.run("bundle", &invocation).map(drop)
+    }
+
     /// Push `refspecs` from the repository at `dir` to `url`, atomically
     /// and never forced: a ref that exists with another value is an error.
     ///

@@ -28,7 +28,7 @@ use odx_core::{Env, Exit, Invocation, ProcessRunner, repo_key};
 use odx_forge::{CachedHttp, CiState, ForgeClient, ForgeKind, RepoUrl, ReqwestHttp, Visibility};
 use odx_git::{
     Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
-    Outcome, StepOutcome, SystemGit, VaultRefs, Via, url_hash, vault,
+    Outcome, StepOutcome, SystemGit, VaultRefs, Via, bundle, url_hash, vault,
 };
 use std::collections::BTreeMap;
 use toml_edit::DocumentMut;
@@ -160,6 +160,7 @@ fn build(
     options: &BuildOptions,
     merger: Option<&Arc<Merger>>,
     prefer_mirror: bool,
+    bundles: Option<&Path>,
 ) -> Built {
     let vault = prepared
         .project
@@ -170,6 +171,11 @@ fn build(
     let mut plans = fetch_plans(planned, vault.filter(|_| prefer_mirror), vault);
     for plan in &mut plans {
         plan.plan.clone = prepared.clones.find(&plan.plan.url).cloned();
+        // A bundle of the locked commits comes before any network.
+        let bundle = bundles.map(|dir| dir.join(format!("{}.bundle", url_hash(&plan.plan.url))));
+        if let Some(bundle) = bundle.filter(|bundle| bundle.is_file()) {
+            plan.plan.mirror = Some(bundle.display().to_string());
+        }
     }
     let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::new(OsRunner)));
     let aggregated = std::cell::RefCell::new(Vec::new());
@@ -354,6 +360,10 @@ fn aggregate(
         &options,
         (!args.fetch_only).then_some(&merger),
         args.prefer_mirror || in_ci(ctx.env),
+        args.bundle_dir
+            .as_ref()
+            .map(|dir| ctx.dir.join(dir))
+            .as_deref(),
     );
     let mut summary = Summary::new(&built, &planned, &prepared.project.root, false);
     summary.current = current
@@ -413,7 +423,7 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     let mut warnings = prepared.project.warnings.clone();
     let kept = if args.update && prepared.lock.is_some() {
         // Resolve the heads first: the guard rail decides which to adopt.
-        let resolved = build(&prepared, &planned, &options, None, true);
+        let resolved = build(&prepared, &planned, &options, None, true, None);
         let fetched: Vec<(String, Vec<Fetched>)> = resolved
             .outcomes
             .iter()
@@ -431,7 +441,7 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     } else {
         Vec::new()
     };
-    let built = build(&prepared, &planned, &options, Some(&merger), true);
+    let built = build(&prepared, &planned, &options, Some(&merger), true, None);
     let mut summary = Summary::new(&built, &planned, &prepared.project.root, true);
     let (mut entries, failures) = lock_entries(&planned, &built, &merger);
     record_kept(&mut entries, &kept, prepared.locked());
@@ -476,6 +486,9 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
                 )?;
             }
         }
+        if let Some(dir) = &args.bundle {
+            bundle_lock(&prepared, &lock, &ctx.dir.join(dir), &mut summary);
+        }
         if previous != lock {
             write_lock(ctx, &prepared, &lock)?;
         }
@@ -518,6 +531,46 @@ fn migrate(ctx: &Context<'_>) -> Result<Report, Report> {
         out: format!("rewrote {} in the current format\n", path.display()),
         ..Report::default()
     })
+}
+
+/// `odx lock --bundle`: one git bundle per repository URL with every
+/// locked commit of it, named after the URL's hash (no project or client
+/// name).
+fn bundle_lock(prepared: &Prepared, lock: &Lockfile, dir: &Path, summary: &mut Summary) {
+    let mut by_url: Vec<(String, Vec<String>)> = Vec::new();
+    let commits = lock
+        .repositories
+        .iter()
+        .flat_map(|entry| {
+            std::iter::once(&entry.base_sha)
+                .chain(entry.merges.iter().map(|m| &m.sha))
+                .map(move |sha| (&entry.url, sha))
+        })
+        .chain(
+            lock.packages
+                .values()
+                .map(|package| (&package.url, &package.sha)),
+        );
+    for (url, sha) in commits {
+        let key = repo_key(url);
+        match by_url.iter_mut().find(|(known, _)| repo_key(known) == key) {
+            Some((_, shas)) if !shas.contains(sha) => shas.push(sha.clone()),
+            Some(_) => {}
+            None => by_url.push((url.clone(), vec![sha.clone()])),
+        }
+    }
+    let git = SystemGit::new(Arc::new(OsRunner));
+    for (url, shas) in by_url {
+        let file = dir.join(format!("{}.bundle", url_hash(&url)));
+        match bundle(&git, &prepared.cache.repo_dir(&url), &shas, &file) {
+            Ok(()) => summary
+                .bundled
+                .push((url, shas.len(), file.display().to_string())),
+            Err(e) => summary
+                .failures
+                .push(format!("{url}: bundling failed: {e}")),
+        }
+    }
 }
 
 /// Build in scratch working trees inside the cache, never in the project.
@@ -1012,6 +1065,7 @@ struct Summary {
     changes: Vec<Change>,
     vaulted: Vec<(String, usize)>,
     kept: Vec<Kept>,
+    bundled: Vec<(String, usize, String)>,
     rewritten: bool,
     failures: Vec<String>,
     /// Built in scratch working trees (`odx lock`): directories are not
@@ -1058,6 +1112,7 @@ impl Summary {
             changes: Vec::new(),
             vaulted: Vec::new(),
             kept: Vec::new(),
+            bundled: Vec::new(),
             rewritten: false,
             failures: Vec::new(),
             scratch,
@@ -1145,6 +1200,9 @@ impl Summary {
                 .out
                 .push_str("pointed packages at the vault in pyproject.toml\n");
         }
+        for (url, commits, file) in &self.bundled {
+            let _ = writeln!(report.out, "bundled {commits} commits of {url} into {file}");
+        }
         for keep in &self.kept {
             let _ = writeln!(report.out, "{}", describe_kept(keep));
         }
@@ -1153,10 +1211,12 @@ impl Summary {
         }
         failures.extend(self.failures.iter().cloned());
         if !failures.is_empty() {
-            report.error = Some(format!(
-                "aggregation failed for\n  {}",
-                failures.join("\n  ")
-            ));
+            let what = if self.scratch {
+                "locking"
+            } else {
+                "aggregation"
+            };
+            report.error = Some(format!("{what} failed for\n  {}", failures.join("\n  ")));
         }
         report
     }
@@ -1241,6 +1301,12 @@ impl Summary {
             .collect();
         value.insert("kept".to_owned(), serde_json::Value::Array(kept));
         value.insert("rewritten".to_owned(), serde_json::json!(self.rewritten));
+        let bundled: Vec<serde_json::Value> = self
+            .bundled
+            .iter()
+            .map(|(url, commits, file)| serde_json::json!({ "url": url, "commits": commits, "file": file }))
+            .collect();
+        value.insert("bundled".to_owned(), serde_json::Value::Array(bundled));
         let failures = &self.failures;
         value.insert("errors".to_owned(), serde_json::json!(failures));
         serde_json::Value::Object(value)
