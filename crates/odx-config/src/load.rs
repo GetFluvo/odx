@@ -155,12 +155,16 @@ pub fn discover(
 /// [`parse_pyproject`] for a file that cannot be read or is invalid.
 pub fn find_pyproject(fs: &dyn FileSystem, start: &Path) -> Result<Project, ConfigError> {
     // `a/../b` is `b`: walking its ancestors must not pass through `a`.
-    let mut normal = PathBuf::new();
-    for part in start.components() {
-        if part == Component::ParentDir {
-            normal.pop();
-        } else {
-            normal.push(part);
+    // Other paths stay as given, separators included.
+    let mut normal = start.to_path_buf();
+    if start.components().any(|part| part == Component::ParentDir) {
+        normal.clear();
+        for part in start.components() {
+            if part == Component::ParentDir {
+                normal.pop();
+            } else {
+                normal.push(part);
+            }
         }
     }
     for dir in normal.ancestors() {
