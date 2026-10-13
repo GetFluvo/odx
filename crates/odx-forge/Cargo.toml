@@ -21,6 +21,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 odx-core = { workspace = true, features = ["fakes"] }
+tempfile.workspace = true
 
 [lints]
 workspace = true

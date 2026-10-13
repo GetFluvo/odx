@@ -163,7 +163,7 @@ impl<'a> ForgeClient<'a> {
     }
 
     /// The JSON at `url`; `None` when the forge answers 404.
-    fn json(
+    pub(crate) fn json(
         &self,
         url: &str,
         repo: &RepoUrl,
@@ -252,66 +252,10 @@ impl<'a> ForgeClient<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{Scripted, reply};
     use odx_core::Output;
     use odx_core::fake::{MapEnv, ScriptedRunner};
     use std::sync::Mutex;
-
-    type Seen = Vec<(String, Vec<(String, String)>)>;
-
-    /// Answers requests from a script, recording what was asked.
-    #[derive(Debug, Default)]
-    struct Scripted {
-        answers: Mutex<Vec<Result<HttpResponse, ForgeError>>>,
-        seen: Mutex<Seen>,
-    }
-
-    impl Scripted {
-        fn new(answers: Vec<Result<HttpResponse, ForgeError>>) -> Self {
-            let mut answers = answers;
-            answers.reverse();
-            Self {
-                answers: Mutex::new(answers),
-                seen: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn urls(&self) -> Vec<String> {
-            self.seen
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|(url, _)| url.clone())
-                .collect()
-        }
-    }
-
-    impl Http for Scripted {
-        fn get(&self, url: &str, headers: &[(&str, String)]) -> Result<HttpResponse, ForgeError> {
-            self.seen
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((
-                    url.to_owned(),
-                    headers
-                        .iter()
-                        .map(|(k, v)| ((*k).to_owned(), v.clone()))
-                        .collect(),
-                ));
-            self.answers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .pop()
-                .unwrap_or_else(|| Ok(reply(404, "")))
-        }
-    }
-
-    fn reply(status: u16, body: &str) -> HttpResponse {
-        HttpResponse {
-            status,
-            headers: Vec::new(),
-            body: body.as_bytes().to_vec(),
-        }
-    }
 
     fn limited(status: u16, headers: &[(&str, &str)]) -> HttpResponse {
         HttpResponse {

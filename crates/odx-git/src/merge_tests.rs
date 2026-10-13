@@ -694,3 +694,35 @@ fn current_worktrees_need_no_build() {
     assert!(!m.is_current(&plan.target_dir, &fx.cache, &built.tree));
     assert!(!FailOn::merger("--porcelain", 1).is_current(&plan.target_dir, &fx.cache, &built.tree));
 }
+
+#[test]
+fn changed_and_present_directories() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    git(repo, &["init", "--quiet", "--initial-branch=main"]);
+    for dir in ["pos_a", "pos_b"] {
+        fs::create_dir_all(repo.join(dir)).unwrap();
+        fs::write(repo.join(dir).join("x.py"), dir).unwrap();
+    }
+    fs::write(repo.join("README.md"), "r").unwrap();
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "--quiet", "-m", "base"]);
+    let base = git(repo, &["rev-parse", "HEAD"]);
+    fs::write(repo.join("pos_b").join("x.py"), "changed").unwrap();
+    fs::write(repo.join("pos_b").join("y.py"), "new").unwrap();
+    fs::write(repo.join("README.md"), "changed").unwrap();
+    git(repo, &["commit", "--quiet", "-am", "change"]);
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "--quiet", "-m", "add"]);
+    let head = git(repo, &["rev-parse", "HEAD"]);
+    let m = merger();
+    assert_eq!(m.changed_dirs(repo, &base, &head).unwrap(), ["pos_b"]);
+    assert_eq!(m.dirs(repo, &base).unwrap(), ["pos_a", "pos_b"]);
+    assert!(m.changed_dirs(repo, &base, &"0".repeat(40)).is_err());
+    assert!(m.dirs(repo, "nope").is_err());
+    assert!(
+        FailOn::merger("--name-only", 1)
+            .changed_dirs(repo, &base, &head)
+            .is_err()
+    );
+}

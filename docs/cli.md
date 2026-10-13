@@ -167,6 +167,38 @@ updated pos #123: 1a2b3c4d5e6f -> 6f5e4d3c2b1a (rebased (same patch))
 locked pos #456 at 0a1b2c3d4e5f
 ```
 
+### The force-push guard rail
+
+A pull request author can push a broken change at any time. `odx lock
+--update` therefore does not take a moved pull request head blindly: it asks
+the forge for the CI state of the new head (GitHub check runs and commit
+statuses, GitLab commit statuses, Gitea/Forgejo commit statuses) and applies
+`on_head_change`, set for the project or per merge:
+
+| `on_head_change` | green | pending | red | no checks |
+| --- | --- | --- | --- | --- |
+| `follow-if-green` (default) | adopt | keep the lock | keep the lock | adopt |
+| `follow` | adopt | adopt | adopt | adopt |
+| `pin` | keep the lock | keep the lock | keep the lock | keep the lock |
+
+A kept pull request stays at its locked commit, which the vault keeps
+available, with `status = "pinned"`, the head that was not adopted, its CI
+state and the date it was first kept recorded in `odx.lock`; the next
+`--update` checks again. For a red head odx tells what it can: whether the
+base branch fails the same checks (**likely unrelated, base also failing**)
+or whether the failing checks name only addons the pull request does not
+touch (**likely unrelated, other addon**). The policy still keeps the lock;
+`--follow <repo>#<pr>` adopts a head deliberately. Dropping a pull request is
+never automatic. When the forge cannot be asked (no token for a private
+repository, rate limit), the lock is kept and a warning says why.
+
+```text
+kept pos #123 at 1a2b3c4d5e6f: upstream head 6f5e4d3c2b1a is red, likely unrelated (base also failing)
+```
+
+Forge answers are cached with their `ETag` under the cache directory and
+asked for again conditionally, which costs nothing on GitHub's rate limit.
+
 ## The vault
 
 ```toml

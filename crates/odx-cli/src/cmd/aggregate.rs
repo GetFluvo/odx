@@ -8,17 +8,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use odx_aggregate::{
-    BuildOptions, Change, ChangeKind, PlanError, Planned, RepoAggregation, RepoPlan, aggregations,
-    fetch_plans, local_clones, lock_changes, lock_entry, mergiraf_program, pin, plan_config,
-    run_pipeline, strategy, update_lock,
+    BuildOptions, Change, ChangeKind, HeadDecision, PlanError, Planned, PlannedSource,
+    RepoAggregation, RepoPlan, aggregations, classify, date, decide, fetch_plans, local_clones,
+    lock_changes, lock_entry, locked_entry, mergiraf_program, pin, plan_config, run_pipeline,
+    strategy, update_lock,
 };
-use odx_config::lock::{LockedRepository, Lockfile};
+use odx_config::lock::{
+    CiState as LockCi, LockedRepository, Lockfile, MergeStatus, RedClassification,
+};
+use odx_config::schema::OnHeadChange;
 use odx_config::schema::RefStyle;
 use odx_config::user::{self, UserConfig, expand_home, load_user_config};
 use odx_config::{ConfigError, OdxConfig, Project, Source, discover};
 use odx_core::system::OsRunner;
-use odx_core::{Env, Exit};
-use odx_forge::{ForgeClient, ForgeKind, RepoUrl, ReqwestHttp, Visibility};
+use odx_core::{Env, Exit, repo_key};
+use odx_forge::{CachedHttp, CiState, ForgeClient, ForgeKind, RepoUrl, ReqwestHttp, Visibility};
 use odx_git::{
     Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
     Outcome, StepOutcome, SystemGit, VaultRefs, Via, url_hash, vault,
@@ -409,9 +413,32 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
             .join(format!("{}-{name}", url_hash(&repo.url)));
     }
     let (merger, options) = merger_and_options(&prepared.project.config, ctx, false, true)?;
+    let mut warnings = prepared.project.warnings.clone();
+    let kept = if args.update && prepared.lock.is_some() {
+        // Resolve the heads first: the guard rail decides which to adopt.
+        let resolved = build(&prepared, &planned, &options, None, true);
+        let fetched: Vec<(String, Vec<Fetched>)> = resolved
+            .outcomes
+            .iter()
+            .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+            .collect();
+        guard(
+            ctx,
+            &prepared,
+            &mut planned,
+            &fetched,
+            &args.follow,
+            &merger,
+            &mut warnings,
+        )
+    } else {
+        Vec::new()
+    };
     let built = build(&prepared, &planned, &options, Some(&merger), true);
     let mut summary = Summary::new(&built, &planned, &prepared.project.root, true);
-    let (entries, failures) = lock_entries(&planned, &built, &merger);
+    let (mut entries, failures) = lock_entries(&planned, &built, &merger);
+    record_kept(&mut entries, &kept, prepared.locked());
+    summary.kept = kept;
     summary.failures.extend(failures);
     let lock = next_lock(&prepared, entries, args.repo.as_deref());
     let previous = prepared.lock.clone().unwrap_or_default();
@@ -426,7 +453,6 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         }
     } else {
         let mut lock = lock;
-        let mut warnings = prepared.project.warnings.clone();
         if !args.no_push {
             vault_lock(ctx, &prepared, &mut lock, &mut summary, &mut warnings)?;
         }
@@ -435,7 +461,187 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         }
         return Ok(summary.report(global.json, false, warnings));
     }
-    Ok(summary.report(global.json, false, prepared.project.warnings))
+    Ok(summary.report(global.json, false, warnings))
+}
+
+/// A pull request the guard rail kept at its locked commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Kept {
+    repository: String,
+    step: usize,
+    label: String,
+    locked: String,
+    head: String,
+    ci: Option<LockCi>,
+    classification: Option<RedClassification>,
+}
+
+fn sha_of(commits: &[Fetched], wanted: &PlannedSource) -> Option<String> {
+    commits
+        .iter()
+        .find(|f| f.remote == wanted.remote && f.source == wanted.source)
+        .map(|f| f.sha.clone())
+}
+
+/// The force-push guard rail: for every pull request whose head moved since
+/// it was locked, apply its `on_head_change` policy to the CI state of the
+/// new head; a kept pull request goes back to its locked commit. Every
+/// other source is set to the commit it resolved to, so building needs no
+/// network.
+fn guard(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    planned: &mut [Planned],
+    fetched: &[(String, Vec<Fetched>)],
+    follow: &[String],
+    merger: &Merger,
+    warnings: &mut Vec<odx_config::Problem>,
+) -> Vec<Kept> {
+    let mut kept_prs = Vec::new();
+    // Repositories whose fetch failed are left as planned; building reports
+    // them.
+    let resolved = planned.iter_mut().filter_map(|repo| {
+        let key = repo_key(&repo.url);
+        fetched
+            .iter()
+            .find(|(url, _)| repo_key(url) == key)
+            .and_then(|(_, commits)| {
+                sha_of(commits, &repo.base).map(|base| (repo, commits.as_slice(), base))
+            })
+    });
+    for (repo, commits, base) in resolved {
+        let entry = locked_entry(repo, prepared.locked()).cloned();
+        let cache = prepared.cache.repo_dir(&repo.url);
+        let locked_merges = entry.as_ref().map_or(&[][..], |e| e.merges.as_slice());
+        repo.base.source = odx_git::Source::Commit(base.clone());
+        let steps = repo
+            .steps
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, step)| sha_of(commits, &step.from).map(|head| (i, step, head)));
+        for (i, step, head) in steps {
+            step.from.source = odx_git::Source::Commit(head.clone());
+            let Some((pr, locked)) = step
+                .lock
+                .pr
+                .zip(locked_merges.get(i))
+                .filter(|(_, locked)| locked.sha != head)
+            else {
+                continue;
+            };
+            let follows = follow.iter().any(|f| *f == format!("{}#{pr}", repo.name));
+            let asks_ci = !follows && step.on_head_change == OnHeadChange::FollowIfGreen;
+            let report =
+                asks_ci.then(|| head_ci(ctx, prepared.cache.root(), &repo.url, &head, warnings));
+            let ci = report.as_ref().map(|(ci, _, _)| *ci);
+            if decide(step.on_head_change, ci.unwrap_or(LockCi::Unknown), follows)
+                == HeadDecision::Adopt
+            {
+                continue;
+            }
+            let classification = report
+                .filter(|(ci, _, statuses_only)| *ci == LockCi::Red && !*statuses_only)
+                .map(|(_, failing, _)| {
+                    let (base_ci, base_failing, _) = head_ci(
+                        ctx,
+                        prepared.cache.root(),
+                        &repo.url,
+                        &base,
+                        &mut Vec::new(),
+                    );
+                    classify(
+                        &failing,
+                        (base_ci == LockCi::Red).then_some(base_failing.as_slice()),
+                        &merger
+                            .changed_dirs(&cache, &base, &head)
+                            .unwrap_or_default(),
+                        &merger.dirs(&cache, &base).unwrap_or_default(),
+                    )
+                })
+                .or_else(|| (ci == Some(LockCi::Red)).then_some(RedClassification::Red));
+            step.from.source = odx_git::Source::Commit(locked.sha.clone());
+            kept_prs.push(Kept {
+                repository: repo.name.clone(),
+                step: i,
+                label: step.label.clone(),
+                locked: locked.sha.clone(),
+                head,
+                ci,
+                classification,
+            });
+        }
+    }
+    kept_prs
+}
+
+/// The CI state of `sha` in the repository at `url`, its failing checks,
+/// and whether the forge only has commit statuses (no check names worth
+/// classifying). A URL that is no forge has no CI; an API that cannot be
+/// read counts as pending, so the locked commit is kept.
+fn head_ci(
+    ctx: &Context<'_>,
+    cache: &Path,
+    url: &str,
+    sha: &str,
+    warnings: &mut Vec<odx_config::Problem>,
+) -> (LockCi, Vec<String>, bool) {
+    let Some(repo) = RepoUrl::parse(url) else {
+        return (LockCi::Unknown, Vec::new(), false);
+    };
+    let answer = ReqwestHttp::new().and_then(|http| {
+        let http = CachedHttp::new(http, cache.join("http"));
+        let sleep = std::thread::sleep;
+        let client = ForgeClient::new(&http, ctx.env, &OsRunner, &sleep);
+        let kind = client.kind(&repo)?;
+        client.ci(&repo, kind, sha).map(|report| (report, kind))
+    });
+    match answer {
+        Ok((report, kind)) => (
+            match report.state {
+                CiState::Green => LockCi::Green,
+                CiState::Red => LockCi::Red,
+                CiState::Pending => LockCi::Pending,
+                CiState::Unknown => LockCi::Unknown,
+            },
+            report.failing,
+            kind == ForgeKind::Gitea,
+        ),
+        Err(e) => {
+            warnings.push(odx_config::Problem {
+                key: url.to_owned(),
+                message: format!(
+                    "cannot read the CI state of {sha}: {e}; keeping the locked commit"
+                ),
+            });
+            (LockCi::Pending, Vec::new(), false)
+        }
+    }
+}
+
+/// Mark the kept pull requests in the new lock entries: status `pinned`,
+/// the head that was not adopted, its CI state, and since when (kept from
+/// an earlier pin).
+fn record_kept(entries: &mut [LockedRepository], kept: &[Kept], locked: &[LockedRepository]) {
+    let today = date(std::time::SystemTime::now());
+    for keep in kept {
+        let since = locked
+            .iter()
+            .filter(|entry| entry.name == keep.repository)
+            .filter_map(|entry| entry.merges.get(keep.step))
+            .find_map(|merge| merge.pinned_since.clone())
+            .unwrap_or_else(|| today.clone());
+        for merge in entries
+            .iter_mut()
+            .filter(|entry| entry.name == keep.repository)
+            .filter_map(|entry| entry.merges.get_mut(keep.step))
+        {
+            merge.status = MergeStatus::Pinned;
+            merge.upstream_head = Some(keep.head.clone());
+            merge.upstream_head_ci = keep.ci;
+            merge.upstream_head_classification = keep.classification;
+            merge.pinned_since = Some(since.clone());
+        }
+    }
 }
 
 /// Push every locked commit that is not vaulted yet to `[tool.odx.mirror]`
@@ -460,7 +666,7 @@ fn vault_lock(
     if !lock.repositories.iter().any(unvaulted) {
         return Ok(());
     }
-    let refs = vault_refs(ctx, mirror, warnings)?;
+    let refs = vault_refs(ctx, prepared.cache.root(), mirror, warnings)?;
     let git = SystemGit::new(Arc::new(OsRunner));
     for entry in lock
         .repositories
@@ -496,6 +702,7 @@ fn vault_lock(
 /// GitLab vaults use tags (GitLab protects tags, not custom refs).
 fn vault_refs(
     ctx: &Context<'_>,
+    cache: &Path,
     mirror: &odx_config::schema::Mirror,
     warnings: &mut Vec<odx_config::Problem>,
 ) -> Result<VaultRefs, Report> {
@@ -509,6 +716,7 @@ fn vault_refs(
         Some(repo) => {
             let (kind, visibility) = ReqwestHttp::new()
                 .and_then(|http| {
+                    let http = CachedHttp::new(http, cache.join("http"));
                     let sleep = std::thread::sleep;
                     let client = ForgeClient::new(&http, ctx.env, &OsRunner, &sleep);
                     let kind = client.kind(&repo)?;
@@ -564,6 +772,7 @@ struct Summary {
     current: Vec<(String, String)>,
     changes: Vec<Change>,
     vaulted: Vec<(String, usize)>,
+    kept: Vec<Kept>,
     failures: Vec<String>,
     /// Built in scratch working trees (`odx lock`): directories are not
     /// shown.
@@ -608,6 +817,7 @@ impl Summary {
             current: Vec::new(),
             changes: Vec::new(),
             vaulted: Vec::new(),
+            kept: Vec::new(),
             failures: Vec::new(),
             scratch,
         }
@@ -689,6 +899,9 @@ impl Summary {
         for change in &self.changes {
             let _ = writeln!(report.out, "{}", describe_change(change));
         }
+        for keep in &self.kept {
+            let _ = writeln!(report.out, "{}", describe_kept(keep));
+        }
         for (name, commits) in &self.vaulted {
             let _ = writeln!(report.out, "vaulted {name}: {commits} commits");
         }
@@ -766,10 +979,47 @@ impl Summary {
             .map(|(name, commits)| serde_json::json!({ "repository": name, "commits": commits }))
             .collect();
         value.insert("vaulted".to_owned(), serde_json::Value::Array(vaulted));
+        let kept: Vec<serde_json::Value> = self
+            .kept
+            .iter()
+            .map(|keep| {
+                serde_json::json!({
+                    "repository": keep.repository,
+                    "item": keep.label,
+                    "locked": keep.locked,
+                    "upstream_head": keep.head,
+                    "ci": keep.ci.map(LockCi::as_str),
+                    "classification": keep.classification.map(RedClassification::as_str),
+                })
+            })
+            .collect();
+        value.insert("kept".to_owned(), serde_json::Value::Array(kept));
         let failures = &self.failures;
         value.insert("errors".to_owned(), serde_json::json!(failures));
         serde_json::Value::Object(value)
     }
+}
+
+/// `kept pos #1 at 1a2b3c4d5e6f: upstream head 6f5e4d3c2b1a is red (base also failing)`.
+fn describe_kept(keep: &Kept) -> String {
+    let state = match (keep.ci, keep.classification) {
+        (Some(LockCi::Red), Some(RedClassification::BaseAlsoFailing)) => {
+            "is red, likely unrelated (base also failing)"
+        }
+        (Some(LockCi::Red), Some(RedClassification::OtherAddon)) => {
+            "is red, likely unrelated (other addon)"
+        }
+        (Some(LockCi::Red), _) => "is red",
+        (Some(_), _) => "is pending",
+        (None, _) => "is newer (on_head_change = \"pin\")",
+    };
+    format!(
+        "kept {} {} at {}: upstream head {} {state}",
+        keep.repository,
+        keep.label,
+        short(&keep.locked),
+        short(&keep.head)
+    )
 }
 
 /// `locked pos #1 at 1a2b3c4d5e6f`, `updated pos #1: a -> b (rebased (same patch))`.
