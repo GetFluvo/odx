@@ -12,7 +12,9 @@ repositories, 25 pull requests) in three scenarios:
          is the same work as cold);
 - no-op: everything from the previous run still in place.
 
-Each is timed with one job and with one job per CPU; the median of the
+In mirror mode `odx aggregate --locked` is timed too, on the same fixture
+as a [tool.odx] project locked once beforehand. Each is timed with one job
+and with one job per CPU; the median of the
 runs after one warm-up run is reported. Every run's result is checked
 against the expected trees in tests/fixtures/benchmark/trees.json, so a
 timing is only accepted for the same work.
@@ -100,7 +102,36 @@ def build_mirrors(work: Path, seed: Path | None) -> Path:
         ]
         git("fetch", "--quiet", upstream, *specs, cwd=bare)
         git("cat-file", "-e", f"{refs['base'][0]}^{{commit}}", cwd=bare)
+    for repo, refs in fixture().items():
+        # The pinned base as a branch, for the odx project ([tool.odx] bases
+        # are branches).
+        bare = mirrors / "OCA" / f"{repo}.git"
+        git("update-ref", "refs/heads/bench-base", refs["base"][0], cwd=bare)
     return mirrors
+
+
+def odx_project(run: Path, origin: str) -> None:
+    """The fixture as a [tool.odx] project (mirror mode)."""
+    # Merge commits, as git-aggregator makes: the same work.
+    lines = [
+        "[tool.odx]",
+        'odoo_version = "17.0"',
+        'mergiraf = "never"',
+        'merge_strategy = "merge"',
+        "",
+    ]
+    for repo, refs in fixture().items():
+        merges = ", ".join(f"{{ pr = {n} }}" for n in refs["prs"])
+        lines += [
+            "[[tool.odx.repositories]]",
+            f'name = "{repo}"',
+            f'url = "{origin}/OCA/{repo}.git"',
+            'base = "bench-base"',
+            f'target_dir = "{repo}"',
+            f"merges = [{merges}]",
+            "",
+        ]
+    (run / "pyproject.toml").write_text("\n".join(lines))
 
 
 def gitaggregate(work: Path) -> Path:
@@ -225,6 +256,7 @@ def main() -> None:
     parser.add_argument(
         "--gar", type=Path, default=ROOT / "target" / "release" / "git-aggregate-rs"
     )
+    parser.add_argument("--odx", type=Path, default=ROOT / "target" / "release" / "odx")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument(
         "--record", action="store_true", help="write trees.json from gitaggregate"
@@ -269,6 +301,33 @@ def main() -> None:
             )
         )
 
+    if args.mode == "mirror":
+        # odx from odx.lock: locked once, outside the timings.
+        run = work / "run" / "odx"
+        run.mkdir(parents=True, exist_ok=True)
+        odx_project(run, origin)
+        odx_env = dict(env, ODX_CACHE_DIR=str(run / ".cache"))
+        subprocess.run(
+            [str(args.odx), "lock"],
+            cwd=run,
+            env=odx_env,
+            check=True,
+            capture_output=True,
+        )
+        for name, threads in [
+            ("odx aggregate --locked", jobs),
+            ("odx aggregate --locked, 1 job", 1),
+        ]:
+            tools.append(
+                Tool(
+                    name,
+                    [str(args.odx), "-j", str(threads), "aggregate", "--locked"],
+                    run,
+                    odx_env,
+                    run / ".cache",
+                )
+            )
+
     expected_file = FIXTURE / "trees.json"
     if args.record:
         reference = tools[3]
@@ -292,11 +351,22 @@ def main() -> None:
     version = subprocess.run(
         [str(args.gar), "--version"], capture_output=True, text=True, check=True
     ).stdout.split()[1]
+    odx_version = (
+        subprocess.run(
+            [str(args.odx), "--version"], capture_output=True, text=True, check=True
+        ).stdout.split()[1]
+        if args.mode == "mirror"
+        else ""
+    )
     print("| Tool | cold | warm | no-op |\n| --- | --- | --- | --- |")
     for tool in tools:
-        label = tool.name.replace(
-            "git-aggregate-rs", f"git-aggregate-rs {version}"
-        ).replace("git-aggregator", f"git-aggregator {GIT_AGGREGATOR.split('==')[1]}")
+        label = (
+            tool.name.replace("git-aggregate-rs", f"git-aggregate-rs {version}")
+            .replace(
+                "git-aggregator", f"git-aggregator {GIT_AGGREGATOR.split('==')[1]}"
+            )
+            .replace("odx aggregate", f"odx {odx_version} aggregate")
+        )
         cells = " | ".join(seconds(results[tool.name][s]) for s in scenarios)
         print(f"| {label} | {cells} |")
     print(

@@ -83,7 +83,7 @@ package:
 
 # Benchmark against git-aggregator (args: e.g. --seed ~/git/OCA, --mode github).
 bench *args:
-    cargo build --release -p git-aggregate-rs
+    cargo build --release -p git-aggregate-rs -p odx-cli
     python3 scripts/benchmark.py {{args}}
 
 # Every gate, in CI order (except commits, which needs a tag).
