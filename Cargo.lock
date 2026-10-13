@@ -1350,6 +1350,7 @@ dependencies = [
  "odx-analyze",
  "odx-config",
  "odx-core",
+ "odx-dev",
  "odx-forge",
  "odx-git",
  "odx-platform",
@@ -1387,6 +1388,12 @@ version = "0.0.4"
 [[package]]
 name = "odx-dev"
 version = "0.0.4"
+dependencies = [
+ "odx-config",
+ "serde",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit",
+]
 
 [[package]]
 name = "odx-env"

@@ -523,3 +523,177 @@ fn real_uv_locks_the_vaulted_commits() {
     assert_eq!(again, out);
     assert_eq!(project.read("odx.lock"), lock);
 }
+
+#[test]
+fn develop_mode_round_trips() {
+    let project = Project::new();
+    project.write(true, "");
+    let (exit, _, err) = project.run(&["lock", "--no-uv"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let before = project.read("pyproject.toml");
+    let pr = git(&project.up, &["rev-parse", "refs/pull/1/head"]);
+
+    let (exit, out, err) = project.run(&["dev", "odoo-addon-pos_x", "--branch", "fix"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    assert!(
+        out.starts_with("cloned odoo-addon-pos-x into .src/odoo-addon-pos-x\n"),
+        "{out}"
+    );
+    assert!(out.contains("odoo-addon-pos-x is on branch fix\n"), "{out}");
+    assert!(
+        out.contains("odoo-addon-pos-x now uses .src/odoo-addon-pos-x/pos_x (editable)"),
+        "{out}"
+    );
+    let clone = project.root.join(".src/odoo-addon-pos-x");
+    assert_eq!(git(&clone, &["rev-parse", "HEAD"]), pr);
+    assert_eq!(git(&clone, &["branch", "--show-current"]), "fix");
+    assert_eq!(git(&clone, &["remote", "get-url", "upstream"]), project.url);
+    assert_eq!(
+        git(&clone, &["remote", "get-url", "mirror"]),
+        file_url(&project.vault)
+    );
+    let developing = project.read("pyproject.toml");
+    assert!(
+        developing.contains(
+            "odoo-addon-pos-x = { path = \".src/odoo-addon-pos-x/pos_x\", editable = true }"
+        ),
+        "{developing}"
+    );
+    let (exit, _, err) = project.run(&["verify"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("in develop mode"), "{err}");
+
+    // Again, and on another branch: the clone is reused.
+    let (_, out, _) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!(
+        out,
+        "odoo-addon-pos-x already uses .src/odoo-addon-pos-x/pos_x (editable)\n"
+    );
+    let (_, out, _) = project.run(&["dev", "odoo-addon-pos_x", "--branch", "fix"]);
+    assert!(
+        out.starts_with("odoo-addon-pos-x is on branch fix\n"),
+        "{out}"
+    );
+    let (exit, _, err) = project.run(&["dev", "odoo-addon-pos_x", "--branch", "bad..name"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("cannot switch .src/odoo-addon-pos-x to bad..name"),
+        "{err}"
+    );
+
+    let (exit, out, _) = project.run(&["dev", "--restore"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(
+        out.starts_with(
+            "restored odoo-addon-pos-x; its clone stays in .src/odoo-addon-pos-x/pos_x\n"
+        ),
+        "{out}"
+    );
+    assert_eq!(project.read("pyproject.toml"), before);
+    assert!(!project.root.join(".odx/develop.toml").exists());
+    let (_, out, _) = project.run(&["dev", "--restore"]);
+    assert_eq!(out, "no package is in develop mode\n");
+    let (exit, _, err) = project.run(&["dev", "--restore", "odoo-addon-pos_x"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("odoo-addon-pos_x is not in develop mode"),
+        "{err}"
+    );
+
+    // Two packages, one restored at a time.
+    project.run(&["dev", "odoo-addon-pos_x"]);
+    project.run(&["dev", "odoo-addon-other"]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Neither pyproject.toml nor the develop state can be written.
+        let file = project.root.join("pyproject.toml");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let (exit, _, _) = project.run(&["dev", "--restore", "odoo-addon-other"]);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(exit, Exit::Failure);
+        let state = project.root.join(".odx/develop.toml");
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let (exit, _, _) = project.run(&["dev", "--restore", "odoo-addon-other"]);
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(exit, Exit::Failure);
+        project.run(&["dev", "odoo-addon-other"]);
+    }
+    let (_, out, _) = project.run(&["dev", "--restore", "odoo-addon-other"]);
+    assert!(out.starts_with("restored odoo-addon-other"), "{out}");
+    assert!(
+        project
+            .read(".odx/develop.toml")
+            .contains("odoo-addon-pos-x")
+    );
+    project.run(&["dev", "--restore"]);
+    assert_eq!(project.read("pyproject.toml"), before);
+}
+
+#[test]
+fn develop_mode_failures() {
+    let project = Project::new();
+    project.write(false, "");
+    let (exit, _, err) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("odoo-addon-pos_x is not a locked package"),
+        "{err}"
+    );
+    project.run(&["lock", "--no-uv"]);
+    let pyproject = project.read("pyproject.toml");
+    // A develop directory of its own, no mirror to add.
+    std::fs::write(
+        project.root.join("pyproject.toml"),
+        format!("{pyproject}\n[tool.odx.dev]\ndev_dir = \"src\"\n"),
+    )
+    .unwrap();
+    let (exit, out, err) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    assert!(out.contains("now uses src/odoo-addon-pos-x/pos_x"), "{out}");
+    project.run(&["dev", "--restore"]);
+    std::fs::write(project.root.join("blocked"), "").unwrap();
+    std::fs::write(
+        project.root.join("pyproject.toml"),
+        format!("{pyproject}\n[tool.odx.dev]\ndev_dir = \"blocked/src\"\n"),
+    )
+    .unwrap();
+    let (exit, _, err) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("blocked"), "{err}");
+    std::fs::write(project.root.join("pyproject.toml"), &pyproject).unwrap();
+    // The develop state cannot be written: pyproject.toml stays as it is.
+    let _ = std::fs::remove_dir_all(project.root.join(".odx"));
+    std::fs::write(project.root.join(".odx"), "").unwrap();
+    let (exit, _, err) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains(".odx/develop.toml"), "{err}");
+    assert_eq!(project.read("pyproject.toml"), pyproject);
+    std::fs::remove_file(project.root.join(".odx")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file = project.root.join("pyproject.toml");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let (exit, _, err) = project.run(&["dev", "odoo-addon-pos_x"]);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(exit, Exit::Failure);
+        assert!(err.contains("pyproject.toml"), "{err}");
+        project.run(&["dev", "--restore"]);
+    }
+    // The cache is gone: nothing to clone from.
+    let _ = std::fs::remove_dir_all(project.root.join(".src"));
+    std::fs::remove_dir_all(project.root.parent().unwrap().join("cache")).unwrap();
+    let (exit, _, err) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("cannot clone"), "{err}");
+    std::fs::write(project.root.join(".odx/develop.toml"), "nonsense = 1").unwrap_or_else(|_| {
+        std::fs::create_dir_all(project.root.join(".odx")).unwrap();
+        std::fs::write(project.root.join(".odx/develop.toml"), "nonsense = 1").unwrap();
+    });
+    let (exit, _, err) = project.run(&["dev", "--restore"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains(".odx/develop.toml"), "{err}");
+    let (exit, _, _) = project.run(&["dev", "odoo-addon-pos_x"]);
+    assert_eq!(exit, Exit::Usage);
+}

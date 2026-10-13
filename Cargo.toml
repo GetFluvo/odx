@@ -25,6 +25,7 @@ odx-forge = { path = "crates/odx-forge", version = "0.0.4" }
 odx-analyze = { path = "crates/odx-analyze", version = "0.0.4" }
 odx-platform = { path = "crates/odx-platform", version = "0.0.4" }
 odx-vendor = { path = "crates/odx-vendor", version = "0.0.4" }
+odx-dev = { path = "crates/odx-dev", version = "0.0.4" }
 
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }

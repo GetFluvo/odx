@@ -314,12 +314,36 @@ pub struct SniffArgs {
 
 /// Arguments of `odx dev`.
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are independent switches"
+)]
 pub struct DevArgs {
     /// Package to switch to an editable local clone.
     pub package: Option<String>,
-    /// Restore the package to its locked version.
-    #[arg(long, requires = "package")]
+    /// Put the locked source back (one package, or every one in develop mode).
+    #[arg(long)]
     pub restore: bool,
+    /// Branch to create or switch to in the package's clone.
+    #[arg(
+        long,
+        value_name = "NAME",
+        requires = "package",
+        conflicts_with = "restore"
+    )]
+    pub branch: Option<String>,
+    /// Do not install addons in editable mode.
+    #[arg(long)]
+    pub no_editable: bool,
+    /// The virtual environment for editable installs (default: `[tool.odx.dev] venv`, else `.venv`).
+    #[arg(long, value_name = "DIR")]
+    pub venv: Option<PathBuf>,
+    /// Only print the addons path.
+    #[arg(long)]
+    pub print_addons_path: bool,
+    /// Show what would change without changing anything.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// Arguments of `odx add`.

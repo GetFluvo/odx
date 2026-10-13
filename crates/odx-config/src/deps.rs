@@ -137,13 +137,10 @@ fn parse_direct_ref(raw: &str) -> DirectRef {
     }
 }
 
-/// Replace the exact pin `==<from>` of `dist` by `==<to>`.
-///
-/// In `[project] dependencies`, every `[project.optional-dependencies]`
-/// group and every `[dependency-groups]` group, keeping extras, markers and
-/// formatting; returns how many requirements changed.
-pub fn repin(doc: &mut DocumentMut, dist: &str, from: &str, to: &str) -> usize {
-    let wanted = normalize_name(dist);
+/// Every requirement array: `[project] dependencies`, every
+/// `[project.optional-dependencies]` group and every `[dependency-groups]`
+/// group.
+fn requirement_arrays(doc: &mut DocumentMut) -> Vec<&mut toml_edit::Array> {
     let mut arrays: Vec<&mut toml_edit::Array> = Vec::new();
     let tables = doc
         .as_table_mut()
@@ -168,6 +165,112 @@ pub fn repin(doc: &mut DocumentMut, dist: &str, from: &str, to: &str) -> usize {
             }
         }
     }
+    arrays
+}
+
+/// Replace the requirement string `from` (of distribution `dist`) by `to`
+/// in every requirement array, keeping its formatting; returns how many
+/// changed.
+pub fn replace_requirement(doc: &mut DocumentMut, dist: &str, from: &str, to: &str) -> usize {
+    let wanted = normalize_name(dist);
+    let mut changed = 0;
+    for array in requirement_arrays(doc) {
+        for value in array.iter_mut() {
+            let matches = value.as_str().is_some_and(|text| {
+                text == from
+                    && parse_requirement(text).is_ok_and(|req| normalize_name(&req.name) == wanted)
+            });
+            if matches {
+                let decor = value.decor().clone();
+                *value = Value::from(to);
+                *value.decor_mut() = decor;
+                changed += 1;
+            }
+        }
+    }
+    changed
+}
+
+/// The direct references (`name @ <url>`) of `dist` in the requirement
+/// arrays, as written.
+pub fn direct_references(doc: &mut DocumentMut, dist: &str) -> Vec<String> {
+    let wanted = normalize_name(dist);
+    requirement_arrays(doc)
+        .into_iter()
+        .flat_map(|array| array.iter())
+        .filter_map(|value| value.as_str())
+        .filter(|text| {
+            parse_requirement(text)
+                .is_ok_and(|req| req.direct.is_some() && normalize_name(&req.name) == wanted)
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The `[tool.uv.sources]` entry of `dist` as written (key and value), if
+/// any.
+pub fn uv_source_entry(doc: &DocumentMut, dist: &str) -> Option<(String, String)> {
+    let wanted = normalize_name(dist);
+    get_path(doc, &["tool", "uv", "sources"])
+        .and_then(Item::as_table_like)
+        .and_then(|sources| {
+            sources
+                .iter()
+                .find(|(key, _)| normalize_name(key) == wanted)
+                .map(|(key, item)| (key.to_owned(), item.to_string()))
+        })
+}
+
+/// Set the `[tool.uv.sources]` entry `key` to `value`, in place.
+///
+/// `value` is an inline value as [`uv_source_entry`] returns it, with its
+/// leading space; `None` removes the entry, and the table when that leaves
+/// it empty. Returns `false` when `value` does not parse.
+pub fn set_uv_source_entry(doc: &mut DocumentMut, key: &str, value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        remove_uv_source(doc, key);
+        let empty = get_path(doc, &["tool", "uv", "sources"])
+            .and_then(Item::as_table_like)
+            .is_some_and(toml_edit::TableLike::is_empty);
+        if let Some(uv) = get_path_mut(doc, &["tool", "uv"])
+            .and_then(Item::as_table_like_mut)
+            .filter(|_| empty)
+        {
+            uv.remove("sources");
+        }
+        return true;
+    };
+    // As the value of a key, so its spacing and trailing comment survive.
+    let Some(parsed) = format!("x ={value}")
+        .parse::<DocumentMut>()
+        .ok()
+        .and_then(|doc| doc.as_table().get("x").and_then(Item::as_value).cloned())
+    else {
+        return false;
+    };
+    let sources = child_table(doc.as_item_mut(), "tool")
+        .and_then(|tool| child_table(tool, "uv"))
+        .and_then(|uv| child_table(uv, "sources"))
+        .and_then(Item::as_table_like_mut);
+    sources.is_some_and(|sources| {
+        match sources.get_mut(key) {
+            Some(item) => *item = Item::Value(parsed),
+            None => {
+                sources.insert(key, Item::Value(parsed));
+            }
+        }
+        true
+    })
+}
+
+/// Replace the exact pin `==<from>` of `dist` by `==<to>`.
+///
+/// In `[project] dependencies`, every `[project.optional-dependencies]`
+/// group and every `[dependency-groups]` group, keeping extras, markers and
+/// formatting; returns how many requirements changed.
+pub fn repin(doc: &mut DocumentMut, dist: &str, from: &str, to: &str) -> usize {
+    let wanted = normalize_name(dist);
+    let arrays = requirement_arrays(doc);
     let mut changed = 0;
     for array in arrays {
         for value in array.iter_mut() {
@@ -448,6 +551,78 @@ pub fn remove_uv_source(doc: &mut DocumentMut, dist: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn develop_mode_edits_round_trip() {
+        let text = "[project]\nname = \"p\"\n\n[project.optional-dependencies]\noca = [\n  \"odoo-addon-x @ git+https://x/r.git@v1#subdirectory=x\",  # pr\n  \"other\",\n]\n\n\
+                    [tool.odx]\nodoo_version = \"17.0\"\n\n[tool.uv.sources]\nodoo = { git = \"https://o\" }  # core\nOdoo_Addon_Y = { git = \"https://y\", tag = \"t\" }\nz = { path = \"z\" }\n";
+        let mut doc: DocumentMut = text.parse().unwrap();
+        assert_eq!(
+            direct_references(&mut doc, "odoo-addon-x"),
+            ["odoo-addon-x @ git+https://x/r.git@v1#subdirectory=x"]
+        );
+        assert_eq!(direct_references(&mut doc, "other"), Vec::<String>::new());
+        let (key, value) = uv_source_entry(&doc, "odoo-addon-y").unwrap();
+        assert_eq!(
+            (key.as_str(), value.as_str()),
+            ("Odoo_Addon_Y", " { git = \"https://y\", tag = \"t\" }")
+        );
+        assert_eq!(uv_source_entry(&doc, "missing"), None);
+        assert!(set_uv_source_entry(
+            &mut doc,
+            &key,
+            Some(" { path = \".src/y\", editable = true }")
+        ));
+        assert!(
+            doc.to_string()
+                .contains("Odoo_Addon_Y = { path = \".src/y\", editable = true }\nz =")
+        );
+        assert!(set_uv_source_entry(&mut doc, &key, Some(&value)));
+        assert_eq!(
+            replace_requirement(
+                &mut doc,
+                "odoo-addon-x",
+                "odoo-addon-x @ git+https://x/r.git@v1#subdirectory=x",
+                "odoo-addon-x"
+            ),
+            1
+        );
+        assert!(doc.to_string().contains("  \"odoo-addon-x\",  # pr\n"));
+        assert_eq!(
+            replace_requirement(
+                &mut doc,
+                "odoo-addon-x",
+                "odoo-addon-x",
+                "odoo-addon-x @ git+https://x/r.git@v1#subdirectory=x"
+            ),
+            1
+        );
+        assert!(set_uv_source_entry(
+            &mut doc,
+            "new",
+            Some("{ path = \"n\" }")
+        ));
+        assert!(set_uv_source_entry(&mut doc, "new", None));
+        assert_eq!(doc.to_string(), text);
+        assert!(!set_uv_source_entry(&mut doc, "bad", Some(" { broken")));
+
+        // Without a sources table: created, then removed again.
+        let bare = "[project]\nname = \"p\"\n\n[tool.odx]\nodoo_version = \"17.0\"\n";
+        let mut doc: DocumentMut = bare.parse().unwrap();
+        assert!(set_uv_source_entry(
+            &mut doc,
+            "a",
+            Some(" { path = \"a\", editable = true }")
+        ));
+        assert!(
+            doc.to_string()
+                .contains("[tool.uv.sources]\na = { path = \"a\", editable = true }"),
+            "{doc}"
+        );
+        assert!(set_uv_source_entry(&mut doc, "a", None));
+        assert_eq!(doc.to_string(), bare);
+        assert!(set_uv_source_entry(&mut DocumentMut::new(), "a", None));
+    }
 
     #[test]
     fn pins_move_in_place() {
