@@ -23,7 +23,7 @@ mod vault;
 pub use backend::{GitBackend, GitError, SystemGit};
 pub use cache::{Cache, url_hash};
 pub use clones::{Clones, LocalClone, remote_urls};
-pub use fetch::{FetchPlan, Fetched, Via, fetch};
+pub use fetch::{FetchPlan, Fetched, Via, detach, fetch};
 pub use lock::RepoLock;
 pub use merge::{Aggregated, Aggregation, MergeError, Merger, Step, StepOutcome, Strategy};
 pub use refs::{Forge, Source};

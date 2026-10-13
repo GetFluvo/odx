@@ -334,6 +334,34 @@ fn local_clones_from_the_user_configuration() {
     assert_eq!((exit, err.as_str()), (Exit::Success, ""));
     assert_eq!(out, "fetched pos: 2 refs (1 through the local clone)\n");
 
+    // Detaching the cache from the clone: by name, by URL, or everything.
+    let nothing = "no cache repository borrows objects from a local clone\n";
+    let (_, out, _) = run(
+        &project,
+        &["cache", "detach", "https://example.com/other.git"],
+    );
+    assert_eq!(out, nothing);
+    let (_, out, _) = run(&project, &["-C", "..", "cache", "detach", "pos"]);
+    assert_eq!(out, nothing);
+    let objects = clones.join("pos").join(".git").join("objects");
+    std::fs::rename(&objects, clones.join("objects.away")).unwrap();
+    std::fs::create_dir_all(&objects).unwrap();
+    let (exit, _, err) = run(&project, &["cache", "detach"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("git repack failed"), "{err}");
+    std::fs::remove_dir_all(&objects).unwrap();
+    std::fs::rename(clones.join("objects.away"), &objects).unwrap();
+    let (exit, out, _) = run(&project, &["cache", "detach", "pos"]);
+    assert_eq!(
+        (exit, out.as_str()),
+        (
+            Exit::Success,
+            format!("detached {}\n", project.upstream).as_str()
+        )
+    );
+    let (_, out, _) = run(&project, &["cache", "detach"]);
+    assert_eq!(out, nothing);
+
     std::fs::write(config_dir.join("config.toml"), "[[repositories]]\n").unwrap();
     let (exit, _, err) = run(&project, &["aggregate", "--fetch-only"]);
     assert_eq!(exit, Exit::Usage);

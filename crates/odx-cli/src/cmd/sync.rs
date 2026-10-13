@@ -4,19 +4,22 @@
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use odx_aggregate::{date, plan_config};
 use odx_config::Span;
 use odx_config::user::{self, UserConfig, load_user_config};
 use odx_core::Exit;
-use odx_git::{RepoLock, url_hash};
+use odx_core::system::OsRunner;
+use odx_git::{RepoLock, SystemGit, detach, url_hash};
 use odx_sync::{
     CachedRepo, Presence, SyncRecord, SyncedWorkspace, busy, parse_size, register, to_collect,
     unregister,
 };
 
 use super::aggregate::{Prepared, prepare, run_aggregate};
+use super::vendor::prefetch_wheels;
 use super::{Report, human, size};
 use crate::Context;
 use crate::cli::{AggregateArgs, CacheCommand, GlobalArgs, SyncArgs};
@@ -134,12 +137,7 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
                 dir: dir.clone(),
                 config: None,
             };
-            let report = run_aggregate(&fetch, &quiet, &workspace);
-            let first = |text: &str| text.lines().next().unwrap_or_default().to_owned();
-            match report.error {
-                None => ("synced", first(&report.out)),
-                Some(error) => ("failed", first(&error)),
-            }
+            sync_one(&fetch, &quiet, &workspace)
         };
         record.workspaces.push(SyncedWorkspace {
             path,
@@ -255,6 +253,35 @@ pub(crate) fn auto_register(prepared: &Prepared, ctx: &Context<'_>) {
     }
 }
 
+/// The first line of `text`.
+fn first_line(text: &str) -> String {
+    text.lines().next().unwrap_or_default().to_owned()
+}
+
+/// Fetch one workspace and prefetch its wheels; the status and detail.
+fn sync_one(
+    fetch: &AggregateArgs,
+    quiet: &GlobalArgs,
+    workspace: &Context<'_>,
+) -> (&'static str, String) {
+    let report = run_aggregate(fetch, quiet, workspace);
+    if let Some(error) = report.error {
+        return ("failed", first_line(&error));
+    }
+    let fetched = first_line(&report.out);
+    match prepare(quiet, workspace).and_then(|prepared| prefetch_wheels(workspace, &prepared)) {
+        Ok(0) => ("synced", fetched),
+        Ok(wheels) => ("synced", format!("{fetched}; {wheels} wheels cached")),
+        Err(error) => (
+            "failed",
+            format!(
+                "{fetched}; wheels: {}",
+                first_line(&error.error.unwrap_or_default())
+            ),
+        ),
+    }
+}
+
 /// `odx sync --register` / `--unregister`: edit `[workspaces]` in the user
 /// configuration.
 fn registry(add: bool, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
@@ -285,6 +312,13 @@ fn registry(add: bool, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report,
         out,
         ..Report::default()
     })
+}
+
+/// The URL of the cache repository `hash`, or the hash when its URL file
+/// is gone.
+fn repo_url(cache: &Path, hash: &str) -> String {
+    std::fs::read_to_string(cache.join("repos").join(format!("{hash}.url")))
+        .map_or_else(|_| hash.to_owned(), |url| url.trim().to_owned())
 }
 
 /// `odx cache`.
@@ -353,6 +387,50 @@ fn repositories(
     found
 }
 
+/// `odx cache detach [<repo>]`.
+fn detach_cached(
+    repo: Option<&str>,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+    repos: &[CachedRepo],
+    cache: &Path,
+    report: &mut Report,
+) -> Result<(), Report> {
+    let only = repo.map(|repo| {
+        let named = prepare(global, ctx).ok().and_then(|prepared| {
+            prepared
+                .project
+                .config
+                .repositories
+                .iter()
+                .find(|candidate| candidate.name.as_deref() == Some(repo))
+                .map(|candidate| candidate.url.clone())
+        });
+        url_hash(named.as_deref().unwrap_or(repo))
+    });
+    let git = SystemGit::new(Arc::new(OsRunner));
+    let mut detached = 0;
+    for found in repos
+        .iter()
+        .filter(|found| only.as_ref().is_none_or(|hash| *hash == found.hash))
+    {
+        let dir = cache.join("repos").join(&found.hash);
+        let lock = cache.join("locks").join(format!("{}.lock", found.hash));
+        let borrowed = detach(&git, &dir, &lock, Duration::from_secs(10))
+            .map_err(|e| failed(Exit::Failure, format!("{}: {e}", dir.display())))?;
+        if borrowed {
+            detached += 1;
+            let _ = writeln!(report.out, "detached {}", repo_url(cache, &found.hash));
+        }
+    }
+    if detached == 0 {
+        report
+            .out
+            .push_str("no cache repository borrows objects from a local clone\n");
+    }
+    Ok(())
+}
+
 fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let (user, cache) = shared(ctx)?;
     let mut report = Report::default();
@@ -385,6 +463,9 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
                 let _ = writeln!(report.out, "last sync: {}", last_sync(&cache));
             }
         }
+        CacheCommand::Detach { repo } => {
+            detach_cached(repo.as_deref(), global, ctx, &repos, &cache, &mut report)?;
+        }
         CacheCommand::Gc { max_size, dry_run } => {
             let limit = match max_size
                 .clone()
@@ -402,8 +483,7 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
             for repo in to_collect(&repos, total, limit) {
                 let dir = cache.join("repos").join(&repo.hash);
                 let url_file = cache.join("repos").join(format!("{}.url", repo.hash));
-                let url = std::fs::read_to_string(&url_file)
-                    .map_or_else(|_| repo.hash.clone(), |url| url.trim().to_owned());
+                let url = repo_url(&cache, &repo.hash);
                 let lock = cache.join("locks").join(format!("{}.lock", repo.hash));
                 // A repository another odx is fetching into is left alone.
                 let removed = *dry_run

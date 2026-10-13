@@ -24,8 +24,8 @@ use odx_platform::requirements::{
 };
 use odx_platform::{profile, profile_name, provided_set, requirements_path};
 use odx_vendor::VendorError;
-use odx_vendor::archive::download_error;
-use odx_vendor::plan::plan;
+use odx_vendor::archive::{download_error, fetch};
+use odx_vendor::plan::{Item, ItemSource, plan};
 use odx_vendor::record::VendorRecord;
 use odx_vendor::{Options, Vendored};
 
@@ -121,31 +121,9 @@ fn install_addons(
             "no [tool.odx.groups] directories to vendor into".to_owned(),
         ));
     }
-    let uv_lock = read_uv_lock(ctx, root)?.ok_or_else(|| {
-        Report::error(
-            Exit::Failure,
-            format!(
-                "{} is missing; run `uv lock`",
-                root.join("uv.lock").display()
-            ),
-        )
-    })?;
-    let lock = prepared.lock.clone().unwrap_or_default();
-    let git_source = |dist: &str| {
-        lock.packages
-            .iter()
-            .find(|(name, _)| normalize_name(name) == normalize_name(dist))
-            .map(|(_, entry)| {
-                (
-                    entry.url.clone(),
-                    entry.sha.clone(),
-                    entry.subdirectory.clone(),
-                )
-            })
-    };
     let groups: Vec<String> = group_dirs.keys().cloned().collect();
     let failed = |e: VendorError| Report::error(Exit::Failure, e.to_string());
-    let items = plan(&uv_lock, &groups, &git_source).map_err(failed)?;
+    let items = vendor_items(ctx, prepared, &groups)?;
     let record_path = root.join(vendor_manifest(config));
     let previous = match ctx.fs.read(&record_path) {
         Ok(bytes) => VendorRecord::parse(&String::from_utf8_lossy(&bytes))
@@ -188,6 +166,70 @@ fn install_addons(
         .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", record_path.display())))?;
     describe_vendored(&vendored, &group_dirs, root, report, json);
     Ok(())
+}
+
+/// The addon packages of `groups` that `odx vendor` installs, from
+/// `uv.lock`.
+fn vendor_items(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    groups: &[String],
+) -> Result<Vec<Item>, Report> {
+    let root = &prepared.project.root;
+    let uv_lock = read_uv_lock(ctx, root)?.ok_or_else(|| {
+        Report::error(
+            Exit::Failure,
+            format!(
+                "{} is missing; run `uv lock`",
+                root.join("uv.lock").display()
+            ),
+        )
+    })?;
+    let lock = prepared.lock.clone().unwrap_or_default();
+    let git_source = |dist: &str| {
+        lock.packages
+            .iter()
+            .find(|(name, _)| normalize_name(name) == normalize_name(dist))
+            .map(|(_, entry)| {
+                (
+                    entry.url.clone(),
+                    entry.sha.clone(),
+                    entry.subdirectory.clone(),
+                )
+            })
+    };
+    plan(&uv_lock, groups, &git_source).map_err(|e| Report::error(Exit::Failure, e.to_string()))
+}
+
+/// Download the wheels `odx vendor` installs into the shared wheel cache;
+/// how many there are. Off with `[tool.odx.cache] prefetch_wheels = false`.
+pub(crate) fn prefetch_wheels(ctx: &Context<'_>, prepared: &Prepared) -> Result<usize, Report> {
+    let config = &prepared.project.config;
+    let groups: Vec<String> = config.group_dirs().into_keys().collect();
+    let wanted = config
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.prefetch_wheels)
+        .unwrap_or(true);
+    if groups.is_empty() || !wanted {
+        return Ok(0);
+    }
+    let items = vendor_items(ctx, prepared, &groups)?;
+    let wheel_cache = prepared.cache.root().join("wheels");
+    ReqwestHttp::new()
+        .map_err(download_error("the package index"))
+        .and_then(|http| {
+            items
+                .iter()
+                .filter_map(|item| match &item.source {
+                    ItemSource::Wheel { url, hash } => Some((url, hash)),
+                    ItemSource::Git { .. } => None,
+                })
+                .map(|(url, hash)| fetch(&http, &wheel_cache, url, hash))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .map(|wheels| wheels.len())
+        .map_err(|e| Report::error(Exit::Failure, e.to_string()))
 }
 
 /// Report what `odx vendor` wrote, as text and JSON.
