@@ -112,6 +112,17 @@ impl SystemGit {
         self.run("update-ref", &invocation).map(drop)
     }
 
+    /// Pack every object the repository at `dir` reaches, including those
+    /// it borrows through `objects/info/alternates`, into its own store.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot read or write an object.
+    pub fn repack_all(&self, dir: &Path) -> Result<(), GitError> {
+        let invocation = self.git(Some(dir)).args(["repack", "-a", "-d", "-q"]);
+        self.run("repack", &invocation).map(drop)
+    }
+
     /// Write a git bundle of `refs` of the repository at `dir` to `file`.
     ///
     /// # Errors

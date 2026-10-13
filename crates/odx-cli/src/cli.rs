@@ -665,6 +665,11 @@ pub enum CacheCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Copy what cache repositories borrow from local clones into the cache, so the clones can go.
+    Detach {
+        /// Only this repository: a name in this project or a URL.
+        repo: Option<String>,
+    },
 }
 
 /// Arguments of `odx sync`.

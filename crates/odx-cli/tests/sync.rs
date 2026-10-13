@@ -340,3 +340,70 @@ fn workspaces_register_themselves_when_asked() {
     let (_, out, _) = machine.odx(machine.tmp.path(), &["sync", "--all"]);
     assert!(out.starts_with("synced "), "{out}");
 }
+
+#[test]
+fn sync_prefetches_the_wheels_vendor_installs() {
+    use sha2::Digest as _;
+
+    let machine = Machine::new();
+    let a = machine.workspace("a");
+    let wheel = machine
+        .tmp
+        .path()
+        .join("odoo_addon_x-17.0.1.0.0-py3-none-any.whl");
+    std::fs::write(&wheel, "a wheel").unwrap();
+    let hash = sha2::Sha256::digest(b"a wheel")
+        .iter()
+        .fold(String::new(), |mut hex, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
+    let pyproject = std::fs::read_to_string(a.join("pyproject.toml")).unwrap();
+    let with_groups = pyproject.replacen(
+        "odoo_version = \"17.0\"\n",
+        "odoo_version = \"17.0\"\n\n[tool.odx.groups]\noca = \"vendor/oca\"\n",
+        1,
+    );
+    std::fs::write(a.join("pyproject.toml"), &with_groups).unwrap();
+    // No uv.lock yet: the wheels cannot be planned.
+    let (exit, out, _) = machine.odx(&a, &["sync"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(out.contains("; wheels: "), "{out}");
+    // One package from an index, one from git (which odx fetches as a
+    // repository, not as a wheel).
+    let uv_lock = |hash: &str| {
+        format!(
+            "version = 1\n\n[[package]]\nname = \"a\"\nversion = \"1\"\nsource = {{ virtual = \".\" }}\n\n[package.optional-dependencies]\noca = [{{ name = \"odoo-addon-x\" }}, {{ name = \"odoo-addon-y\" }}]\n\n[[package]]\nname = \"odoo-addon-x\"\nversion = \"17.0.1.0.0\"\nsource = {{ registry = \"https://pypi.org/simple\" }}\nwheels = [{{ url = \"{}\", hash = \"sha256:{hash}\" }}]\n\n[[package]]\nname = \"odoo-addon-y\"\nversion = \"17.0.1.0.0\"\nsource = {{ git = \"https://example.com/y.git#{}\" }}\n",
+            file_url(&wheel),
+            "0".repeat(40)
+        )
+    };
+    std::fs::write(a.join("uv.lock"), uv_lock("00")).unwrap();
+    let (exit, out, _) = machine.odx(&a, &["sync"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(out.contains("; wheels: "), "{out}");
+    std::fs::write(a.join("uv.lock"), uv_lock(&hash)).unwrap();
+    let (exit, out, _) = machine.odx(&a, &["sync"]);
+    assert_eq!(exit, Exit::Success, "{out}");
+    assert!(out.ends_with("; 1 wheels cached\n"), "{out}");
+    assert!(
+        machine
+            .cache()
+            .join("wheels")
+            .join(format!("{hash}.whl"))
+            .is_file()
+    );
+    // Switched off per project.
+    std::fs::write(
+        a.join("pyproject.toml"),
+        with_groups.replacen(
+            "[tool.odx.groups]",
+            "[tool.odx.cache]\nprefetch_wheels = false\n\n[tool.odx.groups]",
+            1,
+        ),
+    )
+    .unwrap();
+    let (_, out, _) = machine.odx(&a, &["sync"]);
+    assert!(!out.contains("wheels"), "{out}");
+}

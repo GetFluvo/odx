@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::lock::RepoLock;
-use crate::{Cache, Forge, GitBackend, GitError, LocalClone, Source};
+use crate::{Cache, Forge, GitBackend, GitError, LocalClone, Source, SystemGit};
 
 /// What to fetch for one repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +227,34 @@ fn cached_commits(backend: &dyn GitBackend, dir: &Path, plan: &FetchPlan) -> Vec
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+/// Stop the cache repository at `dir` borrowing objects from a local clone.
+///
+/// What it borrows is copied into its own store before the alternate is
+/// dropped, so the clone can be deleted or pruned afterwards. Returns
+/// whether it borrowed anything.
+///
+/// # Errors
+///
+/// [`GitError::Locked`] when another process keeps the repository locked
+/// past `lock_timeout`, and git's error when the borrowed objects cannot be
+/// read (the clone lost them already).
+pub fn detach(
+    git: &SystemGit,
+    dir: &Path,
+    lock_file: &Path,
+    lock_timeout: Duration,
+) -> Result<bool, GitError> {
+    let _lock = RepoLock::acquire(lock_file, lock_timeout)?;
+    let alternates = alternates_file(dir);
+    if !alternates.is_file() {
+        return Ok(false);
+    }
+    git.repack_all(dir)?;
+    fs::remove_file(&alternates)
+        .map(|()| true)
+        .map_err(GitError::from)
 }
 
 /// The alternates file of a repository.

@@ -7,9 +7,10 @@ Inspect and garbage-collect the shared cache
 Usage: odx cache [OPTIONS] <COMMAND>
 
 Commands:
-  info  Show cache location, size and freshness
-  gc    Remove repositories no registered workspace uses, least recently used first
-  help  Print this message or the help of the given subcommand(s)
+  info    Show cache location, size and freshness
+  gc      Remove repositories no registered workspace uses, least recently used first
+  detach  Copy what cache repositories borrow from local clones into the cache, so the clones can go
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -C, --project-dir <DIR>

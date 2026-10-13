@@ -707,6 +707,42 @@ fn a_vanished_clone_is_reported_instead_of_corrupting_the_cache() {
 }
 
 #[test]
+fn detaching_copies_what_the_cache_borrows_from_a_clone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let clone = clone_of(tmp.path(), &up, false);
+    let cache = Cache::new(tmp.path().join("cache"));
+    let plan = pos_plan(&up, Some(clone.clone()));
+    fetch(&cache, &system(), &plan, WAIT).unwrap();
+    let dir = cache.repo_dir(&plan.url);
+    let lock = cache.lock_file(&plan.url);
+    // Locked by another process.
+    let held = RepoLock::acquire(&lock, WAIT).unwrap();
+    let err = detach(&system(), &dir, &lock, Duration::ZERO).unwrap_err();
+    assert!(
+        err.to_string()
+            .ends_with("is locked by another odx process"),
+        "{err}"
+    );
+    drop(held);
+    // The clone lost its objects: nothing to copy them from.
+    let objects = clone.git_dir.join("objects");
+    fs::rename(&objects, clone.git_dir.join("objects.away")).unwrap();
+    fs::create_dir_all(&objects).unwrap();
+    let err = detach(&system(), &dir, &lock, WAIT).unwrap_err();
+    assert!(err.to_string().starts_with("git repack failed"), "{err}");
+    fs::remove_dir_all(&objects).unwrap();
+    fs::rename(clone.git_dir.join("objects.away"), &objects).unwrap();
+    // Detached, the cache works without the clone.
+    assert!(detach(&system(), &dir, &lock, WAIT).unwrap());
+    assert!(!alternates_file(&dir).exists());
+    fs::remove_dir_all(tmp.path().join("clones")).unwrap();
+    let fetched = fetch(&cache, &system(), &pos_plan(&up, None), WAIT).unwrap();
+    assert_eq!(fetched[0].sha, up.base);
+    assert!(!detach(&system(), &dir, &lock, WAIT).unwrap());
+}
+
+#[test]
 fn a_clone_path_that_is_not_a_repository_is_an_error() {
     let tmp = tempfile::tempdir().unwrap();
     let up = upstream(tmp.path(), "pos");

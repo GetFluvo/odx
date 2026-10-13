@@ -105,7 +105,9 @@ $ odx sync --unregister
 
 `odx sync` runs `odx aggregate --fetch-only --prefer-mirror` for each
 workspace, quietly and with few jobs, so a later `odx aggregate` finds
-everything in the cache. `--register` records the workspace (its path,
+everything in the cache. It also downloads the wheels `odx vendor` installs
+for the project's dependency groups into the shared wheel cache (off with
+`[tool.odx.cache] prefetch_wheels = false`). `--register` records the workspace (its path,
 the date and the Odoo series) under `[workspaces]` in the user
 configuration (`~/.config/odx/config.toml`); comments and other settings
 there are kept. One sync runs per machine at a time: a second one prints
@@ -162,6 +164,8 @@ $ odx cache info                 # location, size, repositories, last sync
 $ odx cache gc --dry-run         # what would be removed
 $ odx cache gc                   # remove repositories no registered workspace uses
 $ odx cache gc --max-size 10GB   # only as many as needed to get under 10 GB
+$ odx cache detach               # stop borrowing objects from local clones
+$ odx cache detach pos           # one repository, by name or URL
 ```
 
 A repository is in use when a registered workspace (or the project in the
@@ -169,6 +173,11 @@ current directory) aggregates it or locks a package from it. `odx cache gc`
 removes unused repositories, least recently fetched first; with a size
 limit (`--max-size` or `[cache] max_size`) it stops once the cache fits.
 A repository another odx is fetching into is left alone.
+
+Cache repositories borrow objects from your local clones (`[clones]`).
+Before deleting or pruning such a clone, run `odx cache detach`: it copies
+what the cache borrows into the cache itself (`git repack -a -d`) and
+removes the link.
 
 ## Using your local clones
 
