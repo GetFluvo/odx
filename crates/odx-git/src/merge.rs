@@ -344,7 +344,8 @@ impl Merger {
     pub fn archive(&self, repo: &Path, rev: &str, path: Option<&str>) -> Result<Vec<u8>, GitError> {
         let invocation = self
             .git(repo)
-            .args(["archive", "--format=zip", rev, "--"])
+            // The committed bytes, without line-ending conversion.
+            .args(["-c", "core.autocrlf=false", "archive", "--format=zip", rev, "--"])
             .args(path);
         self.run("archive", &invocation).map(|out| out.stdout)
     }
