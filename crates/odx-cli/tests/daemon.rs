@@ -47,8 +47,12 @@ impl Machine {
         Self { tmp, env }
     }
 
+    /// `relative`, written with `/`, under the machine's directory and
+    /// with the platform's separators.
     fn path(&self, relative: &str) -> PathBuf {
-        self.tmp.path().join(relative)
+        relative
+            .split('/')
+            .fold(self.tmp.path().to_path_buf(), |path, part| path.join(part))
     }
 
     fn odx(&self, args: &[&str]) -> (Exit, String, String) {
