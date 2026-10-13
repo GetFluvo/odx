@@ -13,8 +13,13 @@ use odx_config::packages::package_specs;
 use odx_config::uvlock::UvLock;
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner};
+use odx_forge::ReqwestHttp;
 use odx_git::Merger;
+use odx_platform::installed::{
+    modified_files, scan, site_packages, substituted, wheel_record, wheel_tags,
+};
 use odx_platform::requirements_path;
+use odx_vendor::archive::{download_error, fetch};
 use odx_vendor::check;
 use odx_vendor::record::VendorRecord;
 use toml_edit::{DocumentMut, Item};
@@ -31,12 +36,6 @@ pub(crate) fn run_verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'
 }
 
 fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
-    if args.installed {
-        return Err(Report::error(
-            Exit::Usage,
-            "odx verify --installed: not implemented yet (roadmap phase 5)".to_owned(),
-        ));
-    }
     let prepared = prepare(global, ctx)?;
     let lock = prepared.lock.clone().unwrap_or_default();
     let mut problems = Vec::new();
@@ -46,6 +45,9 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     stray_addons(&prepared, &mut problems);
     if args.requirements {
         requirements(ctx, &prepared, &mut problems)?;
+    }
+    if let Some(dir) = &args.installed {
+        installed(ctx, &prepared, dir, &mut problems);
     }
     if args.vendored || args.deployed.is_some() {
         vendored(
@@ -319,6 +321,116 @@ fn vendored(
         }
     }
     Ok(())
+}
+
+/// Every distribution installed in `dir` that `uv.lock` knows has the
+/// locked version, the locked commit or the files of the locked wheel, and
+/// no file changed since it was installed.
+fn installed(ctx: &Context<'_>, prepared: &Prepared, dir: &Path, problems: &mut Vec<String>) {
+    let target = ctx.dir.join(dir);
+    let Some(site) = site_packages(&target) else {
+        problems.push(format!("{}: no site-packages found", target.display()));
+        return;
+    };
+    let uv_lock_path = prepared.project.root.join("uv.lock");
+    let Some(uv_lock) = ctx
+        .fs
+        .read(&uv_lock_path)
+        .ok()
+        .and_then(|bytes| UvLock::parse(&String::from_utf8_lossy(&bytes)).ok())
+    else {
+        problems.push(format!(
+            "{} is missing or unreadable",
+            uv_lock_path.display()
+        ));
+        return;
+    };
+    let cache = prepared.cache.root().join("wheels");
+    for dist in scan(&site) {
+        let candidates = uv_lock.packages_named(&dist.name);
+        if candidates.is_empty() {
+            continue;
+        }
+        let Some(package) = candidates
+            .iter()
+            .find(|package| package.version.as_deref() == Some(dist.version.as_str()))
+        else {
+            let locked: Vec<&str> = candidates
+                .iter()
+                .filter_map(|package| package.version.as_deref())
+                .collect();
+            problems.push(format!(
+                "{} {} is installed, uv.lock pins {}",
+                dist.name,
+                dist.version,
+                locked.join(" or ")
+            ));
+            continue;
+        };
+        problems.extend(
+            modified_files(&site, &dist)
+                .into_iter()
+                .map(|file| format!("{}: {file} changed after installation", dist.name)),
+        );
+        if let Some(git) = &package.source.git {
+            let locked = git.rsplit_once('#').map(|(_, sha)| sha).unwrap_or_default();
+            if dist.commit.as_deref() != Some(locked) {
+                problems.push(format!(
+                    "{}: installed from commit {}, uv.lock pins {locked}",
+                    dist.name,
+                    dist.commit.as_deref().unwrap_or("(none)")
+                ));
+            }
+            continue;
+        }
+        if package.wheels.is_empty() {
+            // A local directory or file: nothing locked to compare with.
+            continue;
+        }
+        let location = |wheel: &&odx_config::uvlock::UvWheel| {
+            wheel
+                .url
+                .as_deref()
+                .or(wheel.path.as_deref())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let Some(wheel) = package.wheels.iter().find(|wheel| {
+            wheel_tags(&location(wheel))
+                .iter()
+                .any(|tag| dist.tags.contains(tag))
+        }) else {
+            problems.push(format!(
+                "{} {}: no wheel in uv.lock matches what is installed",
+                dist.name, dist.version
+            ));
+            continue;
+        };
+        let url = location(&wheel);
+        let hash = wheel.hash.clone().unwrap_or_default();
+        let record = ReqwestHttp::new()
+            .map_err(download_error(&url))
+            .and_then(|http| fetch(&http, &cache, &url, &hash))
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| wheel_record(&bytes));
+        match record {
+            Ok(record) => {
+                let different = substituted(&record, &dist.record);
+                if let Some(first) = different.first() {
+                    problems.push(format!(
+                        "{} {}: not the locked wheel ({} files differ, such as {first})",
+                        dist.name,
+                        dist.version,
+                        different.len()
+                    ));
+                }
+            }
+            Err(e) => problems.push(format!(
+                "{}: cannot compare with the locked wheel: {e}",
+                dist.name
+            )),
+        }
+    }
 }
 
 /// `[tool.uv.sources]` entries that point at an editable local path.

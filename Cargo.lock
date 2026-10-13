@@ -1430,8 +1430,11 @@ dependencies = [
  "odx-config",
  "pep440_rs",
  "serde",
+ "serde_json",
  "sha2",
+ "tempfile",
  "toml 1.1.8+spec-1.1.0",
+ "zip",
 ]
 
 [[package]]

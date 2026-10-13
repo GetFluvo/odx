@@ -365,6 +365,30 @@ is not odx's, and when `uv.lock` or `odx.lock` moved on since `odx vendor`.
 the deployment repository before a push. The `generic-wheels` profile
 installs wheels instead, so `odx vendor` only writes its requirements there.
 
+## Installed wheels
+
+```console
+$ odx verify --installed .venv         # a virtual environment
+$ odx verify --installed /srv/odoo/lib/python3.12/site-packages
+```
+
+Proof that a deployment installed what was locked. For every distribution
+in the environment that `uv.lock` knows:
+
+- the installed version is the locked one;
+- a package from git was installed from the locked commit
+  (`direct_url.json`);
+- a package from an index holds exactly the files of the locked wheel: odx
+  takes the wheel `uv.lock` names for the installed tags (from the cache,
+  or downloaded and checked against its sha256) and compares its `RECORD`
+  with the installed one, so a different wheel with the same version is
+  found;
+- no installed file changed since installation (its hash against the
+  installed `RECORD`).
+
+Distributions `uv.lock` does not know (pip, setuptools) and packages from a
+local directory are not compared.
+
 ## Platform requirements
 
 ```console

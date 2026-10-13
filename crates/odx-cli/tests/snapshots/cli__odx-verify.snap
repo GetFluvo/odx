@@ -16,8 +16,8 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
-      --installed
-          Check installed wheels against uv.lock and odx.lock
+      --installed <DIR>
+          Check the wheels installed in a virtual environment (or site-packages) against uv.lock
 
   -j, --jobs <N>
           Override the number of parallel jobs

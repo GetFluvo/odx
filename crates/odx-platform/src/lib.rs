@@ -6,6 +6,7 @@
 //! it out.
 
 pub mod export;
+pub mod installed;
 pub mod provided;
 pub mod requirements;
 

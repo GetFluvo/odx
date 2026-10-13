@@ -19,7 +19,10 @@ workspace = true
 odx-config.workspace = true
 pep440_rs.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 toml.workspace = true
