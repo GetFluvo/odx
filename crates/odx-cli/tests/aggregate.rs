@@ -1066,3 +1066,52 @@ fn credentials_in_urls_never_reach_output() {
     let (_, json, _) = run(&project, &["--json", "aggregate", "--fetch-only"]);
     assert!(!json.contains("s3cr3t"), "{json}");
 }
+
+#[test]
+fn bundles_carry_the_locked_commits() {
+    let project = project("mergiraf = \"never\"");
+    let text = std::fs::read_to_string(project.root.join("pyproject.toml")).unwrap();
+    std::fs::write(
+        project.root.join("pyproject.toml"),
+        format!(
+            "{text}[[tool.odx.repositories]]\nname = \"pos-copy\"\nurl = \"{}\"\ntarget_dir = \"vendor/pos-copy\"\n",
+            project.upstream
+        ),
+    )
+    .unwrap();
+    let (exit, out, err) = run(&project, &["--json", "lock", "--bundle", "bundles"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.contains("\"commits\":2"), "{out}");
+    let (exit, out, _) = run(&project, &["lock", "--update", "--bundle", "bundles"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(out.contains("bundled 2 commits of "), "{out}");
+
+    // Upstream and cache are gone: the bundle is all there is.
+    let up = upstream_dir(&project);
+    std::fs::rename(&up, up.with_extension("gone")).unwrap();
+    std::fs::remove_dir_all(project.root.parent().unwrap().join("cache")).unwrap();
+    let (exit, out, err) = run(
+        &project,
+        &["aggregate", "--locked", "--bundle-dir", "bundles"],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(out.contains("from the mirror"), "{out}");
+    assert!(project.root.join("vendor/pos/b.txt").exists());
+
+    // The commits are not in the (new) cache: nothing to bundle from.
+    std::fs::remove_dir_all(project.root.parent().unwrap().join("cache")).unwrap();
+    let (exit, _, err) = run(&project, &["lock", "--bundle", "bundles"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("bundling failed"), "{err}");
+
+    // Nowhere to write.
+    std::fs::rename(up.with_extension("gone"), &up).unwrap();
+    assert_eq!(
+        run(&project, &["aggregate", "--locked", "--fetch-only"]).0,
+        Exit::Success
+    );
+    std::fs::write(project.root.join("blocked"), "").unwrap();
+    let (exit, _, err) = run(&project, &["lock", "--bundle", "blocked"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("bundling failed"), "{err}");
+}

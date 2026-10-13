@@ -267,6 +267,21 @@ vaulted odoo-addon-pos_vouchers: 1 commits
 pointed packages at the vault in pyproject.toml
 ```
 
+### Bundles as a safety net
+
+```console
+$ odx lock --bundle bundles/                     # one git bundle per repository
+$ odx aggregate --locked --bundle-dir bundles/   # locked commits from the bundles first
+```
+
+`--bundle` writes one git bundle per repository URL with every locked
+commit of it, named after the URL's hash (no project or client name), for
+CI to keep as an artifact. The commits are also kept under
+`refs/odx/locked/<commit>` in the cache. `odx aggregate --bundle-dir` takes
+locked commits from the bundles before asking any remote. Bundles must be
+kept as long as the `odx.lock` that references them is deployable; the
+vault is the mechanism, bundles are a safety net.
+
 ## Verifying a checkout
 
 ```console

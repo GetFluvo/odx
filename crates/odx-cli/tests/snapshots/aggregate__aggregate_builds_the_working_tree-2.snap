@@ -2,4 +2,4 @@
 source: crates/odx-cli/tests/aggregate.rs
 expression: redact(&out)
 ---
-{"built":[{"head":"<sha>","merges":[{"label":"#1","status":"merged"}],"name":"pos","target_dir":"vendor/pos","tree":"<sha>"}],"current":[],"errors":[],"fetched":[{"cached":0,"from_mirror":0,"refs":2,"repositories":"pos","through_clone":0}],"kept":[],"lock":[],"rewritten":false,"schema":1,"vaulted":[]}
+{"built":[{"head":"<sha>","merges":[{"label":"#1","status":"merged"}],"name":"pos","target_dir":"vendor/pos","tree":"<sha>"}],"bundled":[],"current":[],"errors":[],"fetched":[{"cached":0,"from_mirror":0,"refs":2,"repositories":"pos","through_clone":0}],"kept":[],"lock":[],"rewritten":false,"schema":1,"vaulted":[]}

@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::{GitError, SystemGit};
@@ -56,6 +57,32 @@ pub fn vault(
         git.push(repo, mirror, &refspecs)?;
     }
     Ok(names)
+}
+
+/// Write `file`, a git bundle of the commits `shas` of the cache repository.
+///
+/// Each commit is kept under `refs/odx/locked/<sha>` in `repo`, so
+/// collecting the cache never drops a locked commit. `odx aggregate
+/// --bundle-dir` fetches the commits from such a bundle by id.
+///
+/// # Errors
+///
+/// When git cannot create the refs or the bundle.
+pub fn bundle(git: &SystemGit, repo: &Path, shas: &[String], file: &Path) -> Result<(), GitError> {
+    let mut unique: Vec<&String> = shas.iter().collect();
+    unique.sort();
+    unique.dedup();
+    let names: Vec<String> = unique
+        .iter()
+        .map(|sha| format!("refs/odx/locked/{sha}"))
+        .collect();
+    let updates = unique.iter().fold(String::new(), |mut text, sha| {
+        let _ = writeln!(text, "update refs/odx/locked/{sha} {sha}");
+        text
+    });
+    git.update_refs(repo, &updates)?;
+    file.parent().map_or(Ok(()), std::fs::create_dir_all)?;
+    git.bundle(repo, file, &names)
 }
 
 #[cfg(test)]
@@ -148,5 +175,56 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().starts_with("git push failed"), "{err}");
+    }
+
+    #[test]
+    fn bundles_hold_commits_under_their_own_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "--quiet"]);
+        git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "a"]);
+        let a = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "b"]);
+        let b = git(&repo, &["rev-parse", "HEAD"]);
+        let system = SystemGit::new(Arc::new(OsRunner));
+        let bundled = tmp.path().join("bundles").join("repo.bundle");
+        bundle(&system, &repo, &[a.clone(), b, a.clone()], &bundled).unwrap();
+        let back = tmp.path().join("back.git");
+        git(
+            tmp.path(),
+            &["init", "--quiet", "--bare", back.to_str().unwrap()],
+        );
+        git(
+            &back,
+            &[
+                "fetch",
+                "--quiet",
+                bundled.to_str().unwrap(),
+                &format!("{a}:refs/a"),
+            ],
+        );
+        assert_eq!(git(&back, &["rev-parse", "refs/a"]), a);
+        assert!(bundle(&system, &repo, &["1".repeat(40)], &bundled).is_err());
+        assert!(
+            bundle(
+                &system,
+                &repo,
+                std::slice::from_ref(&a),
+                &tmp.path().join("x").join("..").join("repo")
+            )
+            .is_err()
+        );
+        let blocked = tmp.path().join("file");
+        std::fs::write(&blocked, "").unwrap();
+        assert!(
+            bundle(
+                &system,
+                &repo,
+                std::slice::from_ref(&a),
+                &blocked.join("repo.bundle")
+            )
+            .is_err()
+        );
     }
 }
