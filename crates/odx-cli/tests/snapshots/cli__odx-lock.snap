@@ -34,14 +34,17 @@ Options:
       --fresh
           Ignore cached data; refresh everything before answering
 
+      --no-uv
+          Do not run `uv lock` after rewriting package sources
+
       --no-push
           Do not push locked commits to the configured vault
 
-      --auto-update
-          Apply the configured lock auto-update policy to PyPI packages
-
       --no-refresh
           Use cached data even when stale
+
+      --auto-update
+          Apply the configured lock auto-update policy to PyPI packages
 
       --refresh-index
           Rebuild the addon index for the series involved

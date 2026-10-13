@@ -84,6 +84,8 @@ pub struct LockSource {
     pub branch: Option<String>,
     /// Remote of the branch, when not the repository URL.
     pub remote: Option<String>,
+    /// Tag (packages).
+    pub tag: Option<String>,
 }
 
 impl LockSource {
@@ -94,6 +96,7 @@ impl LockSource {
             sha: merge.sha.clone(),
             branch: merge.branch.clone(),
             remote: merge.remote.clone(),
+            tag: None,
         }
     }
 
@@ -414,6 +417,7 @@ fn source_value(source: &LockSource) -> Item {
     for (key, value) in [
         ("sha", &source.sha),
         ("branch", &source.branch),
+        ("tag", &source.tag),
         ("remote", &source.remote),
     ] {
         if let Some(value) = value {

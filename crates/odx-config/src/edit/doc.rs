@@ -39,7 +39,7 @@ pub enum Added {
 
 /// A `pyproject.toml` opened for editing; formatting outside the touched
 /// entries is preserved byte for byte.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PyprojectEdit {
     doc: DocumentMut,
 }
@@ -60,6 +60,25 @@ impl PyprojectEdit {
         text.parse()
             .map(|doc| Self { doc })
             .map_err(|e: toml_edit::TomlError| EditError::Toml(e.to_string()))
+    }
+
+    /// The document being edited.
+    ///
+    /// ```
+    /// use odx_config::edit::PyprojectEdit;
+    ///
+    /// let mut edit = PyprojectEdit::parse("[project]\nname = \"p\"\n").unwrap();
+    /// assert!(edit.document().get("project").is_some());
+    /// edit.document_mut().remove("project");
+    /// assert_eq!(edit.to_string(), "");
+    /// ```
+    pub fn document(&self) -> &DocumentMut {
+        &self.doc
+    }
+
+    /// The document being edited, for changes the methods do not cover.
+    pub fn document_mut(&mut self) -> &mut DocumentMut {
+        &mut self.doc
     }
 
     /// The `[tool.odx]` table, created with `odoo_version` when missing.

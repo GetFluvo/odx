@@ -26,12 +26,14 @@ fn sample() -> Lockfile {
         sha: None,
         branch: None,
         remote: None,
+        tag: None,
     };
     let branch = LockSource {
         pr: None,
         sha: None,
         branch: Some("17.0-fix".to_owned()),
         remote: Some("https://github.com/acme/pos.git".to_owned()),
+        tag: None,
     };
     let mut lock = Lockfile::new();
     lock.odoo = Some(OdooPin {
@@ -247,6 +249,7 @@ fn removing_entries() {
         sha: None,
         branch: None,
         remote: None,
+        tag: None,
     };
     assert!(lock.remove_merge("git@github.com:oca/pos", &pr));
     assert!(!lock.remove_merge("https://github.com/OCA/pos.git", &pr));
@@ -280,12 +283,14 @@ fn source() -> impl Strategy<Value = LockSource> {
         proptest::option::of(text()),
         proptest::option::of(text()),
         proptest::option::of(text()),
+        proptest::option::of(text()),
     )
-        .prop_map(|(pr, sha, branch, remote)| LockSource {
+        .prop_map(|(pr, sha, branch, remote, tag)| LockSource {
             pr,
             sha,
             branch,
             remote,
+            tag,
         })
 }
 

@@ -119,6 +119,74 @@ pub fn source_label(source: &LockSource) -> String {
     }
 }
 
+fn change(
+    repository: &str,
+    item: String,
+    kind: ChangeKind,
+    old: Option<&String>,
+    new: Option<&String>,
+) -> Change {
+    Change {
+        repository: repository.to_owned(),
+        item,
+        kind,
+        old: old.cloned(),
+        new: new.cloned(),
+    }
+}
+
+/// Changes of packages and of the Odoo core.
+fn package_changes(old: &Lockfile, new: &Lockfile) -> Vec<Change> {
+    let mut changes = Vec::new();
+    for (dist, entry) in &new.packages {
+        match old.packages.get(dist) {
+            None => changes.push(change(
+                dist,
+                "package".to_owned(),
+                ChangeKind::Added,
+                None,
+                Some(&entry.sha),
+            )),
+            Some(was) if was.sha != entry.sha => changes.push(change(
+                dist,
+                "package".to_owned(),
+                ChangeKind::Changed,
+                Some(&was.sha),
+                Some(&entry.sha),
+            )),
+            Some(_) => {}
+        }
+    }
+    for (dist, was) in &old.packages {
+        if !new.packages.contains_key(dist) {
+            changes.push(change(
+                dist,
+                "package".to_owned(),
+                ChangeKind::Removed,
+                Some(&was.sha),
+                None,
+            ));
+        }
+    }
+    let rev = |lock: &Lockfile| lock.odoo.as_ref().map(|odoo| odoo.rev.clone());
+    let (before, after) = (rev(old), rev(new));
+    if before != after {
+        let kind = match (&before, &after) {
+            (None, _) => ChangeKind::Added,
+            (_, None) => ChangeKind::Removed,
+            _ => ChangeKind::Changed,
+        };
+        changes.push(change(
+            "odoo",
+            "core".to_owned(),
+            kind,
+            before.as_ref(),
+            after.as_ref(),
+        ));
+    }
+    changes
+}
+
 /// Every difference between `old` and `new`, by repository name.
 ///
 /// ```
@@ -129,14 +197,6 @@ pub fn source_label(source: &LockSource) -> String {
 /// ```
 pub fn lock_changes(old: &Lockfile, new: &Lockfile) -> Vec<Change> {
     let mut changes = Vec::new();
-    let change =
-        |repository: &str, item: String, kind, old: Option<&String>, new: Option<&String>| Change {
-            repository: repository.to_owned(),
-            item,
-            kind,
-            old: old.cloned(),
-            new: new.cloned(),
-        };
     for entry in &new.repositories {
         let Some(previous) = old
             .repositories
@@ -215,6 +275,7 @@ pub fn lock_changes(old: &Lockfile, new: &Lockfile) -> Vec<Change> {
             ));
         }
     }
+    changes.extend(package_changes(old, new));
     changes
 }
 
@@ -222,6 +283,7 @@ pub fn lock_changes(old: &Lockfile, new: &Lockfile) -> Vec<Change> {
 mod tests {
     use super::*;
     use crate::plan_config;
+    use odx_config::lock::{LockedPackage, OdooPin};
     use odx_config::parse_pyproject;
     use odx_core::system::OsRunner;
     use odx_git::{Step, Strategy};
@@ -249,6 +311,7 @@ mod tests {
             sha: sha.map(str::to_owned),
             branch: branch.map(str::to_owned),
             remote: None,
+            tag: None,
         }
     }
 
@@ -340,6 +403,57 @@ mod tests {
         .map(|(r, i, k)| (r.to_owned(), i.to_owned(), k));
         assert_eq!(summary, expected);
         assert_eq!(lock_changes(&new, &new), []);
+    }
+
+    #[test]
+    fn package_and_core_changes() {
+        let package = |sha: &str| LockedPackage {
+            group: None,
+            url: "u".into(),
+            source: source(Some(1), None, None),
+            subdirectory: None,
+            sha: sha.repeat(40),
+            mirror_ref: None,
+        };
+        let odoo = |rev: &str| OdooPin {
+            url: "o".into(),
+            rev: rev.repeat(40),
+        };
+        let mut old = Lockfile::new();
+        old.packages.insert("kept".into(), package("k"));
+        old.packages.insert("moved".into(), package("a"));
+        old.packages.insert("gone".into(), package("g"));
+        let mut new = Lockfile::new();
+        new.packages.insert("kept".into(), package("k"));
+        new.packages.insert("moved".into(), package("b"));
+        new.packages.insert("new".into(), package("n"));
+        new.odoo = Some(odoo("1"));
+        let kinds = |old: &Lockfile, new: &Lockfile| -> Vec<(String, ChangeKind)> {
+            lock_changes(old, new)
+                .into_iter()
+                .map(|c| (c.repository, c.kind))
+                .collect()
+        };
+        assert_eq!(
+            kinds(&old, &new),
+            [
+                ("moved".to_owned(), ChangeKind::Changed),
+                ("new".to_owned(), ChangeKind::Added),
+                ("gone".to_owned(), ChangeKind::Removed),
+                ("odoo".to_owned(), ChangeKind::Added),
+            ]
+        );
+        let mut later = new.clone();
+        later.odoo = Some(odoo("2"));
+        assert_eq!(
+            kinds(&new, &later),
+            [("odoo".to_owned(), ChangeKind::Changed)]
+        );
+        later.odoo = None;
+        assert_eq!(
+            kinds(&new, &later),
+            [("odoo".to_owned(), ChangeKind::Removed)]
+        );
     }
 
     #[test]

@@ -320,6 +320,57 @@ pub fn read_uv_git_sources(doc: &DocumentMut) -> Vec<GitSource> {
         .collect()
 }
 
+/// The table at `key` in `item`, created (implicit) when missing; `None`
+/// when `item`, or the value at `key`, is not a table.
+fn child_table<'a>(item: &'a mut Item, key: &str) -> Option<&'a mut Item> {
+    item.as_table_like_mut().and_then(|table| {
+        if table.get(key).is_none() {
+            let mut new = toml_edit::Table::new();
+            new.set_implicit(true);
+            table.insert(key, Item::Table(new));
+        }
+        table.get_mut(key).filter(|child| child.is_table_like())
+    })
+}
+
+/// Point `[tool.uv.sources]` entry `dist` at tag `tag` of git repository `git`.
+///
+/// The table is created when needed and an existing entry for the same
+/// distribution (in any spelling) is replaced. Returns `false` when `tool`,
+/// `tool.uv` or `tool.uv.sources` is not a table.
+///
+/// ```
+/// use odx_config::deps::{read_uv_git_sources, set_uv_git_source};
+///
+/// let mut doc: toml_edit::DocumentMut = "[project]\nname = \"p\"\n".parse().unwrap();
+/// assert!(set_uv_git_source(&mut doc, "odoo-addon-x", "https://vault/v.git", "odx/abc", Some("x")));
+/// let source = &read_uv_git_sources(&doc)[0];
+/// assert_eq!((source.tag.as_deref(), source.subdirectory.as_deref()), (Some("odx/abc"), Some("x")));
+/// ```
+pub fn set_uv_git_source(
+    doc: &mut DocumentMut,
+    dist: &str,
+    git: &str,
+    tag: &str,
+    subdirectory: Option<&str>,
+) -> bool {
+    remove_uv_source(doc, dist);
+    let mut entry = toml_edit::InlineTable::new();
+    entry.insert("git", Value::from(git));
+    entry.insert("tag", Value::from(tag));
+    if let Some(subdirectory) = subdirectory {
+        entry.insert("subdirectory", Value::from(subdirectory));
+    }
+    let sources = child_table(doc.as_item_mut(), "tool")
+        .and_then(|tool| child_table(tool, "uv"))
+        .and_then(|uv| child_table(uv, "sources"))
+        .and_then(Item::as_table_like_mut);
+    sources.is_some_and(|sources| {
+        sources.insert(dist, Item::Value(Value::InlineTable(entry)));
+        true
+    })
+}
+
 /// Remove the `[tool.uv.sources]` entry of `dist`; returns whether one existed.
 pub fn remove_uv_source(doc: &mut DocumentMut, dist: &str) -> bool {
     let wanted = normalize_name(dist);
@@ -338,6 +389,33 @@ pub fn remove_uv_source(doc: &mut DocumentMut, dist: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uv_sources_are_written_in_place() {
+        let mut doc: DocumentMut = "[tool.uv.sources]\nodoo = { git = \"https://github.com/OCA/OCB.git\", branch = \"17.0\" }\nOdoo_Addon_X = { git = \"old\" }\n".parse().unwrap();
+        assert!(set_uv_git_source(
+            &mut doc,
+            "odoo-addon-x",
+            "v",
+            "odx/a",
+            None
+        ));
+        let sources = read_uv_git_sources(&doc);
+        assert_eq!(sources.len(), 2);
+        assert_eq!(
+            (sources[1].name.as_str(), sources[1].git.as_str()),
+            ("odoo-addon-x", "v")
+        );
+        assert_eq!(sources[1].subdirectory, None);
+        assert!(doc.to_string().starts_with("[tool.uv.sources]\nodoo = "));
+        for broken in ["tool = 1\n", "[tool]\nuv = 1\n", "[tool.uv]\nsources = 1\n"] {
+            let mut doc: DocumentMut = broken.parse().unwrap();
+            assert!(
+                !set_uv_git_source(&mut doc, "x", "v", "t", None),
+                "{broken}"
+            );
+        }
+    }
 
     const PYPROJECT: &str = r#"[project]
 name = "project-addons"

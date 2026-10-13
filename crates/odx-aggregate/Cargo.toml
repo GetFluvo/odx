@@ -18,6 +18,7 @@ odx-core.workspace = true
 odx-git.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+toml_edit.workspace = true
 
 [dev-dependencies]
 odx-core = { workspace = true, features = ["fakes", "system"] }
