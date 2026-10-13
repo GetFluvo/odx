@@ -34,7 +34,7 @@ pub struct Cli {
 }
 
 /// Options accepted by every command.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "command-line flags are independent switches"

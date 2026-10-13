@@ -410,6 +410,7 @@ fn dashboard(
             format!("no section {name:?}; sections are {}", known.join(", ")),
         ));
     }
+    #[cfg(not(feature = "tui"))]
     if args.format == DashboardFormat::Tui && args.act.is_none() {
         return Err(Report::error(
             Exit::Usage,
@@ -417,6 +418,10 @@ fn dashboard(
         ));
     }
     let prepared = prepare(global, ctx)?;
+    #[cfg(feature = "tui")]
+    if args.format == DashboardFormat::Tui && args.act.is_none() {
+        return interactive(args, global, ctx, &prepared);
+    }
     let mut warnings = Vec::new();
     // A recent dashboard (odx sync keeps one) answers at once; actions and
     // --fresh rebuild.
@@ -582,4 +587,86 @@ fn names(actions: &[Action]) -> String {
     } else {
         names.join(", ")
     }
+}
+
+/// `odx dashboard --format tui`: the view in the terminal until `q`.
+// A terminal session cannot run under test. The view's state, keys and
+// drawing are tested in odx-dashboard, its actions as `odx dashboard act`.
+#[cfg(feature = "tui")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn interactive(
+    args: &DashboardArgs,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+) -> Result<Report, Report> {
+    use odx_dashboard::tui::{App, Command, key_of};
+    use ratatui::crossterm::event::{self, Event, KeyEventKind};
+
+    use std::io::IsTerminal as _;
+    if !std::io::stdout().is_terminal() {
+        return Err(Report::error(
+            Exit::Usage,
+            "the interactive view needs a terminal; use --format table or markdown".to_owned(),
+        ));
+    }
+    let mut warnings = Vec::new();
+    let (mut dashboards, mut specs) = build(args, global, ctx, prepared, &mut warnings)?;
+    keep(prepared, &dashboards);
+    let mut app = App::new(&dashboards);
+    let mut terminal = ratatui::try_init()
+        .map_err(|e| Report::error(Exit::Failure, format!("cannot open the terminal: {e}")))?;
+    let fresh = GlobalArgs {
+        fresh: true,
+        ..global.clone()
+    };
+    let outcome = loop {
+        if let Err(e) = terminal.draw(|frame| app.render(frame)) {
+            break Err(e.to_string());
+        }
+        let key = match event::read() {
+            Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => key_of(key),
+            Ok(_) => None,
+            Err(e) => break Err(e.to_string()),
+        };
+        let Some(command) = key.and_then(|key| app.key(key)) else {
+            continue;
+        };
+        if let Command::Act { id, action, reason } = &command {
+            let act = DashboardActArgs {
+                id: id.clone(),
+                include: *action == Action::Include,
+                port: *action == Action::Port,
+                mute: *action == Action::Mute,
+                drop: *action == Action::Drop,
+                follow: *action == Action::Follow,
+                reason: reason.clone(),
+                kind: crate::cli::VerdictKind::NotWanted,
+            };
+            let report = run_act(&act, &dashboards, &specs, &fresh, ctx).unwrap_or_else(|r| r);
+            app.status = report
+                .error
+                .or_else(|| report.out.lines().next().map(str::to_owned))
+                .unwrap_or_else(|| format!("{} {id}: done", action.name()));
+        }
+        match command {
+            Command::Quit => break Ok(()),
+            Command::Refresh | Command::Act { .. } => {
+                if let Ok((built, built_specs)) = build(args, &fresh, ctx, prepared, &mut warnings)
+                {
+                    keep(prepared, &built);
+                    app.load(&built);
+                    dashboards = built;
+                    specs = built_specs;
+                }
+            }
+        }
+    };
+    ratatui::restore();
+    outcome
+        .map(|()| Report {
+            warnings,
+            ..Report::default()
+        })
+        .map_err(|e| Report::error(Exit::Failure, e))
 }
