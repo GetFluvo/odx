@@ -90,6 +90,35 @@ impl OdxConfig {
             .clone()
             .unwrap_or_else(|| PathBuf::from("odx.lock"))
     }
+
+    /// Directories of committed project addons, relative to the project
+    /// root: `[tool.odx.groups] project_addons`, else `[tool.odx.layout]
+    /// project_addons`, else the project root.
+    pub fn project_addon_dirs(&self) -> Vec<PathBuf> {
+        self.groups
+            .as_ref()
+            .and_then(|groups| groups.project_addons.clone())
+            .or_else(|| {
+                self.layout
+                    .as_ref()
+                    .and_then(|layout| layout.project_addons.clone())
+            })
+            .unwrap_or_else(|| vec![PathBuf::from(".")])
+    }
+
+    /// Dependency group → the directory its addons are vendored into:
+    /// `[tool.odx.layout] groups`, overridden by `[tool.odx.groups]`.
+    pub fn group_dirs(&self) -> BTreeMap<String, PathBuf> {
+        let mut dirs = self
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.groups.clone())
+            .unwrap_or_default();
+        if let Some(groups) = &self.groups {
+            dirs.extend(groups.dirs.clone());
+        }
+        dirs
+    }
 }
 
 /// How merges are applied on top of the base.
@@ -826,6 +855,33 @@ mod tests {
         let config: OdxConfig =
             toml::from_str("odoo_version = \"17.0\"\nlockfile = \"locks/odx.lock\"").unwrap();
         assert_eq!(config.lockfile(), PathBuf::from("locks/odx.lock"));
+    }
+
+    #[test]
+    fn addon_dirs() {
+        let config: OdxConfig = toml::from_str("odoo_version = \"17.0\"").unwrap();
+        assert_eq!(config.project_addon_dirs(), [PathBuf::from(".")]);
+        assert!(config.group_dirs().is_empty());
+        let config: OdxConfig = toml::from_str(
+            "odoo_version = \"17.0\"\n\
+             [layout]\nproject_addons = [\"addons\"]\ngroups = { oca = \"a\", private = \"p\" }\n",
+        )
+        .unwrap();
+        assert_eq!(config.project_addon_dirs(), [PathBuf::from("addons")]);
+        let config: OdxConfig = toml::from_str(
+            "odoo_version = \"17.0\"\n\
+             [groups]\nproject_addons = [\"custom\"]\noca = \"modules/oca\"\n\
+             [layout]\nproject_addons = [\"addons\"]\ngroups = { oca = \"a\", private = \"p\" }\n",
+        )
+        .unwrap();
+        assert_eq!(config.project_addon_dirs(), [PathBuf::from("custom")]);
+        assert_eq!(
+            config.group_dirs().into_iter().collect::<Vec<_>>(),
+            [
+                ("oca".to_owned(), PathBuf::from("modules/oca")),
+                ("private".to_owned(), PathBuf::from("p"))
+            ]
+        );
     }
 
     #[test]

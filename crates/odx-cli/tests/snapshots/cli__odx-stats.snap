@@ -10,8 +10,14 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --include-vendor
+          Also count the aggregated and vendored addons
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --per-addon
+          One row per addon instead of per language
 
   -j, --jobs <N>
           Override the number of parallel jobs
