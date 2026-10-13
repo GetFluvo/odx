@@ -247,6 +247,23 @@ pub struct LockedPackage {
     pub mirror_ref: Option<String>,
 }
 
+/// A wheel `odx build` made from locked source.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockedWheel {
+    /// `<manifest version>+odx.<tree>`.
+    pub version: String,
+    /// `sha256:<hex>` of the wheel.
+    pub sha256: String,
+    /// The index it was published to, once published.
+    pub index: Option<String>,
+    /// What it was built from: `repository <name>`, `package <dist>` or
+    /// `project`.
+    pub source: String,
+    /// The git tree of the addon directory it was built from.
+    pub tree: String,
+}
+
 /// The Odoo core revision, when Odoo is a git source.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -272,6 +289,9 @@ pub struct Lockfile {
     /// Locked packages by distribution name.
     #[serde(default)]
     pub packages: BTreeMap<String, LockedPackage>,
+    /// Wheels built by `odx build`, by distribution name.
+    #[serde(default)]
+    pub wheels: BTreeMap<String, LockedWheel>,
 }
 
 #[derive(Deserialize)]
@@ -290,6 +310,7 @@ impl Default for Lockfile {
             odoo: None,
             repositories: Vec::new(),
             packages: BTreeMap::new(),
+            wheels: BTreeMap::new(),
         }
     }
 }
@@ -369,6 +390,9 @@ impl Lockfile {
         for (name, package) in &self.packages {
             ids.push((format!("packages.{name}.sha"), &package.sha));
         }
+        for (name, wheel) in &self.wheels {
+            ids.push((format!("wheels.{name}.tree"), &wheel.tree));
+        }
         match ids.into_iter().find(|(_, value)| !is_object_id(value)) {
             Some((key, value)) => Err(LockError::BadObjectId {
                 key,
@@ -428,6 +452,20 @@ impl Lockfile {
                 packages.insert(name, Item::Table(package_table(package)));
             }
             doc.insert("packages", Item::Table(packages));
+        }
+        if !self.wheels.is_empty() {
+            let mut wheels = Table::new();
+            wheels.set_implicit(true);
+            for (name, wheel) in &self.wheels {
+                let mut table = Table::new();
+                set(&mut table, "version", Some(&wheel.version));
+                set(&mut table, "sha256", Some(&wheel.sha256));
+                set(&mut table, "index", wheel.index.as_ref());
+                set(&mut table, "source", Some(&wheel.source));
+                set(&mut table, "tree", Some(&wheel.tree));
+                wheels.insert(name, Item::Table(table));
+            }
+            doc.insert("wheels", Item::Table(wheels));
         }
         format!("{HEADER}{doc}")
     }

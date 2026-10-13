@@ -39,6 +39,13 @@ url = "https://github.com/OCA/pos.git"
 source = { pr = 45 }
 subdirectory = "pos_vouchers"
 sha = "<commit>"
+
+[wheels.odoo-addon-pos-vouchers]   # written by odx build
+version = "17.0.1.0.0+odx.pr45.0123456789ab"
+sha256 = "sha256:<hex>"
+index = "private"                 # once published
+source = "package odoo-addon-pos-vouchers"
+tree = "<tree of the addon directory>"
 ```
 
 Repositories are sorted by name, merges keep the configured order, packages

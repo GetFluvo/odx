@@ -12,6 +12,7 @@ use odx_core::{Exit, redact};
 
 pub(crate) mod aggregate;
 pub(crate) mod autoupdate;
+pub(crate) mod build;
 pub(crate) mod compat;
 pub(crate) mod edit;
 pub(crate) mod sniff;

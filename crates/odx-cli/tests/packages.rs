@@ -469,7 +469,7 @@ fn real_uv_locks_the_vaulted_commits() {
     for (addon, dist) in [("pos_x", "odoo-addon-pos_x"), ("other", "odoo-addon-other")] {
         std::fs::write(
             project.up.join(addon).join("pyproject.toml"),
-            format!("[project]\nname = \"{dist}\"\nversion = \"17.0.1.0.0\"\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n"),
+            format!("[project]\nname = \"{dist}\"\nversion = \"17.0.1.0.0\"\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[tool.hatch.build.targets.wheel]\ninclude = [\"*.py\"]\n"),
         )
         .unwrap();
     }
@@ -512,4 +512,14 @@ fn real_uv_locks_the_vaulted_commits() {
     );
     let (exit, out, err) = project.run(&["verify", "--requirements"]);
     assert_eq!(exit, Exit::Success, "{out}{err}");
+    // Wheels of the locked packages, with content-derived versions, twice
+    // the same.
+    let (exit, out, err) = project.run(&["build"]);
+    assert_eq!(exit, Exit::Success, "{out}{err}");
+    assert!(out.contains("+odx.pr1."), "{out}");
+    let lock = project.read("odx.lock");
+    assert!(lock.contains("[wheels.odoo-addon-pos-x]"), "{lock}");
+    let (_, again, _) = project.run(&["build"]);
+    assert_eq!(again, out);
+    assert_eq!(project.read("odx.lock"), lock);
 }

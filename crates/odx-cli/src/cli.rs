@@ -249,6 +249,18 @@ pub struct BuildArgs {
     /// Publish the built wheels to the private index.
     #[arg(long)]
     pub publish: bool,
+    /// The `[[tool.uv.index]]` to publish to (default: `[tool.odx.platform] index`, else `private`).
+    #[arg(long, value_name = "NAME")]
+    pub index: Option<String>,
+    /// Only addons whose name matches (repeatable, shell-style patterns).
+    #[arg(long, value_name = "GLOB")]
+    pub addon: Vec<String>,
+    /// Also build the project's own addons (from the committed HEAD).
+    #[arg(long)]
+    pub project: bool,
+    /// Where the wheels go (default: `dist/wheels`).
+    #[arg(long, value_name = "DIR")]
+    pub out_dir: Option<PathBuf>,
     /// Emit a CycloneDX SBOM per wheel.
     #[arg(long)]
     pub sbom: bool,

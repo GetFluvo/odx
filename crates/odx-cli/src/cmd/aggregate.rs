@@ -267,7 +267,11 @@ fn next_lock(prepared: &Prepared, entries: Vec<LockedRepository>, only: Option<&
     lock
 }
 
-fn write_lock(ctx: &Context<'_>, prepared: &Prepared, lock: &Lockfile) -> Result<(), Report> {
+pub(crate) fn write_lock(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    lock: &Lockfile,
+) -> Result<(), Report> {
     ctx.fs
         .write(&prepared.lock_path, lock.render().as_bytes())
         .map_err(|e| {

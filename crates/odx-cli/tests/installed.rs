@@ -228,12 +228,19 @@ fn substituted_and_changed_installations_are_found() {
         )],
     );
     install(&project.site, "other", "1.0", &[], &[]);
+    std::fs::write(
+        project.root.join("odx.lock"),
+        "version = 1\n\n[wheels.odoo-addon-a]\nversion = \"1.0+odx.0123456789ab\"\nsha256 = \"sha256:00\"\nsource = \"project\"\ntree = \"0123456789abcdef0123456789abcdef01234567\"\n\n\
+         [wheels.other]\nversion = \"1.0\"\nsha256 = \"sha256:00\"\nsource = \"project\"\ntree = \"0123456789abcdef0123456789abcdef01234567\"\n",
+    )
+    .unwrap();
     let (exit, err) = project.verify(&venv);
     assert_eq!(exit, Exit::Failure);
     for expected in [
         "gitpkg: installed from commit 4567, uv.lock pins 0123",
         "odoo-addon-a 1.0: not the locked wheel (1 files differ, such as odoo/addons/a/x.py)",
         "other 1.0 is installed, uv.lock pins 2.0",
+        "odoo-addon-a 1.0 is installed, odx build made 1.0+odx.0123456789ab",
     ] {
         assert!(err.contains(expected), "{expected}\n{err}");
     }

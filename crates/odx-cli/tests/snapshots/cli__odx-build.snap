@@ -16,8 +16,11 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
-      --sbom
-          Emit a CycloneDX SBOM per wheel
+      --index <NAME>
+          The `[[tool.uv.index]]` to publish to (default: `[tool.odx.platform] index`, else `private`)
+
+      --addon <GLOB>
+          Only addons whose name matches (repeatable, shell-style patterns)
 
   -j, --jobs <N>
           Override the number of parallel jobs
@@ -25,11 +28,20 @@ Options:
       --offline
           Serve forge and index data from the cache only
 
+      --project
+          Also build the project's own addons (from the committed HEAD)
+
       --fresh
           Ignore cached data; refresh everything before answering
 
+      --out-dir <DIR>
+          Where the wheels go (default: `dist/wheels`)
+
       --no-refresh
           Use cached data even when stale
+
+      --sbom
+          Emit a CycloneDX SBOM per wheel
 
       --refresh-index
           Rebuild the addon index for the series involved
