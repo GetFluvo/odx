@@ -148,6 +148,42 @@ impl ForgeClient<'_> {
 }
 
 impl ForgeClient<'_> {
+    /// The commits of pull request `number` (the first hundred), in the
+    /// forge's order.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::NotVisible`] when the forge does not show it, and
+    /// network, status, JSON and rate-limit errors.
+    pub fn pull_request_commits(
+        &self,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        number: u64,
+    ) -> Result<Vec<String>, ForgeError> {
+        let base = Self::repo_api(repo, kind);
+        let url = match kind {
+            ForgeKind::Gitlab => format!("{base}/merge_requests/{number}/commits?per_page=100"),
+            ForgeKind::Github => format!("{base}/pulls/{number}/commits?per_page=100"),
+            ForgeKind::Gitea => format!("{base}/pulls/{number}/commits?limit=50"),
+        };
+        let value = self.json(&url, repo, kind)?.ok_or_else(|| {
+            ForgeError::NotVisible(format!("{}/{}#{number}", repo.host, repo.path))
+        })?;
+        Ok(value
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter_map(|commit| {
+                commit
+                    .get("sha")
+                    .or_else(|| commit.get("id"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// The open pull requests of `repo` that target branch `base` (the
     /// first hundred).
     ///
@@ -273,6 +309,60 @@ mod tests {
         }
         let (pr, _) = pull("https://gitlab.com/g/r", ForgeKind::Gitlab, 200, "{}");
         assert_eq!(pr.unwrap().labels, Vec::<String>::new());
+    }
+
+    #[test]
+    fn pull_request_commits_per_forge() {
+        let list = |url: &str, kind: ForgeKind, status: u16, body: &str| {
+            let http = Scripted::new(vec![Ok(reply(status, body))]);
+            let env = MapEnv::default();
+            let runner = ScriptedRunner::default();
+            let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
+            let result = client.pull_request_commits(&RepoUrl::parse(url).unwrap(), kind, 7);
+            (result, http.urls())
+        };
+        let (commits, urls) = list(
+            "https://github.com/OCA/pos",
+            ForgeKind::Github,
+            200,
+            r#"[{"sha":"a"},{"sha":"b"},{}]"#,
+        );
+        assert_eq!(commits.unwrap(), ["a", "b"]);
+        assert_eq!(
+            urls,
+            ["https://api.github.com/repos/OCA/pos/pulls/7/commits?per_page=100"]
+        );
+        let (commits, urls) = list(
+            "https://gitlab.com/g/r",
+            ForgeKind::Gitlab,
+            200,
+            r#"[{"id":"c"}]"#,
+        );
+        assert_eq!(commits.unwrap(), ["c"]);
+        assert_eq!(
+            urls,
+            ["https://gitlab.com/api/v4/projects/g%2Fr/merge_requests/7/commits?per_page=100"]
+        );
+        let (commits, urls) = list("https://codeberg.org/o/r", ForgeKind::Gitea, 200, "{}");
+        assert_eq!(commits.unwrap(), Vec::<String>::new());
+        assert_eq!(
+            urls,
+            ["https://codeberg.org/api/v1/repos/o/r/pulls/7/commits?limit=50"]
+        );
+        let (commits, _) = list("https://codeberg.org/o/r", ForgeKind::Gitea, 404, "");
+        assert_eq!(
+            commits,
+            Err(ForgeError::NotVisible("codeberg.org/o/r#7".to_owned()))
+        );
+        let http = Scripted::new(vec![Err(ForgeError::Http("down".to_owned()))]);
+        let env = MapEnv::default();
+        let runner = ScriptedRunner::default();
+        let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
+        let repo = RepoUrl::parse("https://github.com/OCA/pos").unwrap();
+        assert_eq!(
+            client.pull_request_commits(&repo, ForgeKind::Github, 7),
+            Err(ForgeError::Http("down".to_owned()))
+        );
     }
 
     #[test]

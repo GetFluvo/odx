@@ -147,23 +147,23 @@ impl<'a> Worktree<'a> {
         }
     }
 
-    fn output(&self, invocation: &Invocation) -> Result<String, String> {
+    pub(crate) fn output(&self, invocation: &Invocation) -> Result<String, String> {
         self.bytes(invocation)
             .map(|out| String::from_utf8_lossy(&out).trim().to_owned())
     }
 
-    fn command(&self) -> Invocation {
+    pub(crate) fn command(&self) -> Invocation {
         Invocation::new("git")
             .env("LC_ALL", "C")
             .arg("-C")
             .arg(self.dir.as_os_str())
     }
 
-    fn git(&self, args: &[&str]) -> Result<String, String> {
+    pub(crate) fn git(&self, args: &[&str]) -> Result<String, String> {
         self.output(&self.command().args(args))
     }
 
-    fn git_dir(&self) -> Result<PathBuf, String> {
+    pub(crate) fn git_dir(&self) -> Result<PathBuf, String> {
         self.git(&["rev-parse", "--absolute-git-dir"])
             .map(PathBuf::from)
             .map_err(|e| format!("{} is not a git repository: {e}", self.dir.display()))
@@ -172,28 +172,46 @@ impl<'a> Worktree<'a> {
     /// The migration in progress, if any.
     #[must_use]
     pub fn state(&self) -> Option<State> {
-        let file = self.git_dir().ok()?.join(STATE_FILE);
+        self.load(STATE_FILE)
+    }
+
+    /// What `file` in the git directory keeps.
+    pub(crate) fn load<T: serde::de::DeserializeOwned>(&self, file: &str) -> Option<T> {
+        let file = self.git_dir().ok()?.join(file);
         serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
     }
 
-    fn save(&self, state: &State) -> Result<(), String> {
-        let file = self.git_dir()?.join(STATE_FILE);
+    /// Keep `state` in `file` in the git directory.
+    pub(crate) fn keep<T: Serialize>(&self, file: &str, state: &T) -> Result<(), String> {
+        let file = self.git_dir()?.join(file);
         let text = serde_json::to_string_pretty(state).unwrap_or_default();
         std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))
     }
 
-    /// Drop the kept migration. A file git's own directory does not let
-    /// go of is left for `--abort`.
-    fn forget(&self) {
+    fn save(&self, state: &State) -> Result<(), String> {
+        self.keep(STATE_FILE, state)
+    }
+
+    /// Drop `file` from the git directory. A file git's own directory does
+    /// not let go of is left for `--abort`.
+    pub(crate) fn drop_file(&self, file: &str) {
         if let Ok(dir) = self.git_dir() {
-            let _ = std::fs::remove_file(dir.join(STATE_FILE));
+            let _ = std::fs::remove_file(dir.join(file));
         }
+    }
+
+    fn forget(&self) {
+        self.drop_file(STATE_FILE);
     }
 
     /// Whether `git am` stopped in the middle.
     fn applying(&self) -> bool {
-        self.git_dir()
-            .is_ok_and(|dir| dir.join("rebase-apply").is_dir())
+        self.in_git_dir("rebase-apply")
+    }
+
+    /// Whether `name` exists in the git directory.
+    pub(crate) fn in_git_dir(&self, name: &str) -> bool {
+        self.git_dir().is_ok_and(|dir| dir.join(name).exists())
     }
 
     /// Start migrating: fetch both series from the remote, create the
@@ -212,12 +230,7 @@ impl<'a> Worktree<'a> {
                 state.plan.addon
             ));
         }
-        let changes = self.git(&["status", "--porcelain", "--untracked-files=no"])?;
-        if !changes.is_empty() {
-            return Err(
-                "the worktree has uncommitted changes; commit or stash them first".to_owned(),
-            );
-        }
+        self.clean()?;
         let (target, source) = (plan.target(), plan.source());
         let refspecs = [
             format!("+refs/heads/{}:{target}", plan.to),
@@ -259,9 +272,7 @@ impl<'a> Worktree<'a> {
             "--",
             &plan.addon,
         ]))?;
-        let name = self.git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
-        let head = self.git(&["rev-parse", "HEAD"])?;
-        let previous = Some(name).filter(|name| name != "HEAD").unwrap_or(head);
+        let previous = self.checked_out()?;
         let base = self.git(&["rev-parse", &target])?;
         let branch = plan.branch();
         self.git(&["switch", "--quiet", "--no-track", "-c", &branch, &target])
@@ -287,9 +298,37 @@ impl<'a> Worktree<'a> {
                 .stdin(patches),
         );
         if let Err(e) = applied {
-            return Ok(Outcome::Stopped(stopped(&e)));
+            return Ok(Outcome::Stopped(stopped(&e, MIGRATE)));
         }
         self.fixes(state, tools)
+    }
+
+    /// The top of the worktree.
+    pub(crate) fn root(&self) -> Result<PathBuf, String> {
+        self.git(&["rev-parse", "--show-toplevel"])
+            .map(PathBuf::from)
+    }
+
+    /// Run a program through the worktree's runner.
+    pub(crate) fn run(&self, invocation: &Invocation) -> std::io::Result<odx_core::Output> {
+        self.runner.run(invocation)
+    }
+
+    /// Refuse a worktree with uncommitted changes.
+    pub(crate) fn clean(&self) -> Result<(), String> {
+        let changes = self.git(&["status", "--porcelain", "--untracked-files=no"])?;
+        if changes.is_empty() {
+            Ok(())
+        } else {
+            Err("the worktree has uncommitted changes; commit or stash them first".to_owned())
+        }
+    }
+
+    /// The branch checked out, or the commit when detached.
+    pub(crate) fn checked_out(&self) -> Result<String, String> {
+        let name = self.git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
+        let head = self.git(&["rev-parse", "HEAD"])?;
+        Ok(Some(name).filter(|name| name != "HEAD").unwrap_or(head))
     }
 
     /// Go on after a conflict: `git am --continue` unless the history is
@@ -305,7 +344,7 @@ impl<'a> Worktree<'a> {
         if state.step == Step::History && self.applying() {
             let continued = self.git(&["am", "--continue", "--quiet"]);
             if let Err(e) = continued {
-                return Ok(Outcome::Stopped(stopped(&e)));
+                return Ok(Outcome::Stopped(stopped(&e, MIGRATE)));
             }
         }
         self.fixes(state, tools)
@@ -420,7 +459,12 @@ impl<'a> Worktree<'a> {
 
     /// Commit the addon's changes as `subject`; whether there was anything
     /// to commit (always true with `allow_empty`).
-    fn commit(&self, addon: &str, subject: &str, allow_empty: bool) -> Result<bool, String> {
+    pub(crate) fn commit(
+        &self,
+        addon: &str,
+        subject: &str,
+        allow_empty: bool,
+    ) -> Result<bool, String> {
         self.git(&["add", "--all", "--", addon])?;
         let changed = self.git(&["diff", "--cached", "--quiet"]).is_err();
         if changed || allow_empty {
@@ -473,14 +517,17 @@ impl<'a> Worktree<'a> {
     }
 }
 
-/// How to go on after `git am` stopped.
-fn stopped(error: &str) -> String {
+/// The command `--continue` and `--abort` belong to.
+const MIGRATE: &str = "odx migrate";
+
+/// How to go on after git stopped replaying commits for `command`.
+pub(crate) fn stopped(error: &str, command: &str) -> String {
     let detail = error
         .lines()
         .find(|line| line.starts_with("Patch failed") || line.starts_with("error:"))
         .unwrap_or("a commit does not apply");
     format!(
-        "replaying the history stopped: {detail}\nresolve the conflict, `git add` the files, then run `odx migrate --continue` (or `odx migrate --abort`)"
+        "replaying the history stopped: {detail}\nresolve the conflict, `git add` the files, then run `{command} --continue` (or `{command} --abort`)"
     )
 }
 
@@ -787,48 +834,14 @@ mod tests {
         git(&work, &["am", "--skip"]);
         assert_eq!(done(tree.resume(&none)).history, 1);
         assert_eq!(
-            stopped("x"),
+            stopped("x", MIGRATE),
             "replaying the history stopped: a commit does not apply\nresolve the conflict, `git add` the files, then run `odx migrate --continue` (or `odx migrate --abort`)"
         );
     }
 
-    /// Runs commands for real, except the `fail_at`-th, which fails to
-    /// start (`spawn`) or exits with 1.
-    #[derive(Debug)]
-    struct Faulty {
-        fail_at: usize,
-        spawn: bool,
-        calls: std::sync::atomic::AtomicUsize,
-    }
-
-    impl Faulty {
-        fn new(fail_at: usize, spawn: bool) -> Self {
-            Self {
-                fail_at,
-                spawn,
-                calls: std::sync::atomic::AtomicUsize::new(0),
-            }
-        }
-    }
-
-    impl ProcessRunner for Faulty {
-        fn run(&self, invocation: &Invocation) -> std::io::Result<odx_core::Output> {
-            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if call != self.fail_at {
-                return OsRunner.run(invocation);
-            }
-            if self.spawn {
-                return Err(std::io::Error::other("injected"));
-            }
-            Ok(odx_core::Output {
-                status: Some(1),
-                ..odx_core::Output::default()
-            })
-        }
-    }
-
     #[test]
     fn every_command_can_fail() {
+        use crate::testing::Faulty;
         let none = tools("odx-test-no-such-program", Some("odx-test-no-such-program"));
         let calls = |run: &dyn Fn(&Faulty)| {
             let counter = Faulty::new(usize::MAX, false);

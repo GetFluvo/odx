@@ -130,8 +130,7 @@ pub enum Command {
 
     // Porting & environments
     /// Port PRs or missing commits to another series; maintainer sweeps; blacklists.
-    #[command(subcommand)]
-    Port(PortCommand),
+    Port(PortArgs),
     /// Migrate addons to another Odoo series, the OCA way: history, pre-commit and odoo-lint fixes.
     Migrate(MigrateArgs),
     /// Copy exact pins (and optionally code) of modules or a feature between environments.
@@ -692,30 +691,77 @@ pub struct MigrateAddonArgs {
     pub open_pr: bool,
 }
 
+/// Arguments of `odx port`.
+#[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct PortArgs {
+    /// What to port.
+    #[command(subcommand)]
+    pub command: Option<PortCommand>,
+    /// Go on after resolving a conflict.
+    #[arg(long = "continue", conflicts_with = "abort")]
+    pub resume: bool,
+    /// Give up the port in progress and delete its branch.
+    #[arg(long)]
+    pub abort: bool,
+}
+
+/// What `odx port pr` and `odx port addon` share.
+#[derive(Debug, Args)]
+pub struct PortOptions {
+    /// Target series.
+    #[arg(long, value_name = "SERIES")]
+    pub to: String,
+    /// The remote the series come from [default: the one pointing at the pull request's
+    /// repository; for addons `upstream` when it exists, else `origin`].
+    #[arg(long, value_name = "NAME")]
+    pub remote: Option<String>,
+    /// Leave out odoo-lint's upgrade fixes.
+    #[arg(long)]
+    pub no_migrate: bool,
+    /// Then push the branch and open a draft pull request.
+    #[arg(long)]
+    pub open_pr: bool,
+    /// With --open-pr: push to this remote instead of the target or your fork.
+    #[arg(long, value_name = "NAME", requires = "open_pr")]
+    pub push_remote: Option<String>,
+}
+
 /// `odx port` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum PortCommand {
-    /// Port one pull request to another series.
+    /// Port one pull request to another series: its commits cherry-picked with their
+    /// authors onto the branch `<to>-port-<n>`, then odoo-lint's upgrade fixes.
     Pr {
         /// Pull request, for example `OCA/contract#1476`.
         pr: String,
-        /// Target series.
-        #[arg(long, value_name = "SERIES")]
-        to: String,
-        /// Push to your fork and open the pull request.
-        #[arg(long)]
-        open_pr: bool,
+        /// Where to, and how.
+        #[command(flatten)]
+        options: PortOptions,
     },
-    /// Port an addon's missing commits from another series.
+    /// Port the commits an addon has on another series and lacks on the target, grouped
+    /// by pull request, on the branch `<to>-port-<addon>`.
     Addon {
         /// Addon name.
         addon: String,
         /// Source series.
         #[arg(long, value_name = "SERIES")]
         from: String,
-        /// Target series.
-        #[arg(long, value_name = "SERIES")]
-        to: String,
+        /// Where to, and how.
+        #[command(flatten)]
+        options: PortOptions,
+    },
+    /// Add an entry to an addon's oca-port blacklist and commit it on the branch checked
+    /// out: `.oca/oca-port/blacklist/<addon>.json`, written as oca-port writes it.
+    Blacklist {
+        /// Addon name.
+        addon: String,
+        /// The pull request, for example `OCA/contract#1201`, or `orphaned` for the addon's
+        /// orphaned commits.
+        entry: String,
+        /// Why it is not ported; mandatory.
+        #[arg(long)]
+        reason: String,
     },
     /// Sweep every addon of a repository against older series (maintainer mode).
     Sweep {

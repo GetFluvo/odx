@@ -2,7 +2,7 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Port one pull request to another series
+Port one pull request to another series: its commits cherry-picked with their authors onto the branch `<to>-port-<n>`, then odoo-lint's upgrade fixes
 
 Usage: odx port pr [OPTIONS] --to <SERIES> <PR>
 
@@ -20,17 +20,26 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
-      --open-pr
-          Push to your fork and open the pull request
+      --remote <NAME>
+          The remote the series come from [default: the one pointing at the pull request's repository; for addons `upstream` when it exists, else `origin`]
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
+      --no-migrate
+          Leave out odoo-lint's upgrade fixes
+
       --offline
           Serve forge and index data from the cache only
 
+      --open-pr
+          Then push the branch and open a draft pull request
+
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --push-remote <NAME>
+          With --open-pr: push to this remote instead of the target or your fork
 
       --no-refresh
           Use cached data even when stale
