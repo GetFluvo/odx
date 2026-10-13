@@ -370,7 +370,10 @@ fn requirements_failures() {
     write(&old.root.join("pyproject.toml"), &pyproject);
     let (exit, _, err) = old.odx(&["vendor", "--requirements"]);
     assert_eq!(exit, Exit::Usage);
-    assert!(err.contains("odx has no provided set odoo-standard for Odoo 12.0"), "{err}");
+    assert!(
+        err.contains("odx has no provided set odoo-standard for Odoo 12.0"),
+        "{err}"
+    );
 
     // generic-wheels exports uv.lock, which must exist, with uv.
     let wheels = Project::new("profile = \"generic-wheels\"", false);

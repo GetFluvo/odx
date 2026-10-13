@@ -506,7 +506,10 @@ fn real_uv_locks_the_vaulted_commits() {
     let (exit, out, err) = project.run(&["vendor", "--requirements"]);
     assert_eq!(exit, Exit::Success, "{out}{err}");
     let requirements = project.read("dist/requirements.txt");
-    assert!(requirements.contains("odoo-addon-pos-x @ git+"), "{requirements}");
+    assert!(
+        requirements.contains("odoo-addon-pos-x @ git+"),
+        "{requirements}"
+    );
     let (exit, out, err) = project.run(&["verify", "--requirements"]);
     assert_eq!(exit, Exit::Success, "{out}{err}");
 }
