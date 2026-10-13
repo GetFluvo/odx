@@ -347,6 +347,14 @@ A built dashboard is kept in the cache; for `[tool.odx.cache] ttl.pr_state`
 and `--fresh` rebuilds it. `odx sync` rebuilds it for every workspace, and
 brings the verdict repository up to date on the way.
 
+`odx dashboard --format tui` opens the same dashboard as an interactive
+view in the terminal, one tab per series and section. Left and right switch
+tabs, up and down select an entry, `i`, `d`, `f`, `m` and `p` include,
+drop, follow, mute (asking for the reason) and port (asking for
+confirmation) the selected entry, `r` rebuilds the dashboard and `q` or Esc
+quits. The view is an optional feature: install odx with `cargo install
+odx-cli --features tui` (the PyPI wheel leaves it out).
+
 ## Verdicts and mutes
 
 ```console

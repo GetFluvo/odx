@@ -306,7 +306,11 @@ fn sections_and_renderers() {
     assert!(err.contains("no section \"drift\""), "{err}");
     let (code, _, err) = setup.odx(&["dashboard", "--format", "tui"]);
     assert_eq!(code, 2);
-    assert!(err.contains("`tui` feature"), "{err}");
+    if cfg!(feature = "tui") {
+        assert!(err.contains("needs a terminal"), "{err}");
+    } else {
+        assert!(err.contains("`tui` feature"), "{err}");
+    }
     // A package locked from a pull request is pinned too.
     let lock = std::fs::read_to_string(setup.project.join("odx.lock")).unwrap();
     std::fs::write(

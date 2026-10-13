@@ -15,7 +15,12 @@ categories.workspace = true
 [lints]
 workspace = true
 
+[features]
+# The interactive view.
+tui = ["dep:ratatui"]
+
 [dependencies]
+ratatui = { workspace = true, optional = true }
 serde.workspace = true
 
 [dev-dependencies]

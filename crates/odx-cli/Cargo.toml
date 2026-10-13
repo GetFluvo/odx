@@ -16,6 +16,10 @@ categories.workspace = true
 name = "odx"
 path = "src/main.rs"
 
+[features]
+# The interactive dashboard (`odx dashboard --format tui`).
+tui = ["odx-dashboard/tui", "dep:ratatui"]
+
 [dependencies]
 clap.workspace = true
 clap_complete.workspace = true
@@ -30,6 +34,7 @@ odx-git.workspace = true
 odx-platform.workspace = true
 odx-sync.workspace = true
 odx-dashboard.workspace = true
+ratatui = { workspace = true, optional = true }
 odx-index.workspace = true
 odx-port.workspace = true
 odx-verdicts.workspace = true

@@ -7,6 +7,9 @@
 //! render the same model; [`ticked`] reads the boxes ticked in the Markdown
 //! back as `(id, action)` pairs. The model never calls a forge.
 
+#[cfg(feature = "tui")]
+pub mod tui;
+
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
