@@ -276,6 +276,37 @@ local changes are listed at the end. The head is compared with the cache
 pull request the forge cannot show is reported as a warning while the others
 are listed. `--json` gives the same as data.
 
+## Preparing a series upgrade
+
+```console
+$ odx upgrade --target 18.0          # every addon of the project on 18.0
+$ odx upgrade --only-missing         # what has no 18.0 version yet
+$ odx upgrade --no-lint              # skip odoo-lint's readiness counts
+```
+
+`odx upgrade` looks at every addon the project uses: its own addons (under
+`project_addons`), the selected addons of aggregated repositories, and the
+addon packages in `uv.lock`. For each one it reports whether the target
+series has it:
+
+- `released`: the package index has a release for the target series;
+- `available`: the addon is on the target branch of a repository odx has in
+  its cache, or `[tool.odx.index.overrides]` names its repository;
+- `migration PR #n`: an open `[MIG]` pull request for the target series in
+  the repository the addon lives in now;
+- `missing`: none of the above, so the team migrates it.
+
+An addon that moved to another repository is shown with both repositories,
+and one renamed or merged on the way (OpenUpgrade's rename tables, plus
+`[tool.odx.index.renames]`) under its new name. The project's own addons
+get odoo-lint's upgrade counts (`odl upgrade-check`; `ODX_ODL` names the
+executable): how many changes are automatic, need review, or are manual.
+The target defaults to `[tool.odx.upgrade] target_odoo_version`.
+
+The answers of the package index are cached per series in the cache's
+`index/` directory for `[tool.odx.index] ttl` (default 7 days);
+`--refresh-index` asks again, `--offline` uses what is cached.
+
 ## Locking
 
 ```console

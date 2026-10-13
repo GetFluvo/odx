@@ -80,7 +80,7 @@ commits:
 
 # Both distribution paths: crates.io and PyPI wheels.
 package:
-    cargo publish --dry-run --allow-dirty -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p odx-dev -p odx-sync -p git-aggregate-rs -p odx-cli
+    cargo publish --dry-run --allow-dirty -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p odx-dev -p odx-sync -p odx-index -p git-aggregate-rs -p odx-cli
     uvx maturin build --release
     uvx maturin build --release -m crates/git-aggregate-rs/Cargo.toml
 

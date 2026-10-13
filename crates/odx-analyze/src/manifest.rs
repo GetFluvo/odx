@@ -113,6 +113,45 @@ pub fn parse_literal(text: &str) -> Result<Value, String> {
     }
 }
 
+/// The literal assigned to `name` at the start of a line of Python source.
+///
+/// Reads `name = {...}`, such as the rename tables of OpenUpgrade's
+/// `apriori.py`; `None` when there is no such assignment or the value is no
+/// literal.
+///
+/// ```
+/// use odx_analyze::manifest::{Value, assignment};
+///
+/// let source = "# renames\nrenamed_modules = {\n    'a': 'b',  # moved\n}\nx = 1\n";
+/// let table = assignment(source, "renamed_modules").unwrap();
+/// assert_eq!(table.get("a"), Some(&Value::Str("b".into())));
+/// assert_eq!(assignment(source, "merged_modules"), None);
+/// ```
+pub fn assignment(text: &str, name: &str) -> Option<Value> {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let value = line
+            .strip_prefix(name)
+            .map(str::trim_start)
+            .and_then(|rest| rest.strip_prefix('='))
+            .filter(|rest| !rest.starts_with('='));
+        if let Some(value) = value {
+            let start = offset + line.len() - value.len();
+            let mut parser = Parser {
+                chars: text
+                    .get(start..)
+                    .unwrap_or_default()
+                    .char_indices()
+                    .collect(),
+                at: 0,
+            };
+            return parser.value().ok();
+        }
+        offset += line.len();
+    }
+    None
+}
+
 struct Parser {
     chars: Vec<(usize, char)>,
     at: usize,

@@ -14,3 +14,14 @@ categories.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+odx-analyze.workspace = true
+odx-forge.workspace = true
+odx-git.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+odx-core = { workspace = true, features = ["system"] }
+tempfile.workspace = true

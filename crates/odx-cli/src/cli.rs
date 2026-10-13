@@ -521,9 +521,15 @@ pub enum VerdictCommand {
 /// Arguments of `odx upgrade`.
 #[derive(Debug, Args)]
 pub struct UpgradeArgs {
-    /// Target Odoo series, for example `19.0`.
+    /// Target Odoo series, for example `19.0` (default: `[tool.odx.upgrade] target_odoo_version`).
     #[arg(long, value_name = "SERIES")]
-    pub target: String,
+    pub target: Option<String>,
+    /// Only addons not available on the target series.
+    #[arg(long)]
+    pub only_missing: bool,
+    /// Skip odoo-lint's readiness counts for the project's own addons.
+    #[arg(long)]
+    pub no_lint: bool,
 }
 
 /// `odx port` subcommands.
