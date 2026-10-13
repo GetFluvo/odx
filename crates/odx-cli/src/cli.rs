@@ -120,7 +120,7 @@ pub enum Command {
     #[command(subcommand)]
     Verdict(VerdictCommand),
     /// Compare __manifest__.py dependencies with pyproject.toml.
-    CheckDeps,
+    CheckDeps(CheckDepsArgs),
     /// List database migration scripts introduced by merges.
     Sniff(SniffArgs),
     /// Lines of code per language.
@@ -720,6 +720,20 @@ pub enum StatusSort {
     Date,
 }
 
+/// Arguments of `odx check-deps`.
+#[derive(Debug, Args)]
+pub struct CheckDepsArgs {
+    /// Add missing addons the package index has to `[tool.odx.groups] default`.
+    #[arg(long)]
+    pub fix: bool,
+    /// Also report declared addon packages no scanned addon depends on.
+    #[arg(long)]
+    pub unused: bool,
+    /// Also check licenses along `depends` (AGPL and GPL need compatible dependers).
+    #[arg(long)]
+    pub licenses: bool,
+}
+
 /// Arguments of `odx lint`.
 #[derive(Debug, Args)]
 pub struct LintArgs {
@@ -771,7 +785,7 @@ impl Command {
             Self::Status(_) => "status",
             Self::Suggest(_) => "suggest",
             Self::Verdict(_) => "verdict",
-            Self::CheckDeps => "check-deps",
+            Self::CheckDeps(_) => "check-deps",
             Self::Sniff(_) => "sniff",
             Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
@@ -807,7 +821,7 @@ impl Command {
             | Self::Status(_)
             | Self::Suggest(_)
             | Self::Verdict(_)
-            | Self::CheckDeps
+            | Self::CheckDeps(_)
             | Self::Upgrade(_) => 7,
             Self::Port(_) => 8,
             Self::Lint(_) => 9,

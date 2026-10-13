@@ -276,6 +276,39 @@ local changes are listed at the end. The head is compared with the cache
 pull request the forge cannot show is reported as a warning while the others
 are listed. `--json` gives the same as data.
 
+## Checking dependencies
+
+```console
+$ odx check-deps                  # exit 1 when something is missing or odd
+$ odx check-deps --fix            # add missing addons from the package index
+$ odx check-deps --unused --licenses
+```
+
+`odx check-deps` reads the `__manifest__.py` of the project's own addons
+and of the selected addons of aggregated repositories, and reports:
+
+- `missing`: an addon in `depends` that nothing provides. Providers are
+  Odoo's own addons for the series (16.0 to 19.0 are bundled), the project,
+  the aggregated repositories (their working trees, or their cached base
+  before `odx aggregate`), the addon packages in any dependency group, and
+  `[tool.odx.check_deps] provided` (for example enterprise addons);
+- `missing python package`: an `external_dependencies` entry that
+  `pyproject.toml` does not declare;
+- `duplicate`: one addon from two sources, which Odoo resolves by
+  `addons_path` order;
+- `stray`: an addon directory in a vendored group that `odx vendor` did not
+  write, or one of the project's addons that git does not track.
+
+`--unused` adds declared addon packages that no scanned addon depends on;
+`--licenses` adds AGPL or GPL dependencies of addons under a weaker
+license. `--fix` adds the missing addons the package index has a release
+of for the series to `[tool.odx.groups] default`; run `uv lock` afterwards.
+
+```toml
+[tool.odx.check_deps]
+provided = ["account_accountant"]   # available on the platform, not in the project
+```
+
 ## Preparing a series upgrade
 
 ```console

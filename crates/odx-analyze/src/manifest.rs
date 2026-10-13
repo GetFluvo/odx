@@ -67,6 +67,8 @@ pub struct Manifest {
     pub python: Vec<String>,
     /// `installable` (default `true`).
     pub installable: bool,
+    /// `license`.
+    pub license: Option<String>,
 }
 
 /// Parse a manifest.
@@ -92,6 +94,10 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             .map(Value::strings)
             .unwrap_or_default(),
         installable: value.get("installable") != Some(&Value::Bool(false)),
+        license: value
+            .get("license")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     })
 }
 
