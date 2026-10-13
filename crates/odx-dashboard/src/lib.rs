@@ -9,10 +9,10 @@
 
 use std::fmt::Write as _;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// What a section shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SectionKind {
     /// Pull requests the project aggregates or pins, and their state.
@@ -79,7 +79,7 @@ impl SectionKind {
 }
 
 /// Something a person can do about an entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Action {
     /// Add the pull request to the project.
@@ -124,7 +124,7 @@ impl Action {
 }
 
 /// One line of a section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     /// Stable id, the same in every renderer.
     pub id: String,
@@ -141,7 +141,7 @@ pub struct Entry {
 }
 
 /// One section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Section {
     /// What it shows.
     pub kind: SectionKind,
@@ -152,7 +152,7 @@ pub struct Section {
 }
 
 /// The dashboard of one series.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dashboard {
     /// Format version.
     pub schema: u32,
@@ -350,6 +350,14 @@ mod tests {
             "open, head same"
         );
         assert_eq!(dashboard().entry("nope"), None);
+    }
+
+    #[test]
+    fn the_model_round_trips_through_json() {
+        let model = vec![dashboard()];
+        let text = serde_json::to_string(&model).unwrap();
+        let back: Vec<Dashboard> = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, model);
     }
 
     #[test]

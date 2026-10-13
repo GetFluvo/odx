@@ -212,6 +212,30 @@ fn sync_failures() {
     assert_eq!(exit, Exit::Success);
     assert!(out.starts_with("skipped "), "{out}");
     drop(foreground);
+    // A workspace whose upstream is gone, and one whose dashboard cannot
+    // be built.
+    let b = machine.workspace("b");
+    std::fs::remove_dir_all(machine.tmp.path().join("up-b")).unwrap();
+    let (exit, out, _) = machine.odx(&b, &["sync"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(out.starts_with("failed "), "{out}");
+    let pyproject = std::fs::read_to_string(a.join("pyproject.toml")).unwrap();
+    std::fs::write(
+        a.join("pyproject.toml"),
+        pyproject.replacen(
+            "odoo_version = \"17.0\"\n",
+            "odoo_version = \"17.0\"\n\n[tool.odx.port]\nmigration_commit_patterns = [\"(\"]\n",
+            1,
+        ),
+    )
+    .unwrap();
+    let (exit, out, _) = machine.odx(&a, &["sync"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        out.contains("; dashboard: migration_commit_patterns"),
+        "{out}"
+    );
+    std::fs::write(a.join("pyproject.toml"), pyproject).unwrap();
     // A user configuration that is not TOML.
     std::fs::create_dir_all(machine.tmp.path().join("config")).unwrap();
     std::fs::write(machine.tmp.path().join("config/config.toml"), "[cache\n").unwrap();
@@ -386,7 +410,10 @@ fn sync_prefetches_the_wheels_vendor_installs() {
     std::fs::write(a.join("uv.lock"), uv_lock(&hash)).unwrap();
     let (exit, out, _) = machine.odx(&a, &["sync"]);
     assert_eq!(exit, Exit::Success, "{out}");
-    assert!(out.ends_with("; 1 wheels cached\n"), "{out}");
+    assert!(
+        out.ends_with("; 1 wheels cached; dashboard of 1 entries\n"),
+        "{out}"
+    );
     assert!(
         machine
             .cache()

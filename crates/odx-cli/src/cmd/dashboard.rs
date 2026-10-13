@@ -33,6 +33,66 @@ fn now() -> u64 {
         .map_or(0, |since| since.as_secs())
 }
 
+/// Where the last dashboard of the project is kept.
+fn snapshot_file(prepared: &Prepared) -> std::path::PathBuf {
+    prepared
+        .cache
+        .root()
+        .join("snapshots")
+        .join(super::verdict::project_id(prepared))
+        .join("dashboard.json")
+}
+
+/// The kept dashboard, when it is younger than `[tool.odx.cache]
+/// ttl.pr_state` (default 30 minutes).
+fn snapshot(prepared: &Prepared) -> Option<Vec<Dashboard>> {
+    let ttl = prepared
+        .project
+        .config
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.ttl.as_ref())
+        .and_then(|ttl| ttl.pr_state)
+        .map_or(30 * 60, |span| span.as_duration().as_secs());
+    let kept: Vec<Dashboard> = std::fs::read(snapshot_file(prepared))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())?;
+    let oldest = kept.iter().map(|d| d.generated_at).min().unwrap_or(0);
+    (now().saturating_sub(oldest) <= ttl).then_some(kept)
+}
+
+/// Build the dashboards of `prepared` and keep them for the next
+/// `odx dashboard` (what `odx sync` runs for every workspace).
+pub(crate) fn refresh(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    global: &GlobalArgs,
+) -> Result<usize, Report> {
+    let args = DashboardArgs {
+        format: DashboardFormat::Table,
+        env: None,
+        section: Vec::new(),
+        checkboxes: false,
+        act: None,
+    };
+    let (dashboards, _) = build(&args, global, ctx, prepared, &mut Vec::new())?;
+    keep(prepared, &dashboards);
+    Ok(dashboards
+        .iter()
+        .flat_map(|d| &d.sections)
+        .map(|s| s.entries.len())
+        .sum())
+}
+
+/// Keep `dashboards`; a cache that cannot be written only costs a rebuild.
+fn keep(prepared: &Prepared, dashboards: &[Dashboard]) {
+    let file = snapshot_file(prepared);
+    let _ = file
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&file, serde_json::to_vec(dashboards).unwrap_or_default()));
+}
+
 /// `odx dashboard` and `odx dashboard act`.
 pub(crate) fn run_dashboard(
     args: &DashboardArgs,
@@ -324,9 +384,6 @@ fn build(
                 .iter()
                 .position(|kind| *kind == section.kind)
         });
-        sections.retain(|section| {
-            args.section.is_empty() || args.section.iter().any(|name| name == section.kind.name())
-        });
         dashboards.push(Dashboard {
             schema: 1,
             series: target,
@@ -361,10 +418,32 @@ fn dashboard(
     }
     let prepared = prepare(global, ctx)?;
     let mut warnings = Vec::new();
-    let (dashboards, specs) = build(args, global, ctx, &prepared, &mut warnings)?;
+    // A recent dashboard (odx sync keeps one) answers at once; actions and
+    // --fresh rebuild.
+    let kept = snapshot(&prepared).filter(|_| args.act.is_none() && !global.fresh);
+    let (dashboards, specs, note) = if let Some(dashboards) = kept {
+        let age =
+            now().saturating_sub(dashboards.iter().map(|d| d.generated_at).min().unwrap_or(0));
+        let note = format!("data as of {} min ago; --fresh rebuilds it\n", age / 60);
+        (dashboards, Specs::new(), note)
+    } else {
+        let (dashboards, specs) = build(args, global, ctx, &prepared, &mut warnings)?;
+        keep(&prepared, &dashboards);
+        (dashboards, specs, String::new())
+    };
     if let Some(DashboardAct::Act(act)) = &args.act {
         return run_act(act, &dashboards, &specs, global, ctx);
     }
+    let dashboards: Vec<Dashboard> = dashboards
+        .into_iter()
+        .map(|mut dashboard| {
+            dashboard.sections.retain(|section| {
+                args.section.is_empty()
+                    || args.section.iter().any(|name| name == section.kind.name())
+            });
+            dashboard
+        })
+        .collect();
     let out = if global.json {
         format!(
             "{}\n",
@@ -381,7 +460,11 @@ fn dashboard(
             .join("\n")
     };
     Ok(Report {
-        out,
+        out: if global.json {
+            out
+        } else {
+            format!("{out}{note}")
+        },
         warnings,
         ..Report::default()
     })
