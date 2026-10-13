@@ -31,6 +31,7 @@ odx-platform.workspace = true
 odx-sync.workspace = true
 odx-index.workspace = true
 odx-port.workspace = true
+odx-verdicts.workspace = true
 odx-vendor.workspace = true
 serde.workspace = true
 serde_json.workspace = true

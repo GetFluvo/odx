@@ -30,6 +30,7 @@ pub(crate) mod suggest;
 pub(crate) mod sync;
 pub(crate) mod upgrade;
 pub(crate) mod vendor;
+pub(crate) mod verdict;
 pub(crate) mod verify;
 
 /// Run `invocation`; a failure carries its standard error.
@@ -43,6 +44,18 @@ pub(crate) fn run_checked(invocation: &Invocation, what: &str) -> Result<(), Str
         |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
     );
     Err(format!("{what} failed: {detail}"))
+}
+
+/// The standard output of `invocation`, trimmed; a failure carries its
+/// standard error (or why it did not start).
+pub(crate) fn output_of(invocation: &Invocation) -> Result<String, String> {
+    let output = OsRunner.run(invocation);
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).trim().to_owned();
+    match output {
+        Ok(out) if out.success() => Ok(text(&out.stdout)),
+        Ok(out) => Err(text(&out.stderr)),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Bytes under `dir`.
@@ -125,6 +138,24 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn process_output() {
+        assert!(
+            output_of(&Invocation::new("git").arg("--version"))
+                .unwrap()
+                .starts_with("git version")
+        );
+        assert_ne!(
+            output_of(&Invocation::new("git").arg("--no-such-flag")),
+            Err(String::new())
+        );
+        assert!(output_of(&Invocation::new("git").arg("--no-such-flag")).is_err());
+        assert_ne!(
+            output_of(&Invocation::new("odx-test-no-such-program")),
+            Err(String::new())
+        );
     }
 
     #[test]

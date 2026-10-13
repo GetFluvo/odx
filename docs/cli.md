@@ -309,6 +309,59 @@ on default to `[tool.odx.port] default_from`, else the one below and the
 one above; each environment's series (`[tool.odx.environments.env.<name>]
 series`) is a target of its own.
 
+## Verdicts and mutes
+
+```console
+$ odx verdict add OCA/pos#1480 --addon pos_x --kind not-needed --reason "17.0 computes this itself"
+$ odx verdict add OCA/pos#1501 --addon pos_x --kind not-wanted --reason "we do not use loyalty"
+$ odx verdict list [--series 17.0] [--addon pos_x] [--stale]
+$ odx verdict show v:17.0:pos_x:48bfbbca
+$ odx verdict confirm v:17.0:pos_x:48bfbbca     # still holds after the target code changed
+$ odx verdict revoke v:17.0:pos_x:48bfbbca --reason "wrong call"
+$ odx verdict sync
+```
+
+A suggestion of `odx suggest` that was looked at and turned down is
+recorded with a **kind** and a mandatory **reason**, keyed by the patch-ids
+of its commits (and its pull request as the handle you type):
+
+| Kind | Meaning | Default scope |
+| --- | --- | --- |
+| `not-applicable` | the target series' code differs; the change does not apply | organisation |
+| `not-needed` | the problem does not exist on the target series | organisation |
+| `superseded` | the target has another change for the same issue | organisation |
+| `already-present` | the change is there by another route | organisation |
+| `declined` | rejected for other reasons (quality, risk, policy) | project |
+| `not-wanted` | the project does not want the functionality | project |
+| `deferred` | look again later (`--until`, or when the target code changes) | project |
+
+Organisation **verdicts** are facts about the code: they hide the
+suggestion in every project of the organisation on that series. Project
+**mutes** are decisions of one project (`--scope environment --env <name>`
+narrows a mute to environments). Both live in a private **verdict
+repository** that odx clones into the cache and pushes to after every
+change:
+
+```toml
+# ~/.config/odx/config.toml
+[verdicts]
+repo = "https://forge.example/odoo/verdicts.git"   # must be private; odx refuses a public one
+```
+
+Files there are `verdicts/<series>/<addon>.toml` and
+`projects/<project id>/mutes.toml`; the project id is `[tool.odx]
+project_id`, else derived from the project's `origin` URL. Without a
+verdict repository, mutes go to the project's own `.odx/mutes.toml`, and
+organisation verdicts are refused.
+
+Except for `declined` and `not-wanted` (or with `--no-recheck`), an entry
+records the files the change touches as they are on the target series.
+When they change, the suggestion comes back marked "previously declined"
+and `odx verdict list --stale` lists the entry: `confirm` keeps it,
+`revoke` withdraws it. Nothing is deleted; a revocation is recorded with
+who, when and why. `odx suggest --show-suppressed` shows what verdicts and
+mutes hide.
+
 ## Checking dependencies
 
 ```console

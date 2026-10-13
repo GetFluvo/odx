@@ -10,11 +10,20 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --series <SERIES>
+          Only those for this target series
+
+      --addon <ADDON>
+          Only those for this addon
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --stale
+          Only those whose target code changed since
 
       --offline
           Serve forge and index data from the cache only
