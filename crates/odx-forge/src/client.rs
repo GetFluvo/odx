@@ -25,6 +25,27 @@ impl ForgeKind {
             Self::Gitea => "Gitea/Forgejo",
         }
     }
+
+    /// The forge a host most likely runs, by its name alone (no network):
+    /// enough to pick its token variables, as `ODX_TOKEN_<HOST>` works for
+    /// any.
+    ///
+    /// ```
+    /// use odx_forge::ForgeKind;
+    ///
+    /// assert_eq!(ForgeKind::guess("github.com"), ForgeKind::Github);
+    /// assert_eq!(ForgeKind::guess("gitlab.example.com"), ForgeKind::Gitlab);
+    /// assert_eq!(ForgeKind::guess("codeberg.org"), ForgeKind::Gitea);
+    /// ```
+    pub fn guess(host: &str) -> Self {
+        if host.contains("github") {
+            Self::Github
+        } else if host.contains("gitlab") {
+            Self::Gitlab
+        } else {
+            Self::Gitea
+        }
+    }
 }
 
 /// Who can read a repository.
@@ -63,6 +84,18 @@ pub fn token(
     env: &dyn Env,
     runner: &dyn ProcessRunner,
 ) -> Option<String> {
+    token_source(host, kind, env, runner).map(|(token, _)| token)
+}
+
+/// The token for `host`, as [`token`] finds it, with where it came from:
+/// an environment variable's name, `gh auth token`, or the store
+/// `odx auth login` writes to.
+pub fn token_source(
+    host: &str,
+    kind: ForgeKind,
+    env: &dyn Env,
+    runner: &dyn ProcessRunner,
+) -> Option<(String, String)> {
     let own: String = host
         .chars()
         .map(|c| {
@@ -81,7 +114,11 @@ pub fn token(
     };
     std::iter::once(format!("ODX_TOKEN_{own}"))
         .chain(conventional.iter().map(|name| (*name).to_owned()))
-        .find_map(|name| env.var(&name).filter(|value| !value.is_empty()))
+        .find_map(|name| {
+            env.var(&name)
+                .filter(|value| !value.is_empty())
+                .map(|value| (value, name))
+        })
         .or_else(|| {
             (kind == ForgeKind::Github)
                 .then(|| {
@@ -91,8 +128,18 @@ pub fn token(
                         .filter(odx_core::Output::success)
                         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
                         .filter(|token| !token.is_empty())
+                        .map(|token| (token, "gh auth token".to_owned()))
                 })
                 .flatten()
+        })
+        .or_else(|| {
+            let store = crate::secrets::secrets(env);
+            store
+                .get(host)
+                .ok()
+                .flatten()
+                .filter(|token| !token.is_empty())
+                .map(|token| (token, store.describe()))
         })
 }
 
