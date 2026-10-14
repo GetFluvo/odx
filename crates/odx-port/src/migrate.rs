@@ -1080,7 +1080,9 @@ mod tests {
             assert!(work.join("my_addon").join(file).exists(), "{file}");
         }
         assert_eq!(
-            std::fs::read_to_string(work.join("my_addon/i18n/nl.po")).unwrap(),
+            std::fs::read_to_string(work.join("my_addon/i18n/nl.po"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "a\nb\nc\n"
         );
         // Kept as replayed when asked.
