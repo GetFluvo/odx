@@ -628,6 +628,14 @@ the manifests the aggregated repositories have); the project's own addons
 apart, as they are migrated in place. The target defaults to
 `[tool.odx.upgrade] target_odoo_version`.
 
+Outside a project, in a plain clone of an addons repository (an OCA
+repository with its new, still empty series branch, say), `odx migrate plan
+--to 19.0 [--from 18.0] [--remote upstream]` plans the repository instead:
+the addons on `<remote>/<from>` with a manifest, those already on
+`<remote>/<to>`, those with an open `[MIG]` pull request, and the rest in
+dependency order (from the manifests on the source series). `odx migrate
+addon`, `odx migrate pr` and `odx port` never need a project.
+
 `odx migrate pr`, on the migration branch, pushes it and opens the pull
 request `[<to>][MIG] <addon>: Migration to <to>` against the target series:
 to the migrated remote when your token may push there (a company

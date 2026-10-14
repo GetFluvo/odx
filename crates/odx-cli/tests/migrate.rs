@@ -120,7 +120,7 @@ fn migrates_an_addon() {
     assert_eq!(exit, Exit::Success, "{err}");
     assert_eq!(
         out,
-        "migrated on branch 19.0-mig-my_addon: 2 commit(s) of history\n  \
+        "migrated on branch 19.0-mig-my_addon from origin/18.0: 2 commit(s) of history\n  \
          [MIG] my_addon: Migration to 19.0\n\
          odoo-lint finds nothing left to do by hand\n\
          next: fix what is left, run the tests, then push the branch and open the pull request\n"
@@ -225,7 +225,7 @@ fn conflicts_continue_and_abort() {
     let (exit, out, err) = odx(&work, &env, &["migrate", "--continue"]);
     assert_eq!(exit, Exit::Success, "{err}");
     assert!(
-        out.starts_with("migrated on branch 19.0-mig-my_addon: 1 commit(s)"),
+        out.starts_with("migrated on branch 19.0-mig-my_addon from origin/18.0: 1 commit(s)"),
         "{out}"
     );
 }
@@ -385,6 +385,34 @@ fn an_open_migration_pull_request_comes_first() {
             &format!("{api}/OCA/repo.git"),
         ],
     );
+    // The plan names it.
+    let (ok, out, err) = binary(&work, &up, &api, &["migrate", "plan", "--to", "19.0"]);
+    assert!(ok, "{err}");
+    assert!(
+        out.contains(
+            "open migration pull request: my_addon #7; review, test and contribute there\n"
+        ),
+        "{out}"
+    );
+    let (_, out, _) = binary(
+        &work,
+        &up,
+        &api,
+        &["--json", "migrate", "plan", "--to", "19.0"],
+    );
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["pull_requests"][0]["number"], 7);
+    let (ok, out, _) = binary(
+        &work,
+        &up,
+        &api,
+        &["--offline", "migrate", "plan", "--to", "19.0"],
+    );
+    assert!(ok);
+    assert!(
+        out.contains("to migrate, dependencies first (1):\n  my_addon\n"),
+        "{out}"
+    );
     let start = ["migrate", "addon", "my_addon", "--to", "19.0"];
     let (ok, _, err) = binary(&work, &up, &api, &start);
     assert!(!ok);
@@ -421,6 +449,12 @@ fn an_open_migration_pull_request_comes_first() {
     assert!(ok, "{err}");
     assert!(
         err.contains("warning: migrate: cannot look for an open migration pull request: "),
+        "{err}"
+    );
+    let (ok, _, err) = binary(&work, &up, &api, &["migrate", "plan", "--to", "19.0"]);
+    assert!(ok, "{err}");
+    assert!(
+        err.contains("warning: migrate: cannot look for open migration pull requests: "),
         "{err}"
     );
     git(&work, &["checkout", "--quiet", "19.0"]);
@@ -685,13 +719,15 @@ fn administrative_commits_are_squashed_unless_asked() {
     assert_eq!(exit, Exit::Success, "{err}");
     assert!(
         out.starts_with(
-            "migrated on branch 19.0-mig-my_addon: 2 commit(s) of history (1 administrative commit(s) squashed into them)\n"
+            "migrated on branch 19.0-mig-my_addon from origin/18.0: 2 commit(s) of history (1 administrative commit(s) squashed into them)\n"
         ),
         "{out}"
     );
     let (_, out, _) = again(&["--no-squash"]);
     assert!(
-        out.starts_with("migrated on branch 19.0-mig-my_addon: 3 commit(s) of history\n"),
+        out.starts_with(
+            "migrated on branch 19.0-mig-my_addon from origin/18.0: 3 commit(s) of history\n"
+        ),
         "{out}"
     );
     // A project may name other bots, or none.
@@ -701,7 +737,65 @@ fn administrative_commits_are_squashed_unless_asked() {
     );
     let (_, out, _) = again(&[]);
     assert!(
-        out.starts_with("migrated on branch 19.0-mig-my_addon: 3 commit(s) of history\n"),
+        out.starts_with(
+            "migrated on branch 19.0-mig-my_addon from origin/18.0: 3 commit(s) of history\n"
+        ),
         "{out}"
     );
+}
+
+#[test]
+fn plans_of_a_plain_addons_repository() {
+    let (_tmp, up, work) = fixture();
+    // On 18.0 another addon that depends on my_addon, and one 19.0 has.
+    git(&up, &["checkout", "--quiet", "18.0"]);
+    write(
+        &up.join("a_dep/__manifest__.py"),
+        "{'depends': ['base', 'my_addon']}\n",
+    );
+    write(&up.join("done/__manifest__.py"), "{}\n");
+    write(&up.join("docs/index.md"), "not an addon\n");
+    commit(&up, "[ADD] more");
+    git(&up, &["checkout", "--quiet", "19.0"]);
+    write(&up.join("done/__manifest__.py"), "{}\n");
+    commit(&up, "[MIG] done");
+    git(&up, &["checkout", "--quiet", "--detach"]);
+    let env = env();
+    let (exit, out, err) = odx(&work, &env, &["migrate", "plan", "--to", "19.0"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert_eq!(
+        out,
+        "migration plan origin/18.0 -> origin/19.0\n\
+         already on 19.0 (1): done\n\
+         to migrate, dependencies first (2):\n  my_addon\n  a_dep\n\
+         next: `odx migrate addon <addon> --to 19.0 --from 18.0 --remote origin`\n"
+    );
+    let (_, out, _) = odx(&work, &env, &["--json", "migrate", "plan", "--to", "19.0"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        value["to_migrate"],
+        serde_json::json!(["my_addon", "a_dep"])
+    );
+    assert_eq!(value["source"], "origin/18.0");
+    for (args, exit, expected) in [
+        (
+            &["migrate", "plan"][..],
+            Exit::Usage,
+            "name the target series with --to",
+        ),
+        (
+            &["migrate", "plan", "--to", "x"],
+            Exit::Usage,
+            "cannot tell the series before x",
+        ),
+        (
+            &["migrate", "plan", "--to", "19.0", "--remote", "nowhere"],
+            Exit::Failure,
+            "cannot fetch from nowhere",
+        ),
+    ] {
+        let (code, _, err) = odx(&work, &env, args);
+        assert_eq!(code, exit, "{err}");
+        assert!(err.contains(expected), "{err}");
+    }
 }

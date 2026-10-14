@@ -69,8 +69,19 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             };
             return own(to.as_deref(), &tools, global, ctx);
         }
-        (Some(MigrateCommand::Plan { to }), _, _) => {
-            return super::upgrade::migrate_plan(to.as_deref(), global, ctx);
+        (Some(MigrateCommand::Plan { to, from, remote }), _, _) => {
+            let project =
+                global.config.is_some() || odx_config::find_pyproject(ctx.fs, &ctx.dir).is_ok();
+            if project {
+                return super::upgrade::migrate_plan(to.as_deref(), global, ctx);
+            }
+            let Some(to) = to else {
+                return Err(Report::error(
+                    Exit::Usage,
+                    "outside an odx project, name the target series with --to".to_owned(),
+                ));
+            };
+            return repository_plan(ctx, global, to, from.as_deref(), remote.as_deref());
         }
         (Some(MigrateCommand::Pr(pr)), _, _) => {
             let opened = open_pr(ctx, &tools, pr)?;
@@ -231,6 +242,139 @@ fn own(
     })
 }
 
+/// `odx migrate plan` in a plain clone of an addons repository: the
+/// addons on `<remote>/<from>` that `<remote>/<to>` lacks, those with an
+/// open migration pull request apart, the rest dependencies first.
+fn repository_plan(
+    ctx: &Context<'_>,
+    global: &GlobalArgs,
+    to: &str,
+    from: Option<&str>,
+    remote: Option<&str>,
+) -> Result<Report, Report> {
+    let Some(from) = from.map(str::to_owned).or_else(|| previous(to)) else {
+        return Err(Report::error(
+            Exit::Usage,
+            format!("cannot tell the series before {to}; name it with --from"),
+        ));
+    };
+    let remote = remote.map_or_else(|| default_remote(ctx), str::to_owned);
+    let refname = |series: &str| format!("refs/remotes/{remote}/{series}");
+    let (source, target) = (refname(&from), refname(to));
+    Worktree::new(&OsRunner, &ctx.dir)
+        .fetch(
+            &remote,
+            &[
+                format!("+refs/heads/{from}:{source}"),
+                format!("+refs/heads/{to}:{target}"),
+            ],
+        )
+        .map_err(|e| Report::error(Exit::Failure, e))?;
+    let runner = OsRunner;
+    let repo = odx_port::git::Repo::new(&runner, &ctx.dir);
+    let manifest = |rev: &str, addon: &str| repo.show(rev, &format!("{addon}/__manifest__.py"));
+    let listed = output_of(&git(ctx).args(["ls-tree", "--name-only", &source])).unwrap_or_default();
+    let (ready, missing): (Vec<&str>, Vec<&str>) = listed
+        .lines()
+        .filter(|addon| manifest(&source, addon).is_some())
+        .partition(|addon| manifest(&target, addon).is_some());
+    let mut warnings = Vec::new();
+    let open = if global.offline {
+        Vec::new()
+    } else {
+        open_migrations(ctx, &remote, to, &mut warnings)
+    };
+    let pr_of = |addon: &str| {
+        open.iter()
+            .find(|(_, title)| title.contains("[MIG]") && title.contains(addon))
+            .map(|(number, _)| *number)
+    };
+    let (prs, todo): (Vec<&str>, Vec<&str>) = missing
+        .into_iter()
+        .partition(|addon| pr_of(addon).is_some());
+    let names: Vec<String> = todo.iter().map(|addon| (*addon).to_owned()).collect();
+    let depends = |addon: &str| -> Vec<String> {
+        manifest(&source, addon)
+            .and_then(|text| odx_analyze::manifest::parse_manifest(&text).ok())
+            .map(|parsed| parsed.depends)
+            .unwrap_or_default()
+    };
+    let order = super::upgrade::dependencies_first(&names, &depends);
+    let out = if global.json {
+        let value = serde_json::json!({
+            "source": source.trim_start_matches("refs/remotes/"),
+            "target": to,
+            "available": ready,
+            "pull_requests": prs.iter().map(|addon| serde_json::json!({
+                "addon": addon, "number": pr_of(addon),
+            })).collect::<Vec<_>>(),
+            "to_migrate": order,
+        });
+        format!("{value}\n")
+    } else {
+        let mut out = format!("migration plan {remote}/{from} -> {remote}/{to}\n");
+        let _ = writeln!(
+            out,
+            "already on {to} ({}): {}",
+            ready.len(),
+            ready.join(", ")
+        );
+        for addon in &prs {
+            let _ = writeln!(
+                out,
+                "open migration pull request: {addon} #{}; review, test and contribute there",
+                pr_of(addon).unwrap_or_default()
+            );
+        }
+        let _ = writeln!(out, "to migrate, dependencies first ({}):", order.len());
+        for addon in &order {
+            let _ = writeln!(out, "  {addon}");
+        }
+        let _ = writeln!(
+            out,
+            "next: `odx migrate addon <addon> --to {to} --from {from} --remote {remote}`"
+        );
+        out
+    };
+    Ok(Report {
+        out,
+        warnings,
+        ..Report::default()
+    })
+}
+
+/// The open pull requests targeting `to` on `remote`'s forge, as number
+/// and title; a forge that cannot be asked is a warning.
+fn open_migrations(
+    ctx: &Context<'_>,
+    remote: &str,
+    to: &str,
+    warnings: &mut Vec<Problem>,
+) -> Vec<(u64, String)> {
+    let Some(repo) = forge_repo(ctx, remote) else {
+        return Vec::new();
+    };
+    let sleep = std::thread::sleep;
+    let open = ReqwestHttp::new()
+        .and_then(|http| {
+            let client = ForgeClient::new(&http as &dyn Http, ctx.env, &OsRunner, &sleep);
+            client
+                .kind(&repo)
+                .and_then(|kind| client.open_pull_requests(&repo, kind, to))
+        })
+        .map_err(|e| e.to_string());
+    match open {
+        Ok(prs) => prs.into_iter().map(|pr| (pr.number, pr.title)).collect(),
+        Err(e) => {
+            warnings.push(Problem {
+                key: "migrate".to_owned(),
+                message: format!("cannot look for open migration pull requests: {e}"),
+            });
+            Vec::new()
+        }
+    }
+}
+
 /// The plan for `args`, with the defaults filled in.
 fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
     let Some(from) = args.from.clone().or_else(|| previous(&args.to)) else {
@@ -309,8 +453,8 @@ fn migration_pr(ctx: &Context<'_>, plan: &Plan, warnings: &mut Vec<Problem>) -> 
 
 fn text(summary: &Summary) -> String {
     let mut out = format!(
-        "migrated on branch {}: {} commit(s) of history",
-        summary.branch, summary.history
+        "migrated on branch {} from {}: {} commit(s) of history",
+        summary.branch, summary.source, summary.history
     );
     if summary.squashed > 0 {
         let _ = write!(

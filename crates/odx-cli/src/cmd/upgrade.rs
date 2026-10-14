@@ -676,7 +676,10 @@ pub(crate) fn migrate_plan(
 
 /// `names` ordered so that each comes after those of them it depends on;
 /// otherwise in the given order. A cycle is broken at its first member.
-fn dependencies_first(names: &[String], depends: &dyn Fn(&str) -> Vec<String>) -> Vec<String> {
+pub(crate) fn dependencies_first(
+    names: &[String],
+    depends: &dyn Fn(&str) -> Vec<String>,
+) -> Vec<String> {
     let mut order: Vec<String> = Vec::new();
     let mut left: Vec<&String> = names.iter().collect();
     while !left.is_empty() {

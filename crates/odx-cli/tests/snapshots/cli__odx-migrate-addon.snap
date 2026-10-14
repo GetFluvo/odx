@@ -63,7 +63,16 @@ Options:
           Errors only
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
   -V, --version
           Print version
+
+The steps, on a new branch `<to>-mig-<addon>` made from `<remote>/<to>` in the clone you run it in:
+  1. stop when an open pull request on the forge already migrates the addon (--force, --offline)
+  2. replay the addon's history from `<remote>/<from>` (git format-patch | git am -3 --keep)
+  3. squash the administrative commits (bots, Weblate) into the commits they follow (--no-squash)
+  4. `[IMP] <addon>: pre-commit auto fixes` (--no-pre-commit)
+  5. `[MIG] <addon>: Migration to <to>`: odoo-lint's upgrade fixes, version bump, old migrations/ removed
+Then odx lists what odoo-lint leaves to fix by hand. Nothing is pushed: `odx migrate pr` does that.
+No odx project (pyproject.toml with [tool.odx]) is needed.

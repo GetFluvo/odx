@@ -660,6 +660,15 @@ pub enum MigrateCommand {
     /// Migrate one addon on the branch `<to>-mig-<addon>`: its history from the source
     /// series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the
     /// `[MIG]` commit.
+    #[command(after_long_help = "\
+The steps, on a new branch `<to>-mig-<addon>` made from `<remote>/<to>` in the clone you run it in:
+  1. stop when an open pull request on the forge already migrates the addon (--force, --offline)
+  2. replay the addon's history from `<remote>/<from>` (git format-patch | git am -3 --keep)
+  3. squash the administrative commits (bots, Weblate) into the commits they follow (--no-squash)
+  4. `[IMP] <addon>: pre-commit auto fixes` (--no-pre-commit)
+  5. `[MIG] <addon>: Migration to <to>`: odoo-lint's upgrade fixes, version bump, old migrations/ removed
+Then odx lists what odoo-lint leaves to fix by hand. Nothing is pushed: `odx migrate pr` does that.
+No odx project (pyproject.toml with [tool.odx]) is needed.")]
     Addon(MigrateAddonArgs),
     /// Push the migration branch checked out and open its pull request: to the
     /// remote when you may push there, else to your fork (created when missing).
@@ -667,10 +676,21 @@ pub enum MigrateCommand {
     /// What moving the project to another series takes, addon by addon: available, an
     /// open migration pull request to review, or to migrate (dependencies first); own
     /// addons apart.
+    ///
+    /// In a plain clone of an addons repository (no `[tool.odx]` project), the addons of
+    /// the repository instead: those on `<remote>/<from>` and not yet on `<remote>/<to>`.
     Plan {
-        /// Target series [default: `[tool.odx.upgrade] target_odoo_version`].
+        /// Target series [default: `[tool.odx.upgrade] target_odoo_version`; mandatory
+        /// outside a project].
         #[arg(long, value_name = "SERIES")]
         to: Option<String>,
+        /// Outside a project: the source series [default: the series before --to].
+        #[arg(long, value_name = "SERIES")]
+        from: Option<String>,
+        /// Outside a project: the remote both series come from [default: `upstream` when
+        /// it exists, else `origin`].
+        #[arg(long, value_name = "NAME")]
+        remote: Option<String>,
     },
     /// Migrate the project's own addons in place: odoo-lint's upgrade fixes and version
     /// bump, old migration scripts removed, one `[MIG]` commit per addon; no pull request.

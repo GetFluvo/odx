@@ -2,7 +2,9 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-What moving the project to another series takes, addon by addon: available, an open migration pull request to review, or to migrate (dependencies first); own addons apart
+What moving the project to another series takes, addon by addon: available, an open migration pull request to review, or to migrate (dependencies first); own addons apart.
+
+In a plain clone of an addons repository (no `[tool.odx]` project), the addons of the repository instead: those on `<remote>/<from>` and not yet on `<remote>/<to>`.
 
 Usage: odx migrate plan [OPTIONS]
 
@@ -11,13 +13,19 @@ Options:
           Run as if started in DIR
 
       --to <SERIES>
-          Target series [default: `[tool.odx.upgrade] target_odoo_version`]
+          Target series [default: `[tool.odx.upgrade] target_odoo_version`; mandatory outside a project]
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
+      --from <SERIES>
+          Outside a project: the source series [default: the series before --to]
+
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --remote <NAME>
+          Outside a project: the remote both series come from [default: `upstream` when it exists, else `origin`]
 
       --offline
           Serve forge and index data from the cache only
@@ -41,7 +49,7 @@ Options:
           Errors only
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
   -V, --version
           Print version
