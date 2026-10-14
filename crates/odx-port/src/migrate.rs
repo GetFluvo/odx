@@ -13,6 +13,8 @@
 use std::path::PathBuf;
 
 use odx_core::{Invocation, ProcessRunner};
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
 
 use crate::squash::Rules;
@@ -122,6 +124,9 @@ pub struct Summary {
     pub findings: Vec<Finding>,
     /// Steps that could not run, and why.
     pub warnings: Vec<String>,
+    /// How long each phase took, in milliseconds: history, squash,
+    /// pre-commit, odoo-lint.
+    pub timings: Vec<(String, u64)>,
 }
 
 /// An addon migrated in place by [`Worktree::migrate_in_place`].
@@ -331,6 +336,7 @@ impl<'a> Worktree<'a> {
             base,
         };
         self.save(&state)?;
+        let began = Instant::now();
         let applied = self.output(
             &self
                 .command()
@@ -340,7 +346,7 @@ impl<'a> Worktree<'a> {
         if let Err(e) = applied {
             return Ok(Outcome::Stopped(stopped(&e, MIGRATE)));
         }
-        self.fixes(state, tools)
+        self.fixes(state, tools, began.elapsed())
     }
 
     /// The top of the worktree.
@@ -381,13 +387,14 @@ impl<'a> Worktree<'a> {
         let Some(state) = self.state() else {
             return Err("no migration is in progress".to_owned());
         };
+        let began = Instant::now();
         if state.step == Step::History && self.applying() {
             let continued = self.git(&["am", "--continue", "--quiet"]);
             if let Err(e) = continued {
                 return Ok(Outcome::Stopped(stopped(&e, MIGRATE)));
             }
         }
-        self.fixes(state, tools)
+        self.fixes(state, tools, began.elapsed())
     }
 
     /// Give up: abort `git am` if it stopped, check out what was checked
@@ -465,7 +472,12 @@ impl<'a> Worktree<'a> {
     /// The pre-commit fixes in their own commit, then odoo-lint's upgrade
     /// fixes, the version bump and the removal of old migration scripts in
     /// the `[MIG]` commit.
-    fn fixes(&self, mut state: State, tools: &Tools) -> Result<Outcome, String> {
+    fn fixes(
+        &self,
+        mut state: State,
+        tools: &Tools,
+        history_took: Duration,
+    ) -> Result<Outcome, String> {
         state.step = Step::Fixes;
         self.save(&state)?;
         let plan = &state.plan;
@@ -474,11 +486,13 @@ impl<'a> Worktree<'a> {
             odl: tools.odl.clone(),
             pre_commit: tools.pre_commit.clone().filter(|_| !plan.no_pre_commit),
         };
+        let began = Instant::now();
         let (squashed, conflict) = if plan.no_squash {
             (0, None)
         } else {
             self.squash_administrative(&state.base, &plan.squash)
         };
+        let squash_took = began.elapsed();
         let history = self
             .git(&["rev-list", "--count", &format!("{}..HEAD", state.base)])?
             .parse()
@@ -491,8 +505,11 @@ impl<'a> Worktree<'a> {
             commits: Vec::new(),
             findings: Vec::new(),
             warnings: conflict.into_iter().collect(),
+            timings: Vec::new(),
         };
+        let began = Instant::now();
         self.pre_commit(addon, tools, &mut summary.warnings)?;
+        let mut pre_commit_took = began.elapsed();
         let subject = format!("[IMP] {addon}: pre-commit auto fixes");
         if self.commit(addon, &subject, false)? {
             summary.commits.push(subject);
@@ -508,21 +525,41 @@ impl<'a> Worktree<'a> {
         ]);
         // odl exits non-zero while findings remain; only a missing program
         // is a problem.
+        let began = Instant::now();
         if let Err(e) = self.runner.run(&fix) {
             summary.warnings.push(format!(
                 "{}: {e}; install odoo-lint for the automatic upgrade fixes",
                 tools.odl
             ));
         }
+        let mut lint_took = began.elapsed();
         let scripts = format!("{addon}/migrations");
         if self.dir.join(&scripts).is_dir() {
             self.git(&["rm", "-r", "--quiet", "--", &scripts])?;
         }
+        let began = Instant::now();
         self.pre_commit(addon, tools, &mut summary.warnings)?;
+        pre_commit_took += began.elapsed();
         let subject = format!("[MIG] {addon}: Migration to {}", plan.to);
         self.commit(addon, &subject, true)?;
         summary.commits.push(subject);
+        let began = Instant::now();
         summary.findings = self.findings(addon, &plan.to, tools);
+        lint_took += began.elapsed();
+        summary.timings = [
+            ("history", history_took),
+            ("squash", squash_took),
+            ("pre-commit", pre_commit_took),
+            ("odoo-lint", lint_took),
+        ]
+        .into_iter()
+        .map(|(phase, took)| {
+            (
+                phase.to_owned(),
+                u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+            )
+        })
+        .collect();
         self.forget();
         Ok(Outcome::Done(summary))
     }

@@ -3,6 +3,7 @@
 //! --continue` and `--abort` after a conflict in its history; `odx migrate
 //! pr` to push the branch and open its pull request.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use odx_config::Problem;
@@ -12,6 +13,8 @@ use odx_forge::{ForgeClient, Http, ReqwestHttp};
 use odx_port::migrate::{Finding, Outcome, Plan, Summary, Tools, Worktree};
 use odx_port::squash::Rules;
 
+use super::deps::Waiting;
+use super::pin::{self, previous};
 use super::propose::{
     Proposed, Pushed, default_remote, forge_repo, git, opened_json, opened_text, propose,
 };
@@ -22,13 +25,6 @@ use crate::cli::{GlobalArgs, MigrateAddonArgs, MigrateArgs, MigrateCommand, Migr
 /// Run `odx migrate`.
 pub(crate) fn run_migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
     migrate(args, global, ctx).unwrap_or_else(|report| report)
-}
-
-/// The series before `series`: `18.0` for `19.0`.
-fn previous(series: &str) -> Option<String> {
-    let (major, _) = series.split_once('.')?;
-    let major: u32 = major.parse().ok()?;
-    major.checked_sub(1).map(|before| format!("{before}.0"))
 }
 
 fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
@@ -83,6 +79,7 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             };
             return repository_plan(ctx, global, to, from.as_deref(), remote.as_deref());
         }
+        (Some(MigrateCommand::Pin), _, _) => return pin_command(global, ctx),
         (Some(MigrateCommand::Pr(pr)), _, _) => {
             let opened = open_pr(ctx, &tools, pr)?;
             return Ok(Report {
@@ -141,6 +138,22 @@ fn finished(
         key: "migrate".to_owned(),
         message: message.clone(),
     }));
+    // Dependencies the target lacks, pinned the OCA way when asked.
+    let branch = pin::current(ctx).ok();
+    let waits = branch
+        .as_ref()
+        .map(|branch| pin::waiting(ctx, global, branch))
+        .unwrap_or_default();
+    let pinning =
+        matches!(&args.command, Some(MigrateCommand::Addon(addon)) if addon.pin_unreleased);
+    let pinned = if pinning {
+        match pin::pin(ctx, &waits) {
+            Ok(lines) => lines,
+            Err(report) => return report,
+        }
+    } else {
+        Vec::new()
+    };
     let wanted = matches!(&args.command, Some(MigrateCommand::Addon(addon)) if addon.open_pr);
     let pr = wanted.then(|| {
         let defaults = MigratePrArgs {
@@ -155,9 +168,9 @@ fn finished(
         None => (None, None),
     };
     let mut out = if global.json {
-        json(summary, opened.as_ref())
+        json(summary, &waits, &pinned, opened.as_ref())
     } else {
-        text(summary)
+        text(summary, &waits, &pinned)
     };
     if let Some(opened) = opened.as_ref().filter(|_| !global.json) {
         out.push_str(&opened_text(opened));
@@ -172,6 +185,38 @@ fn finished(
         warnings,
         error,
     }
+}
+
+/// `odx migrate pin`.
+fn pin_command(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let branch = pin::current(ctx)?;
+    let waits = pin::waiting(ctx, global, &branch);
+    let pinned = pin::pin(ctx, &waits)?;
+    let mut out = String::new();
+    if pinned.is_empty() {
+        let _ = writeln!(
+            out,
+            "nothing to pin: no dependency of {} waits on an open migration pull request",
+            branch.addon
+        );
+    } else {
+        let _ = writeln!(out, "pinned in a commit `{}`:", pin::SUBJECT);
+        for line in &pinned {
+            let _ = writeln!(out, "  {line}");
+        }
+        let _ = writeln!(out, "{}", pin::RED_CHECK);
+    }
+    Ok(Report {
+        out: if global.json {
+            format!(
+                "{}\n",
+                serde_json::json!({"pinned": pinned, "waits_on": waits})
+            )
+        } else {
+            out
+        },
+        ..Report::default()
+    })
 }
 
 /// `odx migrate own`.
@@ -300,47 +345,102 @@ fn repository_plan(
             .unwrap_or_default()
     };
     let order = super::upgrade::dependencies_first(&names, &depends);
-    let out = if global.json {
+    // What each addon waits for that the target does not have yet.
+    let mut lookup = super::deps::Lookup::new(ctx, global.offline);
+    let available =
+        |addon: &str| manifest(&target, addon).is_some() || names.iter().any(|name| name == addon);
+    let waits: BTreeMap<&String, Vec<Waiting>> = order
+        .iter()
+        .map(|addon| {
+            (
+                addon,
+                lookup.waiting(&depends(addon), &from, to, &available),
+            )
+        })
+        .filter(|(_, waiting)| !waiting.is_empty())
+        .collect();
+    let prs: Vec<(&str, u64)> = prs
+        .into_iter()
+        .map(|addon| (addon, pr_of(addon).unwrap_or_default()))
+        .collect();
+    let plan = RepositoryPlan {
+        remote: &remote,
+        from: &from,
+        to,
+        ready: &ready,
+        prs: &prs,
+        order: &order,
+        waits: &waits,
+    };
+    Ok(Report {
+        out: if global.json {
+            plan.json()
+        } else {
+            plan.text()
+        },
+        warnings,
+        ..Report::default()
+    })
+}
+
+/// What `odx migrate plan` found in a plain addons repository.
+struct RepositoryPlan<'a> {
+    remote: &'a str,
+    from: &'a str,
+    to: &'a str,
+    ready: &'a [&'a str],
+    prs: &'a [(&'a str, u64)],
+    order: &'a [String],
+    waits: &'a BTreeMap<&'a String, Vec<Waiting>>,
+}
+
+impl RepositoryPlan<'_> {
+    fn json(&self) -> String {
         let value = serde_json::json!({
-            "source": source.trim_start_matches("refs/remotes/"),
-            "target": to,
-            "available": ready,
-            "pull_requests": prs.iter().map(|addon| serde_json::json!({
-                "addon": addon, "number": pr_of(addon),
+            "source": format!("{}/{}", self.remote, self.from),
+            "target": self.to,
+            "available": self.ready,
+            "pull_requests": self.prs.iter().map(|(addon, number)| serde_json::json!({
+                "addon": addon, "number": number,
             })).collect::<Vec<_>>(),
-            "to_migrate": order,
+            "to_migrate": self.order,
+            "waits_on": self.waits,
         });
         format!("{value}\n")
-    } else {
+    }
+
+    fn text(&self) -> String {
+        let (remote, from, to) = (self.remote, self.from, self.to);
         let mut out = format!("migration plan {remote}/{from} -> {remote}/{to}\n");
         let _ = writeln!(
             out,
             "already on {to} ({}): {}",
-            ready.len(),
-            ready.join(", ")
+            self.ready.len(),
+            self.ready.join(", ")
         );
-        for addon in &prs {
+        for (addon, number) in self.prs {
             let _ = writeln!(
                 out,
-                "open migration pull request: {addon} #{}; review, test and contribute there",
-                pr_of(addon).unwrap_or_default()
+                "open migration pull request: {addon} #{number}; review, test and contribute there"
             );
         }
-        let _ = writeln!(out, "to migrate, dependencies first ({}):", order.len());
-        for addon in &order {
+        let _ = writeln!(
+            out,
+            "to migrate, dependencies first ({}):",
+            self.order.len()
+        );
+        for addon in self.order {
             let _ = writeln!(out, "  {addon}");
+            for waiting in self.waits.get(addon).into_iter().flatten() {
+                let _ = writeln!(out, "    {}", waiting.describe(to));
+            }
         }
         let _ = writeln!(
             out,
             "next: `odx migrate addon <addon> --to {to} --from {from} --remote {remote}`"
         );
         out
-    };
-    Ok(Report {
-        out,
-        warnings,
-        ..Report::default()
-    })
+    }
 }
 
 /// The open pull requests targeting `to` on `remote`'s forge, as number
@@ -451,7 +551,7 @@ fn migration_pr(ctx: &Context<'_>, plan: &Plan, warnings: &mut Vec<Problem>) -> 
     Ok(())
 }
 
-fn text(summary: &Summary) -> String {
+fn text(summary: &Summary, waits: &[Waiting], pinned: &[String]) -> String {
     let mut out = format!(
         "migrated on branch {} from {}: {} commit(s) of history",
         summary.branch, summary.source, summary.history
@@ -483,31 +583,77 @@ fn text(summary: &Summary) -> String {
             );
         }
     }
+    out.push_str(&timings(&summary.timings));
+    if let Some(waiting) = waits.first() {
+        let to = summary.branch.split_once("-mig-").map_or("", |(to, _)| to);
+        let _ = writeln!(out, "{} dependencies are not on {to} yet:", waits.len());
+        for waiting in waits {
+            let _ = writeln!(out, "  {}", waiting.describe(to));
+        }
+        if pinned.is_empty() && waiting.pull_request.is_some() {
+            out.push_str("  `odx migrate pin` pins them to their pull requests in test-requirements.txt, the OCA way\n");
+        }
+    }
+    if !pinned.is_empty() {
+        let _ = writeln!(out, "pinned in a commit `{}`:", pin::SUBJECT);
+        for line in pinned {
+            let _ = writeln!(out, "  {line}");
+        }
+        let _ = writeln!(out, "{}", pin::RED_CHECK);
+    }
     out.push_str(
         "next: fix what is left and run the tests; then `odx migrate pr` pushes the branch and opens a draft pull request\n",
     );
     out
 }
 
-fn json(summary: &Summary, opened: Option<&Pushed>) -> String {
+/// `took 10.7 s: history 0.4 s, squash 0.2 s, pre-commit 4.7 s, odoo-lint
+/// 0.3 s`, with why pre-commit is slow the first time.
+fn timings(timings: &[(String, u64)]) -> String {
+    let seconds = |ms: u64| format!("{}.{} s", ms / 1000, ms % 1000 / 100);
+    let total: u64 = timings.iter().map(|(_, ms)| ms).sum();
+    let phases: Vec<String> = timings
+        .iter()
+        .map(|(phase, ms)| format!("{phase} {}", seconds(*ms)))
+        .collect();
+    let mut line = format!("took {}: {}\n", seconds(total), phases.join(", "));
+    let slow = timings
+        .iter()
+        .any(|(phase, ms)| phase == "pre-commit" && *ms > 20_000);
+    if slow {
+        line.push_str("  pre-commit builds its hook environments the first time it meets a configuration; later runs reuse them\n");
+    }
+    line
+}
+
+fn json(
+    summary: &Summary,
+    waits: &[Waiting],
+    pinned: &[String],
+    opened: Option<&Pushed>,
+) -> String {
     #[derive(serde::Serialize)]
     struct Done<'a> {
         status: &'static str,
         #[serde(flatten)]
         summary: &'a Summary,
+        waits_on: &'a [Waiting],
+        pinned: &'a [String],
         #[serde(skip_serializing_if = "Option::is_none")]
         pull_request: Option<serde_json::Value>,
     }
     let done = Done {
         status: "done",
         summary,
+        waits_on: waits,
+        pinned,
         pull_request: opened.map(opened_json),
     };
     format!("{}\n", serde_json::to_string(&done).unwrap_or_default())
 }
 
 /// The pull request's description.
-fn body(addon: &str, from: &str, to: &str, findings: &[Finding]) -> String {
+fn body(addon: &str, from: &str, to: &str, findings: &[Finding], depends: &[String]) -> String {
     let mut body = format!(
         "Migration of `{addon}` from {from} to {to}, made with odx:\n\n\
          - the history of `{addon}` on {from}, authors kept\n\
@@ -526,6 +672,13 @@ fn body(addon: &str, from: &str, to: &str, findings: &[Finding]) -> String {
             );
         }
     }
+    if !depends.is_empty() {
+        body.push_str("\nDepends on:\n");
+        for page in depends {
+            let _ = writeln!(body, "- [ ] {page}");
+        }
+        let _ = writeln!(body, "\n{}.", pin::RED_CHECK);
+    }
     let _ = write!(
         body,
         "\n<!-- odx:migrate addon {addon} --to {to} --from {from} -->\n"
@@ -535,20 +688,14 @@ fn body(addon: &str, from: &str, to: &str, findings: &[Finding]) -> String {
 
 /// Push the migration branch checked out and open its pull request.
 fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pushed, Report> {
-    let branch = output_of(&git(ctx).args(["branch", "--show-current"])).unwrap_or_default();
-    let Some((to, addon)) = branch.split_once("-mig-") else {
-        return Err(Report::error(
-            Exit::Usage,
-            format!("{branch:?} is no migration branch (`<series>-mig-<addon>`)"),
-        ));
-    };
-    let config = |key: &str| {
-        output_of(&git(ctx).args(["config", "--get", &format!("branch.{branch}.{key}")])).ok()
-    };
-    let from = config("odxMigrateFrom")
-        .or_else(|| previous(to))
-        .unwrap_or_default();
-    let remote = config("odxMigrateRemote").unwrap_or_else(|| default_remote(ctx));
+    let pin::MigrationBranch {
+        name: branch,
+        to,
+        addon,
+        from,
+        remote,
+    } = pin::current(ctx)?;
+    let (to, addon) = (to.as_str(), addon.as_str());
     let Some(upstream) = forge_repo(ctx, &remote) else {
         return Err(Report::error(
             Exit::Failure,
@@ -566,7 +713,7 @@ fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pus
             push_remote: args.push_remote.as_deref(),
             draft: !args.ready,
             title: format!("[{to}][MIG] {addon}: Migration to {to}"),
-            body: body(addon, &from, to, &findings),
+            body: body(addon, &from, to, &findings, &pin::depends_on(ctx)),
         },
     )
 }
@@ -584,6 +731,31 @@ mod tests {
     }
 
     #[test]
+    fn descriptions_name_what_they_depend_on() {
+        let pages = ["https://github.com/OCA/s/pull/3".to_owned()];
+        let text = body("pos_x", "18.0", "19.0", &[], &pages);
+        assert!(
+            text.contains("\nDepends on:\n- [ ] https://github.com/OCA/s/pull/3\n\nOCA CI's check"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn timing_lines() {
+        let phases = |pre_commit: u64| {
+            vec![
+                ("history".to_owned(), 400),
+                ("pre-commit".to_owned(), pre_commit),
+            ]
+        };
+        assert_eq!(
+            timings(&phases(4_700)),
+            "took 5.1 s: history 0.4 s, pre-commit 4.7 s\n"
+        );
+        assert!(timings(&phases(64_000)).contains("the first time"));
+    }
+
+    #[test]
     fn descriptions_list_the_work_left() {
         let finding = Finding {
             file: "pos_x/models/a.py".to_owned(),
@@ -592,7 +764,7 @@ mod tests {
             message: "use `Domain`".to_owned(),
         };
         assert_eq!(
-            body("pos_x", "18.0", "19.0", &[finding]),
+            body("pos_x", "18.0", "19.0", &[finding], &[]),
             "Migration of `pos_x` from 18.0 to 19.0, made with odx:\n\n\
              - the history of `pos_x` on 18.0, authors kept\n\
              - the repository's pre-commit fixes\n\

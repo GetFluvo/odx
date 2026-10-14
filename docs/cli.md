@@ -608,6 +608,21 @@ target series:
    manifest version set to `<to>.1.0.0`, the old `migrations/` scripts
    removed, and pre-commit run again.
 
+The summary also says how long each phase took (history, squash,
+pre-commit, odoo-lint): the first time pre-commit meets a configuration it
+builds its hook environments, which can take a minute; later runs reuse them.
+
+Dependencies of the addon that the target series does not have yet (not in
+Odoo, not on the target branch, no release on the package index) are listed
+with their open migration pull request upstream, when there is one.
+`--pin-unreleased`, or `odx migrate pin` later on the branch, pins them the
+OCA way: a line `odoo-addon-<name> @ git+<repository>.git@refs/pull/<n>/head#subdirectory=<name>`
+in `test-requirements.txt`, in a commit of its own titled `[DON'T MERGE]
+test-requirements.txt`, so it can be dropped once the dependency is merged
+and released. `odx migrate pr` then adds a `Depends on:` checklist of those
+pull requests to the description. OCA CI's check for unreleased
+dependencies stays red while the commit is there; that is expected.
+
 odx then lists what odoo-lint leaves to fix by hand. Nothing is pushed: you
 review the branch, finish the migration and run the tests, then `odx migrate
 pr` pushes it and opens the draft pull request. Both series are fetched from `--remote` (default `upstream` when
@@ -644,7 +659,9 @@ repository with its new, still empty series branch, say), `odx migrate plan
 --to 19.0 [--from 18.0] [--remote upstream]` plans the repository instead:
 the addons on `<remote>/<from>` with a manifest, those already on
 `<remote>/<to>`, those with an open `[MIG]` pull request, and the rest in
-dependency order (from the manifests on the source series). `odx migrate
+dependency order (from the manifests on the source series). In both modes, every
+addon to migrate lists the dependencies the target lacks: `waits on
+module_analysis: open migration pull request OCA/server-tools#3631`. `odx migrate
 addon`, `odx migrate pr` and `odx port` never need a project.
 
 `odx migrate pr`, on the migration branch, pushes it and opens the pull

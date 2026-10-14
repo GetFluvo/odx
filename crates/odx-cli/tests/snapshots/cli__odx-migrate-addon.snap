@@ -47,14 +47,17 @@ Options:
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
 
-      --open-pr
-          Then push the branch and open a draft pull request (`odx migrate pr`)
+      --pin-unreleased
+          Pin dependencies that only exist as an open migration pull request upstream in `test-requirements.txt`, the OCA way (`odx migrate pin`)
 
       --refresh-index
           Rebuild the addon index for the series involved
 
       --json
           Machine-readable output on stdout
+
+      --open-pr
+          Then push the branch and open a draft pull request (`odx migrate pr`)
 
   -v, --verbose...
           Increase log verbosity (repeatable)
