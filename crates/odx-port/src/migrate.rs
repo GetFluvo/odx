@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use odx_core::{Invocation, ProcessRunner};
 use serde::{Deserialize, Serialize};
 
+use crate::squash::Rules;
+
 /// The file, in the repository's git directory, that keeps a migration.
 const STATE_FILE: &str = "odx-migrate.json";
 
@@ -32,6 +34,12 @@ pub struct Plan {
     /// Leave the repository's pre-commit fixes out.
     #[serde(default)]
     pub no_pre_commit: bool,
+    /// Keep the administrative commits of the history as they are.
+    #[serde(default)]
+    pub no_squash: bool,
+    /// What makes a commit administrative.
+    #[serde(default)]
+    pub squash: Rules,
 }
 
 impl Plan {
@@ -101,8 +109,11 @@ pub struct Finding {
 pub struct Summary {
     /// The migration branch.
     pub branch: String,
-    /// The commits of history replayed from the source series.
+    /// The commits of history replayed from the source series, after the
+    /// squash.
     pub history: usize,
+    /// The administrative commits squashed into others.
+    pub squashed: usize,
     /// The subjects of the commits the fixes made.
     pub commits: Vec<String>,
     /// What odoo-lint leaves to fix by hand.
@@ -461,6 +472,11 @@ impl<'a> Worktree<'a> {
             odl: tools.odl.clone(),
             pre_commit: tools.pre_commit.clone().filter(|_| !plan.no_pre_commit),
         };
+        let (squashed, conflict) = if plan.no_squash {
+            (0, None)
+        } else {
+            self.squash_administrative(&state.base, &plan.squash)
+        };
         let history = self
             .git(&["rev-list", "--count", &format!("{}..HEAD", state.base)])?
             .parse()
@@ -468,9 +484,10 @@ impl<'a> Worktree<'a> {
         let mut summary = Summary {
             branch: plan.branch(),
             history,
+            squashed,
             commits: Vec::new(),
             findings: Vec::new(),
-            warnings: Vec::new(),
+            warnings: conflict.into_iter().collect(),
         };
         self.pre_commit(addon, tools, &mut summary.warnings)?;
         let subject = format!("[IMP] {addon}: pre-commit auto fixes");
@@ -731,6 +748,8 @@ mod tests {
             to: "19.0".to_owned(),
             remote: "origin".to_owned(),
             no_pre_commit: false,
+            no_squash: false,
+            squash: Rules::default(),
         }
     }
 
@@ -948,6 +967,201 @@ mod tests {
             tree.migrate_in_place(&dirs, "19.0", &missing)
                 .unwrap_err()
                 .contains("uncommitted")
+        );
+    }
+
+    /// A commit for [`administrative`]: author, e-mail, subject, files.
+    type Entry<'a> = (&'a str, &'a str, &'a str, &'a [(&'a str, &'a str)]);
+
+    /// An upstream whose 18.0 history of `my_addon` is `steps`, an empty
+    /// 19.0, and a clone on 19.0.
+    fn administrative(steps: &[Entry<'_>]) -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let up = tmp.path().join("up");
+        std::fs::create_dir_all(&up).unwrap();
+        git(&up, &["init", "--quiet", "--initial-branch=18.0"]);
+        for (author, email, subject, files) in steps {
+            for (file, text) in *files {
+                write(&up.join("my_addon").join(file), text);
+            }
+            git(&up, &["add", "-A"]);
+            git(
+                &up,
+                &[
+                    "commit",
+                    "--quiet",
+                    "--author",
+                    &format!("{author} <{email}>"),
+                    "-m",
+                    subject,
+                ],
+            );
+        }
+        git(&up, &["checkout", "--quiet", "--orphan", "19.0"]);
+        git(&up, &["rm", "-r", "--quiet", "-f", "."]);
+        write(&up.join("README.md"), "19.0\n");
+        git(&up, &["add", "-A"]);
+        git(&up, &["commit", "--quiet", "-m", "[INIT] 19.0"]);
+        git(&up, &["checkout", "--quiet", "--detach"]);
+        git(
+            tmp.path(),
+            &[
+                "clone",
+                "--quiet",
+                "--branch",
+                "19.0",
+                up.to_str().unwrap(),
+                "work",
+            ],
+        );
+        let work = tmp.path().join("work");
+        git(&work, &["config", "user.name", "Me"]);
+        git(&work, &["config", "user.email", "me@example.com"]);
+        (tmp, work)
+    }
+
+    const JANE: &str = "jane@example.com";
+    const NL: &str = "nl@example.com";
+    const BOT: &str = "oca-git-bot@odoo-community.org";
+    const CI: &str = "oca-ci@odoo-community.org";
+
+    /// The history under the `[MIG]` commit: author and subject.
+    fn kept(work: &Path) -> String {
+        git(
+            work,
+            &[
+                "log",
+                "--format=%an|%s",
+                "19.0-mig-my_addon~1",
+                "^origin/19.0",
+            ],
+        )
+    }
+
+    #[test]
+    fn administrative_commits_are_squashed() {
+        let manifest: &[(&str, &str)] = &[("__manifest__.py", "{}\n"), ("i18n/nl.po", "a\n")];
+        let (_tmp, work) = administrative(&[
+            ("Jane", JANE, "[ADD] my_addon", manifest),
+            (
+                "OCA-git-bot",
+                BOT,
+                "[BOT] post-merge updates",
+                &[("README.rst", "r\n")],
+            ),
+            (
+                "Nl",
+                NL,
+                "Translated using Weblate (Dutch)",
+                &[("i18n/nl.po", "a\nb\n")],
+            ),
+            ("Jane", JANE, "[FIX] my_addon: x", &[("x.py", "x\n")]),
+            (
+                "Nl",
+                NL,
+                "Translated using Weblate (Dutch)",
+                &[("i18n/nl.po", "a\nb\nc\n")],
+            ),
+            (
+                "oca-ci",
+                CI,
+                "[UPD] Update my_addon.pot",
+                &[("i18n/my_addon.pot", "p\n")],
+            ),
+        ]);
+        let tree = Worktree::new(&OsRunner, &work);
+        let summary = done(tree.start(plan(), &tools("odx-test-no-such-program", None)));
+        assert_eq!((summary.history, summary.squashed), (3, 3));
+        assert_eq!(
+            kept(&work),
+            "Jane|[FIX] my_addon: x\nNl|Translated using Weblate (Dutch)\nJane|[ADD] my_addon"
+        );
+        for file in ["README.rst", "x.py", "i18n/my_addon.pot"] {
+            assert!(work.join("my_addon").join(file).exists(), "{file}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(work.join("my_addon/i18n/nl.po")).unwrap(),
+            "a\nb\nc\n"
+        );
+        // Kept as replayed when asked.
+        git(&work, &["checkout", "--quiet", "19.0"]);
+        git(&work, &["branch", "-D", "19.0-mig-my_addon"]);
+        let unsquashed = Plan {
+            no_squash: true,
+            ..plan()
+        };
+        let summary = done(tree.start(unsquashed, &tools("odx-test-no-such-program", None)));
+        assert_eq!((summary.history, summary.squashed), (6, 0));
+    }
+
+    #[test]
+    fn squashes_that_conflict_fall_back() {
+        let manifest: &[(&str, &str)] = &[("__manifest__.py", "{}\n"), ("i18n/nl.po", "a\n")];
+        // The fix changes the line the first translation added: the second
+        // translation cannot move before it, the bot commit can.
+        let (_tmp, work) = administrative(&[
+            ("Jane", JANE, "[ADD] my_addon", manifest),
+            (
+                "OCA-git-bot",
+                BOT,
+                "[BOT] post-merge updates",
+                &[("README.rst", "r\n")],
+            ),
+            (
+                "Nl",
+                NL,
+                "Translated using Weblate (Dutch)",
+                &[("i18n/nl.po", "a\nb\n")],
+            ),
+            (
+                "Jane",
+                JANE,
+                "[FIX] my_addon: b",
+                &[("i18n/nl.po", "a\nB\n")],
+            ),
+            (
+                "Nl",
+                NL,
+                "Translated using Weblate (Dutch)",
+                &[("i18n/nl.po", "a\nB\nc\n")],
+            ),
+        ]);
+        let none = tools("odx-test-no-such-program", None);
+        let summary = done(Worktree::new(&OsRunner, &work).start(plan(), &none));
+        assert_eq!((summary.history, summary.squashed), (4, 1));
+        assert!(
+            summary
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("1 administrative")),
+            "{:?}",
+            summary.warnings
+        );
+        // A bot commit that cannot move either: the history is kept.
+        let (_tmp, work) = administrative(&[
+            ("Jane", JANE, "[ADD] my_addon", manifest),
+            (
+                "Nl",
+                NL,
+                "Translated using Weblate (Dutch)",
+                &[("i18n/nl.po", "a\nb\n")],
+            ),
+            (
+                "oca-ci",
+                CI,
+                "Update translation files",
+                &[("i18n/nl.po", "a\nb2\n")],
+            ),
+        ]);
+        let summary = done(Worktree::new(&OsRunner, &work).start(plan(), &none));
+        assert_eq!((summary.history, summary.squashed), (3, 0));
+        assert!(
+            summary
+                .warnings
+                .iter()
+                .any(|w| w.contains("are kept as they are")),
+            "{:?}",
+            summary.warnings
         );
     }
 

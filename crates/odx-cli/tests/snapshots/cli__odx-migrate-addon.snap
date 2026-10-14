@@ -35,11 +35,14 @@ Options:
       --offline
           Serve forge and index data from the cache only
 
-      --force
-          Migrate even when an open pull request already migrates the addon
-
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --no-squash
+          Keep the administrative commits (bots, Weblate) of the history as they are instead of squashing them
+
+      --force
+          Migrate even when an open pull request already migrates the addon
 
       --no-refresh
           Use cached data even when stale

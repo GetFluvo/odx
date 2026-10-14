@@ -646,3 +646,62 @@ fn pull_requests_list_the_findings() {
     assert!(ok, "{err}");
     assert!(out.contains("1 finding(s) left to fix by hand"), "{out}");
 }
+
+#[test]
+fn administrative_commits_are_squashed_unless_asked() {
+    let (_tmp, up, work) = fixture();
+    git(&up, &["checkout", "--quiet", "18.0"]);
+    write(&up.join("my_addon/README.rst"), "readme\n");
+    git(&up, &["add", "-A"]);
+    git(
+        &up,
+        &[
+            "commit",
+            "--quiet",
+            "--author",
+            "OCA-git-bot <oca-git-bot@odoo-community.org>",
+            "-m",
+            "[BOT] post-merge updates",
+        ],
+    );
+    git(&up, &["checkout", "--quiet", "--detach"]);
+    let env = env();
+    let start = [
+        "migrate",
+        "addon",
+        "my_addon",
+        "--to",
+        "19.0",
+        "--no-pre-commit",
+    ];
+    let again = |extra: &[&str]| {
+        git(&work, &["checkout", "--quiet", "19.0"]);
+        git(&work, &["branch", "-D", "19.0-mig-my_addon"]);
+        let mut args = start.to_vec();
+        args.extend_from_slice(extra);
+        odx(&work, &env, &args)
+    };
+    let (exit, out, err) = odx(&work, &env, &start);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.starts_with(
+            "migrated on branch 19.0-mig-my_addon: 2 commit(s) of history (1 administrative commit(s) squashed into them)\n"
+        ),
+        "{out}"
+    );
+    let (_, out, _) = again(&["--no-squash"]);
+    assert!(
+        out.starts_with("migrated on branch 19.0-mig-my_addon: 3 commit(s) of history\n"),
+        "{out}"
+    );
+    // A project may name other bots, or none.
+    write(
+        &work.join("pyproject.toml"),
+        "[tool.odx]\nodoo_version = \"19.0\"\n\n[tool.odx.port]\nsquash_authors = []\nsquash_subjects = []\n",
+    );
+    let (_, out, _) = again(&[]);
+    assert!(
+        out.starts_with("migrated on branch 19.0-mig-my_addon: 3 commit(s) of history\n"),
+        "{out}"
+    );
+}
