@@ -90,10 +90,17 @@ impl Worktree<'_> {
                 .rposition(|(_, key)| here.contains(key))
                 .map(|at| at + 1)
                 .ok_or_else(|| {
-                    format!(
-                        "no commit of {addon} on {} is on this branch yet; name the last one it has with --since <commit>",
-                        plan.from
-                    )
+                    if candidates.is_empty() {
+                        format!(
+                            "{addon} has no history on {}/{}: name the series the migration comes from with --from",
+                            plan.remote, plan.from
+                        )
+                    } else {
+                        format!(
+                            "no commit of {addon} on {} is on this branch yet; name the last one it has with --since <commit>",
+                            plan.from
+                        )
+                    }
                 })?,
         };
         let new: Vec<&String> = candidates
@@ -393,6 +400,15 @@ mod tests {
         let tree = Worktree::new(&OsRunner, &work);
         let error = tree.update(plan(), None, &tools()).unwrap_err();
         assert!(error.contains("--since"), "{error}");
+        let elsewhere = Plan {
+            addon: "other".to_owned(),
+            ..plan()
+        };
+        let error = tree.update(elsewhere, None, &tools()).unwrap_err();
+        assert!(
+            error.contains("other has no history on origin/18.0"),
+            "{error}"
+        );
         let first = git(&up, &["rev-list", "--max-parents=0", "18.0"]);
         commit(
             &up,

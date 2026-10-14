@@ -10,7 +10,7 @@ use odx_config::Problem;
 use odx_core::Exit;
 use odx_core::system::OsRunner;
 use odx_forge::{ForgeClient, Http, ReqwestHttp};
-use odx_port::migrate::{Finding, Outcome, Plan, Summary, Tools, Worktree};
+use odx_port::migrate::{Finding, Outcome, Plan, State, Summary, Tools, Worktree};
 use odx_port::squash::Rules;
 
 use super::deps::Waiting;
@@ -27,6 +27,28 @@ pub(crate) fn run_migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context
     migrate(args, global, ctx).unwrap_or_else(|report| report)
 }
 
+/// What `odx migrate --abort` says it did.
+fn aborted(state: &State, json: bool) -> String {
+    if json {
+        format!(
+            "{}\n",
+            serde_json::json!({"status": "aborted", "branch": state.plan.branch()})
+        )
+    } else if state.update {
+        format!(
+            "aborted the update of {}: back where it was\n",
+            state.plan.branch()
+        )
+    } else {
+        format!(
+            "aborted the migration of {}: deleted {}, back on {}\n",
+            state.plan.addon,
+            state.plan.branch(),
+            state.previous
+        )
+    }
+}
+
 fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let tree = Worktree::new(&OsRunner, &ctx.dir);
     let program =
@@ -39,21 +61,8 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     let outcome = match (&args.command, args.resume, args.abort) {
         (_, _, true) => {
             let state = tree.abort().map_err(|e| Report::error(Exit::Failure, e))?;
-            let out = if global.json {
-                format!(
-                    "{}\n",
-                    serde_json::json!({"status": "aborted", "branch": state.plan.branch()})
-                )
-            } else {
-                format!(
-                    "aborted the migration of {}: deleted {}, back on {}\n",
-                    state.plan.addon,
-                    state.plan.branch(),
-                    state.previous
-                )
-            };
             return Ok(Report {
-                out,
+                out: aborted(&state, global.json),
                 ..Report::default()
             });
         }

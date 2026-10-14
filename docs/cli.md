@@ -688,7 +688,8 @@ odoo-lint's fixes for the target and pre-commit then go into a commit
 `[FW] <addon>: <to> fixes for the changes from <from>`, when they change
 anything. odx finds where to start from the newest source commit already on
 the branch (same author, date and subject); `--since <commit>` names it
-when odx cannot tell. A conflict stops like `odx migrate addon`: resolve,
+when odx cannot tell, and `--from` the source series when the addon came
+from another one than the series before the target. A conflict stops like `odx migrate addon`: resolve,
 `git add`, then `odx migrate --continue`, or `odx migrate --abort` to go
 back to where the branch was.
 

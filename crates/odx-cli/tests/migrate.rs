@@ -1075,14 +1075,32 @@ fn migrations_are_brought_up_to_date() {
         out.starts_with("updated 19.0-mig-my_addon from origin/18.0: 1 new commit(s)"),
         "{out}"
     );
-    // Elsewhere: not a migration branch, or one odx cannot place.
+    // Aborting leaves the branch where it was.
+    let head = git(&work, &["rev-parse", "HEAD"]);
+    upstream_fix(
+        &up,
+        "b.py",
+        "b, fixed twice\n",
+        "[FIX] my_addon: b once more",
+    );
+    let (exit, _, _) = odx(&work, &env, &["migrate", "update"]);
+    assert_eq!(exit, Exit::Failure);
+    let (exit, out, _) = odx(&work, &env, &["migrate", "--abort"]);
+    assert_eq!(exit, Exit::Success);
+    assert_eq!(
+        out,
+        "aborted the update of 19.0-mig-my_addon: back where it was\n"
+    );
+    assert_eq!(git(&work, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&work, &["status", "--porcelain"]), "");
+    // Elsewhere: not a migration branch, or one of an addon not on 18.0.
     git(
         &work,
         &["checkout", "--quiet", "-b", "19.0-mig-other", "origin/19.0"],
     );
     let (exit, _, err) = odx(&work, &env, &["migrate", "update"]);
     assert_eq!(exit, Exit::Failure);
-    assert!(err.contains("--since"), "{err}");
+    assert!(err.contains("has no history on origin/18.0"), "{err}");
     git(&work, &["checkout", "--quiet", "19.0"]);
     let (exit, _, err) = odx(&work, &env, &["migrate", "update"]);
     assert_eq!(exit, Exit::Usage);
@@ -1215,7 +1233,7 @@ fn migration_pull_requests_odx_cannot_update() {
     assert!(err.contains("cannot fetch"), "{err}");
     let (ok, _, err) = run(&["migrate", "update", "OCA/repo#10"]);
     assert!(!ok);
-    assert!(err.contains("--since"), "{err}");
+    assert!(err.contains("has no history on origin/18.0"), "{err}");
     assert_eq!(
         git(&forge.work, &["branch", "--show-current"]),
         "19.0-mig-addon_10"
@@ -1228,6 +1246,7 @@ fn migration_pull_requests_odx_cannot_update() {
 }
 
 #[test]
+#[cfg(unix)]
 fn updates_leave_bots_out_and_bring_target_fixes() {
     use std::os::unix::fs::PermissionsExt as _;
     let (tmp, up, work) = fixture();
