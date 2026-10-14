@@ -127,7 +127,7 @@ fn involved(args: &SuggestArgs, prepared: &Prepared, targets: &[String]) -> BTre
 /// ```
 pub(crate) fn repository_name(url: &str) -> String {
     let path = url.trim_end_matches('/').trim_end_matches(".git");
-    let mut parts = path.rsplit(['/', ':']);
+    let mut parts = path.rsplit(['/', ':', '\\']);
     let repo = parts.next().unwrap_or_default();
     let owner = parts.next().unwrap_or_default();
     format!("{owner}/{repo}")
@@ -497,4 +497,17 @@ fn json(judged: &[Judged<'_>]) -> serde_json::Value {
             })
         }).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repository_names_from_urls_and_paths() {
+        assert_eq!(repository_name("https://github.com/OCA/pos.git"), "OCA/pos");
+        assert_eq!(repository_name("git@github.com:OCA/pos"), "OCA/pos");
+        assert_eq!(repository_name("/srv/git/OCA/pos/"), "OCA/pos");
+        assert_eq!(repository_name(r"C:\Temp\work\up"), "work/up");
+    }
 }
