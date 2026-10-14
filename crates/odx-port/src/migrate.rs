@@ -81,6 +81,10 @@ pub struct State {
     pub previous: String,
     /// The commit the migration branch started from.
     pub base: String,
+    /// An update of an existing migration branch (`odx migrate update`):
+    /// an abort resets the branch to `base` instead of deleting it.
+    #[serde(default)]
+    pub update: bool,
 }
 
 /// The programs the fixes run.
@@ -127,6 +131,8 @@ pub struct Summary {
     /// How long each phase took, in milliseconds: history, squash,
     /// pre-commit, odoo-lint.
     pub timings: Vec<(String, u64)>,
+    /// An update of an existing migration (`odx migrate update`).
+    pub update: bool,
 }
 
 /// An addon migrated in place by [`Worktree::migrate_in_place`].
@@ -233,7 +239,7 @@ impl<'a> Worktree<'a> {
         std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))
     }
 
-    fn save(&self, state: &State) -> Result<(), String> {
+    pub(crate) fn save(&self, state: &State) -> Result<(), String> {
         self.keep(STATE_FILE, state)
     }
 
@@ -245,12 +251,12 @@ impl<'a> Worktree<'a> {
         }
     }
 
-    fn forget(&self) {
+    pub(crate) fn forget(&self) {
         self.drop_file(STATE_FILE);
     }
 
     /// Whether `git am` stopped in the middle.
-    fn applying(&self) -> bool {
+    pub(crate) fn applying(&self) -> bool {
         self.in_git_dir("rebase-apply")
     }
 
@@ -334,6 +340,7 @@ impl<'a> Worktree<'a> {
             step: Step::History,
             previous,
             base,
+            update: false,
         };
         self.save(&state)?;
         let began = Instant::now();
@@ -394,6 +401,9 @@ impl<'a> Worktree<'a> {
                 return Ok(Outcome::Stopped(stopped(&e, MIGRATE)));
             }
         }
+        if state.update {
+            return self.update_fixes(state, tools, began.elapsed());
+        }
         self.fixes(state, tools, began.elapsed())
     }
 
@@ -410,8 +420,15 @@ impl<'a> Worktree<'a> {
         if self.applying() {
             self.git(&["am", "--abort"])?;
         }
-        self.git(&["checkout", "--quiet", &state.previous])?;
-        self.git(&["branch", "--quiet", "-D", &state.plan.branch()])?;
+        let back: [&str; 3] = if state.update {
+            ["reset", "--hard", &state.base]
+        } else {
+            ["checkout", "--quiet", &state.previous]
+        };
+        self.git(&back)?;
+        if !state.update {
+            self.git(&["branch", "--quiet", "-D", &state.plan.branch()])?;
+        }
         self.forget();
         Ok(state)
     }
@@ -469,6 +486,19 @@ impl<'a> Worktree<'a> {
         Ok((done, warnings))
     }
 
+    /// The phases' times in milliseconds, for a summary.
+    pub(crate) fn timings(phases: &[(&str, Duration)]) -> Vec<(String, u64)> {
+        phases
+            .iter()
+            .map(|(phase, took)| {
+                (
+                    (*phase).to_owned(),
+                    u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+                )
+            })
+            .collect()
+    }
+
     /// The pre-commit fixes in their own commit, then odoo-lint's upgrade
     /// fixes, the version bump and the removal of old migration scripts in
     /// the `[MIG]` commit.
@@ -506,6 +536,7 @@ impl<'a> Worktree<'a> {
             findings: Vec::new(),
             warnings: conflict.into_iter().collect(),
             timings: Vec::new(),
+            update: false,
         };
         let began = Instant::now();
         self.pre_commit(addon, tools, &mut summary.warnings)?;
@@ -546,27 +577,19 @@ impl<'a> Worktree<'a> {
         let began = Instant::now();
         summary.findings = self.findings(addon, &plan.to, tools);
         lint_took += began.elapsed();
-        summary.timings = [
+        summary.timings = Self::timings(&[
             ("history", history_took),
             ("squash", squash_took),
             ("pre-commit", pre_commit_took),
             ("odoo-lint", lint_took),
-        ]
-        .into_iter()
-        .map(|(phase, took)| {
-            (
-                phase.to_owned(),
-                u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
-            )
-        })
-        .collect();
+        ]);
         self.forget();
         Ok(Outcome::Done(summary))
     }
 
     /// Run the repository's pre-commit hooks on the addon's files, when it
     /// has a configuration.
-    fn pre_commit(
+    pub(crate) fn pre_commit(
         &self,
         addon: &str,
         tools: &Tools,

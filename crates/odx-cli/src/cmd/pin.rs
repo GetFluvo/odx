@@ -65,6 +65,22 @@ pub(crate) fn current(ctx: &Context<'_>) -> Result<MigrationBranch, Report> {
     })
 }
 
+/// Remember on `branch` where it is pushed: a remote or URL, and the
+/// branch there.
+pub(crate) fn remember(ctx: &Context<'_>, branch: &str, to: &str, head: &str) {
+    for (key, value) in [("odxMigratePushTo", to), ("odxMigratePushBranch", head)] {
+        let _ = output_of(&git(ctx).args(["config", &format!("branch.{branch}.{key}"), value]));
+    }
+}
+
+/// Where `branch` is pushed, as [`remember`] recorded it.
+pub(crate) fn pushed_to(ctx: &Context<'_>, branch: &str) -> Option<(String, String)> {
+    let config = |key: &str| {
+        output_of(&git(ctx).args(["config", "--get", &format!("branch.{branch}.{key}")])).ok()
+    };
+    config("odxMigratePushTo").zip(config("odxMigratePushBranch"))
+}
+
 /// The top of the worktree (`current` made sure there is one).
 fn root(ctx: &Context<'_>) -> PathBuf {
     PathBuf::from(output_of(&git(ctx).args(["rev-parse", "--show-toplevel"])).unwrap_or_default())

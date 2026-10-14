@@ -673,6 +673,32 @@ pull request is a draft (`--ready` opens it for review), and its
 description lists what odoo-lint still finds as a checklist. `odx migrate
 addon --open-pr` does this right after the migration.
 
+```console
+$ odx migrate update                  # on the migration branch checked out
+$ odx migrate update OCA/server-tools#3631 --push
+```
+
+A migration pull request often stays open while the source series keeps
+getting fixes. `odx migrate update` brings it up to date, OCA style: every
+commit that touched the addon on `<remote>/<from>` since the migration is
+replayed on its own, with its author (one forward commit for all of them is
+not how OCA works). Bot commits are left out and Weblate commits squashed,
+by the same rules as `odx migrate addon` (`--no-squash` keeps them all);
+odoo-lint's fixes for the target and pre-commit then go into a commit
+`[FW] <addon>: <to> fixes for the changes from <from>`, when they change
+anything. odx finds where to start from the newest source commit already on
+the branch (same author, date and subject); `--since <commit>` names it
+when odx cannot tell. A conflict stops like `odx migrate addon`: resolve,
+`git add`, then `odx migrate --continue`, or `odx migrate --abort` to go
+back to where the branch was.
+
+Named as `<owner>/<repo>#<number>`, someone else's migration pull request
+is checked out as `<to>-mig-<addon>` (from its `[MIG] <addon>` title) and
+updated the same way. `--push` sends the result where the pull request
+comes from: your branch as `odx migrate pr` pushed it, or the author's fork
+when they let maintainers edit it; otherwise open a pull request against
+their branch.
+
 ## Locking
 
 ```console

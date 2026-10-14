@@ -44,6 +44,13 @@ pub struct PullRequest {
     pub merged_at: Option<String>,
     /// Its labels, sorted.
     pub labels: Vec<String>,
+    /// The page of the repository its branch lives in, when the forge
+    /// says (GitHub, Gitea/Forgejo).
+    pub head_repository: Option<String>,
+    /// The branch it comes from.
+    pub head_branch: String,
+    /// Whether maintainers of the target may push to that branch.
+    pub maintainer_can_modify: bool,
 }
 
 fn text(value: &Value, pointer: &str) -> String {
@@ -83,6 +90,14 @@ fn github_like(value: &Value) -> PullRequest {
             .and_then(Value::as_str)
             .map(str::to_owned),
         labels,
+        head_repository: value
+            .pointer("/head/repo/html_url")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        head_branch: text(value, "/head/ref"),
+        maintainer_can_modify: ["/maintainer_can_modify", "/allow_maintainer_edit"]
+            .iter()
+            .any(|key| value.pointer(key) == Some(&Value::Bool(true))),
     }
 }
 
@@ -116,6 +131,9 @@ fn gitlab(value: &Value) -> PullRequest {
             .and_then(Value::as_str)
             .map(str::to_owned),
         labels,
+        head_repository: None,
+        head_branch: text(value, "/source_branch"),
+        maintainer_can_modify: value.get("allow_collaboration") == Some(&Value::Bool(true)),
     }
 }
 
@@ -249,7 +267,8 @@ mod tests {
     #[test]
     fn github_pull_requests() {
         let open = r#"{"number":7,"title":"[17.0][FIX] pos","state":"open","merged":false,"merged_at":null,
-            "head":{"sha":"abc"},"base":{"ref":"17.0"},"labels":[{"name":"needs review"},{"name":"bug"}]}"#;
+            "head":{"sha":"abc","ref":"17.0-fix","repo":{"html_url":"https://github.com/me/pos"}},
+            "maintainer_can_modify":true,"base":{"ref":"17.0"},"labels":[{"name":"needs review"},{"name":"bug"}]}"#;
         let (pr, urls) = pull("https://github.com/OCA/pos", ForgeKind::Github, 200, open);
         assert_eq!(
             pr.unwrap(),
@@ -261,6 +280,9 @@ mod tests {
                 base: "17.0".to_owned(),
                 merged_at: None,
                 labels: vec!["bug".to_owned(), "needs review".to_owned()],
+                head_repository: Some("https://github.com/me/pos".to_owned()),
+                head_branch: "17.0-fix".to_owned(),
+                maintainer_can_modify: true,
             }
         );
         assert_eq!(urls, ["https://api.github.com/repos/OCA/pos/pulls/7"]);

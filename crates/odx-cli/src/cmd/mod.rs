@@ -35,6 +35,7 @@ pub(crate) mod status;
 pub(crate) mod suggest;
 pub(crate) mod sweep;
 pub(crate) mod sync;
+pub(crate) mod update;
 pub(crate) mod upgrade;
 pub(crate) mod vendor;
 pub(crate) mod verdict;

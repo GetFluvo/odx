@@ -8,12 +8,13 @@ Usage: odx migrate [OPTIONS]
        odx migrate <COMMAND>
 
 Commands:
-  addon  Migrate one addon on the branch `<to>-mig-<addon>`: its history from the source series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the `[MIG]` commit
-  pr     Push the migration branch checked out and open its pull request: to the remote when you may push there, else to your fork (created when missing)
-  pin    Pin the dependencies of the migration branch's addon that only exist as an open migration pull request upstream: lines in `test-requirements.txt` pointing at the pull request, in a commit `[DON'T MERGE] test-requirements.txt`, as OCA asks
-  plan   What moving the project to another series takes, addon by addon: available, an open migration pull request to review, or to migrate (dependencies first); own addons apart
-  own    Migrate the project's own addons in place: odoo-lint's upgrade fixes and version bump, old migration scripts removed, one `[MIG]` commit per addon; no pull request
-  help   Print this message or the help of the given subcommand(s)
+  addon   Migrate one addon on the branch `<to>-mig-<addon>`: its history from the source series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the `[MIG]` commit
+  pr      Push the migration branch checked out and open its pull request: to the remote when you may push there, else to your fork (created when missing)
+  update  Bring an open migration up to date with what the addon got on the source series since: each new commit replayed with its author, bot commits left out, then odoo-lint's fixes for the target in a `[FW]` commit. On the migration branch checked out, or on someone else's migration pull request
+  pin     Pin the dependencies of the migration branch's addon that only exist as an open migration pull request upstream: lines in `test-requirements.txt` pointing at the pull request, in a commit `[DON'T MERGE] test-requirements.txt`, as OCA asks
+  plan    What moving the project to another series takes, addon by addon: available, an open migration pull request to review, or to migrate (dependencies first); own addons apart
+  own     Migrate the project's own addons in place: odoo-lint's upgrade fixes and version bump, old migration scripts removed, one `[MIG]` commit per addon; no pull request
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -C, --project-dir <DIR>
@@ -31,17 +32,17 @@ Options:
       --fresh
           Ignore cached data; refresh everything before answering
 
-      --continue
-          Go on after resolving a conflict in the addon's history
-
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
 
-      --abort
-          Give up the migration in progress and delete its branch
+      --continue
+          Go on after resolving a conflict in the addon's history
 
       --refresh-index
           Rebuild the addon index for the series involved
+
+      --abort
+          Give up the migration in progress and delete its branch
 
       --json
           Machine-readable output on stdout

@@ -87,6 +87,18 @@ fn translation(subject: &str) -> Option<String> {
     Some(language.trim().to_owned())
 }
 
+/// Whether a commit by `email` titled `subject` is a bot's (Weblate
+/// translations are not).
+#[must_use]
+pub fn is_bot(email: &str, subject: &str, rules: &Rules) -> bool {
+    let commit = Commit {
+        sha: String::new(),
+        email: email.to_owned(),
+        subject: subject.to_owned(),
+    };
+    kind(&commit, rules) == Kind::Bot
+}
+
 fn kind(commit: &Commit, rules: &Rules) -> Kind {
     if let Some(language) = translation(&commit.subject) {
         return Kind::Translation {

@@ -296,14 +296,14 @@ fn meta(
 }
 
 /// `owner/repo#n`.
-fn parse_pr(pr: &str) -> Option<(&str, u64)> {
+pub(crate) fn parse_pr(pr: &str) -> Option<(&str, u64)> {
     let (path, number) = pr.rsplit_once('#')?;
     let number = number.parse().ok()?;
     path.contains('/').then_some((path, number))
 }
 
 /// The remote of the clone that points at `path` on a forge.
-fn remote_for(ctx: &Context<'_>, path: &str) -> Option<String> {
+pub(crate) fn remote_for(ctx: &Context<'_>, path: &str) -> Option<String> {
     output_of(&git(ctx).arg("remote"))
         .unwrap_or_default()
         .lines()

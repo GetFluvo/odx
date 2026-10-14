@@ -174,6 +174,7 @@ odx port pr OCA/sale-workflow#1234 --to 17.0 [--open-pr]
 odx port addon sale_x --from 18.0 --to 19.0 | odx port blacklist sale_x OCA/x#12 --reason "..."
 odx port sweep --to 19.0 --from 16.0,17.0,18.0 [--write-blacklist --open-pr]
 odx migrate plan --to 19.0 | odx migrate addon sale_x --to 19.0 [--open-pr] | odx migrate own
+odx migrate update [OCA/server-tools#3631] [--push] | odx migrate pin
 odx sync [--all] | odx daemon install --interval 30m | odx cache gc
 odx doctor | odx auth login <host> | odx completions <shell>
 

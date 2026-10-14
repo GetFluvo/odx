@@ -1,0 +1,66 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Bring an open migration up to date with what the addon got on the source series since: each new commit replayed with its author, bot commits left out, then odoo-lint's fixes for the target in a `[FW]` commit. On the migration branch checked out, or on someone else's migration pull request
+
+Usage: odx migrate update [OPTIONS] [PR]
+
+Arguments:
+  [PR]
+          A migration pull request to update instead of the branch checked out, for example `OCA/contract#1234`; its head becomes the local branch `<to>-mig-<addon>`
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --from <SERIES>
+          The source series [default: the one recorded on the branch, else the series before the target]
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --remote <NAME>
+          The remote the source series comes from [default: the one recorded on the branch, the one pointing at the pull request's repository, else `upstream` or `origin`]
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --since <COMMIT>
+          The last commit of the source series the branch has, when odx cannot tell (a migration made in one commit)
+
+      --no-squash
+          Keep the administrative commits as they are
+
+      --offline
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-pre-commit
+          Leave out the repository's pre-commit fixes
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --push
+          Then push the branch where its pull request comes from
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
