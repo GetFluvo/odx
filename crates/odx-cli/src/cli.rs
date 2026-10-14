@@ -502,6 +502,9 @@ pub struct SuggestArgs {
     /// Include suggestions suppressed by blacklists, verdicts and mutes.
     #[arg(long, visible_alias = "show-suppressed")]
     pub show_muted: bool,
+    /// Tell for each portable suggestion whether its commits apply cleanly on the target.
+    #[arg(long)]
+    pub check_apply: bool,
 }
 
 /// Verdict kinds; every verdict also needs a free-text reason.
@@ -668,6 +671,16 @@ pub enum MigrateCommand {
         /// Target series [default: `[tool.odx.upgrade] target_odoo_version`].
         #[arg(long, value_name = "SERIES")]
         to: Option<String>,
+    },
+    /// Migrate the project's own addons in place: odoo-lint's upgrade fixes and version
+    /// bump, old migration scripts removed, one `[MIG]` commit per addon; no pull request.
+    Own {
+        /// Target series [default: `[tool.odx.upgrade] target_odoo_version`].
+        #[arg(long, value_name = "SERIES")]
+        to: Option<String>,
+        /// Leave out the repository's pre-commit fixes.
+        #[arg(long)]
+        no_pre_commit: bool,
     },
 }
 

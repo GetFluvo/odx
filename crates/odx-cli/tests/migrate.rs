@@ -186,6 +186,9 @@ fn usage_and_refusals() {
     let (exit, _, err) = odx(&work, &env, &["migrate", "--abort"]);
     assert_eq!(exit, Exit::Failure);
     assert!(err.contains("no migration is in progress"), "{err}");
+    // Own addons belong to a project.
+    let (exit, _, err) = odx(&work, &env, &["migrate", "own", "--to", "19.0"]);
+    assert_eq!(exit, Exit::Usage, "{err}");
 }
 
 #[test]

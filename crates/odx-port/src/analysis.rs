@@ -20,6 +20,9 @@ pub enum Class {
     RepoWide,
     /// Translation files only; Weblate syncs them.
     Translations,
+    /// Reverted by a later change on the source, or the revert itself: the
+    /// pair cancels out.
+    Reverted,
     /// In the target branch's blacklist.
     Blacklisted,
 }
@@ -33,6 +36,7 @@ impl Class {
             Self::Migration => "migration commit",
             Self::RepoWide => "repo-wide change",
             Self::Translations => "translations",
+            Self::Reverted => "reverted",
             Self::Blacklisted => "blacklisted",
         }
     }
@@ -220,9 +224,19 @@ pub fn analyse(
         .collect();
     let line = repo.first_parents(query.source).unwrap_or_default();
     let mut groups: Vec<Group> = Vec::new();
+    let mut tips: std::collections::BTreeMap<Option<u64>, String> =
+        std::collections::BTreeMap::new();
     for commit in missing {
         let merge = repo.merged_by(&commit.sha, query.source, &line);
-        let pr = pull_request(merge.as_deref(), &commit.subject);
+        let pr = pull_request(
+            merge.as_ref().map(|merge| merge.message.as_str()),
+            &commit.subject,
+        );
+        // A pull request whose last commit is a migration is a migration,
+        // even when that commit already reached the target.
+        if let Some(tip) = merge.and_then(|merge| merge.tip) {
+            tips.entry(pr).or_insert(tip);
+        }
         let key = pr.map_or_else(
             || ORPHANED.to_owned(),
             |n| format!("{}#{n}", query.repository),
@@ -261,13 +275,54 @@ pub fn analyse(
             .filter_map(|commit| ids.get(&commit.sha).cloned())
             .collect();
         group.reason = query.blacklist.reason(&group.key).map(str::to_owned);
+        let tip_migrates = tips
+            .get(&group.pr)
+            .is_some_and(|tip| settings.migration.iter().any(|re| re.is_match(tip)));
         group.class = if group.reason.is_some() {
             Class::Blacklisted
+        } else if tip_migrates {
+            Class::Migration
         } else {
             classify(&group.commits, &files, query.source_dir, settings)
         };
     }
+    reverted(&mut groups);
     Ok(groups)
+}
+
+/// Mark a change and the later one that reverts it (`Revert "<subject>"`)
+/// as reverted, unless blacklisted.
+fn reverted(groups: &mut [Group]) {
+    let reverts: Vec<(usize, String)> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(at, group)| {
+            group.commits.iter().filter_map(move |commit| {
+                let subject = commit
+                    .subject
+                    .strip_prefix("Revert \"")?
+                    .strip_suffix('"')?;
+                Some((at, subject.to_owned()))
+            })
+        })
+        .collect();
+    for (at, subject) in reverts {
+        // A revert of something the target has may still need porting.
+        let Some(original) = groups
+            .iter()
+            .position(|group| group.commits.iter().any(|commit| commit.subject == subject))
+        else {
+            continue;
+        };
+        for index in [at, original] {
+            if let Some(group) = groups
+                .get_mut(index)
+                .filter(|group| group.class != Class::Blacklisted)
+            {
+                group.class = Class::Reverted;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -356,6 +411,48 @@ mod tests {
             "[BOT] readme",
         );
         merged(dir, 7, &[("pos_x/report.py", "r\n")], "[ADD] pos_x: report");
+        merged(dir, 8, &[("pos_x/cache.py", "c\n")], "[IMP] pos_x: cache");
+        merged(
+            dir,
+            9,
+            &[("pos_x/cache.py", "")],
+            "Revert \"[IMP] pos_x: cache\"",
+        );
+        merged(
+            dir,
+            10,
+            &[("pos_x/cache.py", "c, again\n")],
+            "Revert \"[IMP] pos_x: gone\"",
+        );
+        // A migration pull request whose [MIG] commit is not in pos_x.
+        git(dir, &["checkout", "--quiet", "-b", "pr11"]);
+        change(
+            dir,
+            &[("pos_x/lint.py", "l\n")],
+            "[IMP] pos_x: pre-commit auto fixes",
+        );
+        change(
+            dir,
+            &[("pos_x/lint.py", "l\nm\n")],
+            "[IMP] pos_x: more fixes",
+        );
+        change(
+            dir,
+            &[("other/y.py", "y\n")],
+            "[MIG] other: Migration to 16.0",
+        );
+        git(dir, &["checkout", "--quiet", "16.0"]);
+        git(
+            dir,
+            &[
+                "merge",
+                "--quiet",
+                "--no-ff",
+                "pr11",
+                "-m",
+                "Merge PR #11 into 16.0",
+            ],
+        );
         // 17.0 has the migration and fix a (renamed to pos_y), and a blacklist.
         git(dir, &["checkout", "--quiet", "--orphan", "17.0"]);
         git(dir, &["rm", "-r", "--quiet", "-f", "."]);
@@ -375,6 +472,36 @@ mod tests {
                 "{\"pull_requests\": {\"OCA/pos#7\": \"not wanted on 17.0\"}}",
             )],
             "[BL]",
+        );
+    }
+
+    #[test]
+    fn reverts_cancel_out_unless_blacklisted() {
+        let group = |key: &str, subject: &str, class: Class| Group {
+            pr: None,
+            key: key.to_owned(),
+            title: subject.to_owned(),
+            commits: vec![Commit {
+                sha: key.to_owned(),
+                subject: subject.to_owned(),
+                author: String::new(),
+                date: String::new(),
+            }],
+            class,
+            reason: None,
+            patch_ids: Vec::new(),
+            files: Vec::new(),
+        };
+        let mut groups = vec![
+            group("a", "[IMP] x", Class::Blacklisted),
+            group("b", "Revert \"[IMP] x\"", Class::Portable),
+            group("c", "Revert \"[IMP] x", Class::Portable),
+        ];
+        reverted(&mut groups);
+        let classes: Vec<Class> = groups.iter().map(|group| group.class).collect();
+        assert_eq!(
+            classes,
+            [Class::Blacklisted, Class::Reverted, Class::Portable]
         );
     }
 
@@ -414,6 +541,10 @@ mod tests {
         assert_eq!(
             summary,
             [
+                "OCA/pos#11 migration commit 2 [IMP] pos_x: pre-commit auto fixes",
+                "OCA/pos#10 portable 1 Revert \"[IMP] pos_x: gone\"",
+                "OCA/pos#9 reverted 1 Revert \"[IMP] pos_x: cache\"",
+                "OCA/pos#8 reverted 1 [IMP] pos_x: cache",
                 "OCA/pos#7 blacklisted 1 [ADD] pos_x: report",
                 "OCA/pos#6 repo-wide change 1 [BOT] readme",
                 "OCA/pos#5 repo-wide change 1 [IMP] all: tests",
@@ -423,18 +554,18 @@ mod tests {
                 "orphaned_commits migration commit 1 [MIG] pos_x: Migration to 16.0",
             ]
         );
-        assert_eq!(groups[0].reason.as_deref(), Some("not wanted on 17.0"));
-        assert_eq!(groups[0].files, ["report.py"]);
-        assert_eq!(groups[0].patch_ids.len(), 1);
-        assert_eq!(groups[4].pr, Some(3));
-        assert_eq!(groups[5].commits[0].author, "Jane");
-        assert_eq!(groups[6].pr, None);
+        assert_eq!(groups[4].reason.as_deref(), Some("not wanted on 17.0"));
+        assert_eq!(groups[4].files, ["report.py"]);
+        assert_eq!(groups[4].patch_ids.len(), 1);
+        assert_eq!(groups[8].pr, Some(3));
+        assert_eq!(groups[9].commits[0].author, "Jane");
+        assert_eq!(groups[10].pr, None);
 
         // A strict threshold, custom patterns, and failures.
         let strict = Settings::new(Some(&["^\\[IMP\\]".to_owned()]), Some(10)).unwrap();
         let groups = analyse(&repo, &query, &strict).unwrap();
-        assert_eq!(groups[2].class, Class::Migration);
-        assert_eq!(groups[6].class, Class::Portable);
+        assert_eq!(groups[6].class, Class::Migration);
+        assert_eq!(groups[10].class, Class::Portable);
         assert!(
             Settings::new(Some(&["(".to_owned()]), None)
                 .unwrap_err()

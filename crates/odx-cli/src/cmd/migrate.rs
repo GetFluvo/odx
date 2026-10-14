@@ -61,6 +61,13 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             });
         }
         (_, true, _) => tree.resume(&tools),
+        (Some(MigrateCommand::Own { to, no_pre_commit }), _, _) => {
+            let tools = Tools {
+                pre_commit: tools.pre_commit.filter(|_| !no_pre_commit),
+                ..tools
+            };
+            return own(to.as_deref(), &tools, global, ctx);
+        }
         (Some(MigrateCommand::Plan { to }), _, _) => {
             return super::upgrade::migrate_plan(to.as_deref(), global, ctx);
         }
@@ -153,6 +160,74 @@ fn finished(
         warnings,
         error,
     }
+}
+
+/// `odx migrate own`.
+fn own(
+    to: Option<&str>,
+    tools: &Tools,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+) -> Result<Report, Report> {
+    let prepared = super::aggregate::prepare(global, ctx)?;
+    let to = super::upgrade::target_series(to, &prepared)?;
+    let root = &prepared.project.root;
+    let dirs: Vec<String> = super::upgrade::addons(ctx, &prepared)
+        .into_iter()
+        .filter(|addon| addon.kind == super::upgrade::Kind::Own)
+        .filter_map(|addon| addon.dir)
+        .map(|dir| {
+            dir.strip_prefix(root)
+                .unwrap_or(&dir)
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .collect();
+    let (done, warnings) = Worktree::new(&OsRunner, root)
+        .migrate_in_place(&dirs, &to, tools)
+        .map_err(|e| Report::error(Exit::Failure, e))?;
+    let out = if global.json {
+        format!(
+            "{}\n",
+            serde_json::json!({"target": to, "addons": done, "warnings": warnings})
+        )
+    } else {
+        let mut out = format!("own addons migrated in place to {to}:\n");
+        for addon in &done {
+            let what = if addon.committed {
+                "[MIG] committed"
+            } else {
+                "nothing changed"
+            };
+            let _ = writeln!(
+                out,
+                "  {}: {what}, {} finding(s) left to fix by hand",
+                addon.addon,
+                addon.findings.len()
+            );
+            for finding in &addon.findings {
+                let _ = writeln!(
+                    out,
+                    "    {}:{}: {} {}",
+                    finding.file, finding.line, finding.code, finding.message
+                );
+            }
+        }
+        out
+    };
+    Ok(Report {
+        out,
+        warnings: warnings
+            .into_iter()
+            .map(|message| Problem {
+                key: "migrate".to_owned(),
+                message,
+            })
+            .collect(),
+        ..Report::default()
+    })
 }
 
 /// The plan for `args`, with the defaults filled in.

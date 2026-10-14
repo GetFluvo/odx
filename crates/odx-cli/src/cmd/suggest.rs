@@ -40,6 +40,13 @@ pub(crate) struct Found {
 }
 
 impl Found {
+    /// Whether `group`'s commits cherry-pick cleanly onto the target.
+    pub(crate) fn applies(&self, group: &Group) -> Option<bool> {
+        let runner = OsRunner;
+        let commits: Vec<String> = group.commits.iter().rev().map(|c| c.sha.clone()).collect();
+        Repo::new(&runner, &self.repo_dir).applies(&self.target_ref, &commits)
+    }
+
     /// The id of `files` on the target series now, for re-checks.
     pub(crate) fn tree(&self, files: &[String]) -> Option<String> {
         let runner = OsRunner;
@@ -243,10 +250,17 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     let found = collect(args, global, ctx, &prepared, &mut report.warnings)?;
     let entries = super::verdict::entries(ctx, &prepared, global, &mut report.warnings);
     let judged = judge(&found, &entries, args.env.as_deref());
+    let applies: Vec<Option<bool>> = judged
+        .iter()
+        .map(|item| {
+            let wanted = args.check_apply && item.group.class == Class::Portable;
+            wanted.then(|| item.found.applies(item.group)).flatten()
+        })
+        .collect();
     report.out = if global.json {
-        format!("{}\n", json(&judged))
+        format!("{}\n", json(&judged, &applies))
     } else {
-        text(&judged, args.show_muted)
+        text(&judged, &applies, args.show_muted)
     };
     Ok(report)
 }
@@ -402,11 +416,11 @@ pub(crate) fn judge<'a>(
         .collect()
 }
 
-fn text(judged: &[Judged<'_>], show_suppressed: bool) -> String {
+fn text(judged: &[Judged<'_>], applies: &[Option<bool>], show_suppressed: bool) -> String {
     let mut out = String::new();
     let (mut shown, mut blacklisted, mut suppressed) = (0, 0, 0);
     let mut heading = String::new();
-    for item in judged {
+    for (item, applies) in judged.iter().zip(applies) {
         if item.group.class == Class::Blacklisted {
             blacklisted += 1;
         } else if item.hidden() {
@@ -439,6 +453,11 @@ fn text(judged: &[Judged<'_>], show_suppressed: bool) -> String {
         if let Some(reason) = &group.reason {
             let _ = write!(out, "; {reason}");
         }
+        match applies {
+            Some(true) => out.push_str("; applies cleanly"),
+            Some(false) => out.push_str("; conflicts with the target"),
+            None => {}
+        }
         match item.verdict {
             Some((entry, Standing::Applies)) => {
                 let _ = write!(
@@ -469,10 +488,10 @@ fn text(judged: &[Judged<'_>], show_suppressed: bool) -> String {
     out
 }
 
-fn json(judged: &[Judged<'_>]) -> serde_json::Value {
+fn json(judged: &[Judged<'_>], applies: &[Option<bool>]) -> serde_json::Value {
     serde_json::json!({
         "schema": 1,
-        "suggestions": judged.iter().map(|item| {
+        "suggestions": judged.iter().zip(applies).map(|(item, applies)| {
             let group = item.group;
             serde_json::json!({
                 "addon": item.found.addon,
@@ -485,6 +504,7 @@ fn json(judged: &[Judged<'_>]) -> serde_json::Value {
                 "class": group.class.name(),
                 "reason": group.reason,
                 "patch_ids": group.patch_ids,
+                "applies": applies,
                 "verdict": item.verdict.map(|(entry, standing)| serde_json::json!({
                     "id": entry.id,
                     "kind": entry.kind.name(),

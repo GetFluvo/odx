@@ -11,6 +11,7 @@ Commands:
   addon  Migrate one addon on the branch `<to>-mig-<addon>`: its history from the source series, the repository's pre-commit fixes, then odoo-lint's upgrade fixes as the `[MIG]` commit
   pr     Push the migration branch checked out and open its pull request: to the remote when you may push there, else to your fork (created when missing)
   plan   What moving the project to another series takes, addon by addon: available, an open migration pull request to review, or to migrate (dependencies first); own addons apart
+  own    Migrate the project's own addons in place: odoo-lint's upgrade fixes and version bump, old migration scripts removed, one `[MIG]` commit per addon; no pull request
   help   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -23,17 +24,17 @@ Options:
   -j, --jobs <N>
           Override the number of parallel jobs
 
-      --continue
-          Go on after resolving a conflict in the addon's history
-
       --offline
           Serve forge and index data from the cache only
 
-      --abort
-          Give up the migration in progress and delete its branch
+      --continue
+          Go on after resolving a conflict in the addon's history
 
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --abort
+          Give up the migration in progress and delete its branch
 
       --no-refresh
           Use cached data even when stale

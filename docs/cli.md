@@ -301,13 +301,16 @@ cache, and compares the commits that touch the addon:
   matching `[tool.odx.port] migration_commit_patterns`, default `[MIG]`),
   `translations` (only `i18n/*.po`), `repo-wide change` (more than
   `repo_wide_threshold` addons, default 5, or only the generated README),
-  and `blacklisted` when the target branch's oca-port blacklist
+  `reverted` for a change and the later `Revert "..."` of it, which cancel
+  out, and `blacklisted` when the target branch's oca-port blacklist
   (`.oca/oca-port/blacklist/<addon>.json`) lists it.
 
 Blacklisted groups are hidden unless `--show-suppressed`. The series looked
 on default to `[tool.odx.port] default_from`, else the one below and the
 one above; each environment's series (`[tool.odx.environments.env.<name>]
-series`) is a target of its own.
+series`) is a target of its own. `--check-apply` replays every portable
+group on the target with `git merge-tree`, without touching a worktree, and
+says whether it applies cleanly or conflicts.
 
 ## The dashboard
 
@@ -599,6 +602,16 @@ the branch.
 ```console
 $ odx migrate plan --to 18.0
 ```
+
+```console
+$ odx migrate own --to 18.0
+```
+
+`odx migrate own` migrates the project's own addons (`project_addons`) in
+place, in the project's repository: for each, odoo-lint's upgrade fixes and
+version bump, the old `migrations/` scripts removed and pre-commit run, in a
+commit `[MIG] <addon>: Migration to <to>` when anything changed, then what
+odoo-lint leaves to fix by hand. No pull request: they are yours.
 
 In a project, `odx migrate plan` says what moving to the next series takes,
 addon by addon: what is already available there, which addons have an open

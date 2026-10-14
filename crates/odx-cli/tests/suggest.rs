@@ -230,6 +230,35 @@ fn suggestions_from_the_series_below_and_above() {
     assert_eq!(value["suggestions"][0]["class"], "blacklisted");
     assert_eq!(value["suggestions"][1]["pr"], 2);
     assert_eq!(value["suggestions"][1]["commits"][0]["author"], "Jane");
+    assert_eq!(value["suggestions"][1]["applies"], serde_json::Value::Null);
+    // Whether the portable ones apply, without touching a worktree.
+    let check = [
+        "suggest",
+        "--env",
+        "prod",
+        "--addon",
+        "pos_*",
+        "--check-apply",
+    ];
+    let (_, out, _) = project.odx(&check);
+    assert!(
+        out.contains(&format!(
+            "{url}#2 from 16.0: portable - [FIX] pos_x: b (1 commits, Jane); applies cleanly\n"
+        )),
+        "{out}"
+    );
+    let up = project.root.parent().unwrap().join("up");
+    git(&up, &["checkout", "--quiet", "17.0"]);
+    change(&up, &[("pos_x/b.py", "other\n")], "[IMP] pos_x: b");
+    let mut fresh = vec!["--fresh"];
+    fresh.extend_from_slice(&check);
+    let (_, out, _) = project.odx(&fresh);
+    assert!(
+        out.contains(&format!(
+            "{url}#2 from 16.0: portable - [FIX] pos_x: b (1 commits, Jane); conflicts with the target\n"
+        )),
+        "{out}"
+    );
     // Every environment: 18.0 (next) looks on 17.0 and 19.0.
     let (_, out, err) = project.odx(&["--offline", "suggest"]);
     assert!(out.contains("pos_x on 18.0:\n"), "{out}{err}");

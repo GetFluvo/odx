@@ -111,6 +111,17 @@ pub struct Summary {
     pub warnings: Vec<String>,
 }
 
+/// An addon migrated in place by [`Worktree::migrate_in_place`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InPlace {
+    /// The addon's directory, as given.
+    pub addon: String,
+    /// Whether the migration changed anything, committed as `[MIG]`.
+    pub committed: bool,
+    /// What odoo-lint leaves to fix by hand.
+    pub findings: Vec<Finding>,
+}
+
 /// How a run ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -383,6 +394,59 @@ impl<'a> Worktree<'a> {
         self.git(&["branch", "--quiet", "-D", &state.plan.branch()])?;
         self.forget();
         Ok(state)
+    }
+
+    /// Migrate addons in place, as a project does with its own: for each
+    /// directory (relative to the worktree), odoo-lint's upgrade fixes and
+    /// version bump, old migration scripts removed and pre-commit run, in
+    /// a commit `[MIG] <addon>: Migration to <to>` when anything changed.
+    /// The addons and the steps that could not run.
+    ///
+    /// # Errors
+    ///
+    /// When the worktree has uncommitted changes, or git fails.
+    pub fn migrate_in_place(
+        &self,
+        dirs: &[String],
+        to: &str,
+        tools: &Tools,
+    ) -> Result<(Vec<InPlace>, Vec<String>), String> {
+        self.clean()?;
+        let mut warnings = Vec::new();
+        let mut done = Vec::new();
+        for dir in dirs {
+            let fix = Invocation::new(&tools.odl).current_dir(&self.dir).args([
+                "upgrade-check",
+                "--target",
+                to,
+                "--fix",
+                "--unsafe-fixes",
+                "--bump-version",
+                dir,
+            ]);
+            if let Err(e) = self.runner.run(&fix) {
+                let warning = format!(
+                    "{}: {e}; install odoo-lint for the automatic upgrade fixes",
+                    tools.odl
+                );
+                if !warnings.contains(&warning) {
+                    warnings.push(warning);
+                }
+            }
+            let scripts = format!("{dir}/migrations");
+            if self.dir.join(&scripts).is_dir() {
+                self.git(&["rm", "-r", "--quiet", "--", &scripts])?;
+            }
+            self.pre_commit(dir, tools, &mut warnings)?;
+            let name = dir.rsplit('/').next().unwrap_or(dir);
+            let committed = self.commit(dir, &format!("[MIG] {name}: Migration to {to}"), false)?;
+            done.push(InPlace {
+                addon: dir.clone(),
+                committed,
+                findings: self.findings(dir, to, tools),
+            });
+        }
+        Ok((done, warnings))
     }
 
     /// The pre-commit fixes in their own commit, then odoo-lint's upgrade
@@ -856,6 +920,38 @@ mod tests {
     }
 
     #[test]
+    fn own_addons_migrate_in_place() {
+        let (_tmp, work) = fixture();
+        let tree = Worktree::new(&OsRunner, &work);
+        // An own addon of the 19.0 branch with old migration scripts.
+        write(&work.join("own/a/__manifest__.py"), "{}\n");
+        write(&work.join("own/a/migrations/18.0.1.0.1/pre.py"), "\n");
+        write(&work.join("own/b/__manifest__.py"), "{}\n");
+        git(&work, &["add", "-A"]);
+        git(&work, &["commit", "--quiet", "-m", "own"]);
+        let dirs = ["own/a".to_owned(), "own/b".to_owned()];
+        let missing = tools("odx-test-no-such-program", Some("odx-test-no-such-program"));
+        let (done, warnings) = tree.migrate_in_place(&dirs, "19.0", &missing).unwrap();
+        assert_eq!(
+            done.iter().map(|addon| addon.committed).collect::<Vec<_>>(),
+            [true, false]
+        );
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert_eq!(
+            git(&work, &["log", "-1", "--format=%s"]),
+            "[MIG] a: Migration to 19.0"
+        );
+        assert!(!work.join("own/a/migrations").exists());
+        write(&work.join("own/b/x.py"), "x\n");
+        git(&work, &["add", "-A"]);
+        assert!(
+            tree.migrate_in_place(&dirs, "19.0", &missing)
+                .unwrap_err()
+                .contains("uncommitted")
+        );
+    }
+
+    #[test]
     fn every_command_can_fail() {
         use crate::testing::Faulty;
         let none = tools("odx-test-no-such-program", Some("odx-test-no-such-program"));
@@ -875,7 +971,19 @@ mod tests {
             halted(tree.start(plan(), &none));
             let _ = Worktree::new(runner, &work).abort();
         };
-        for scenario in [&start as &dyn Fn(&Faulty), &abort] {
+        let in_place = |runner: &Faulty| {
+            let (_tmp, work) = fixture();
+            write(&work.join("own/a/migrations/x.py"), "\n");
+            git(&work, &["add", "-A"]);
+            git(&work, &["commit", "--quiet", "-m", "own"]);
+            let missing = tools("odx-test-no-such-program", Some("odx-test-no-such-program"));
+            let _ = Worktree::new(runner, &work).migrate_in_place(
+                &["own/a".to_owned()],
+                "19.0",
+                &missing,
+            );
+        };
+        for scenario in [&start as &dyn Fn(&Faulty), &abort, &in_place] {
             // A program that does not start fails the same way everywhere.
             scenario(&Faulty::new(0, true));
             for fail_at in 0..calls(scenario) {

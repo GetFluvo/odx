@@ -355,6 +355,7 @@ fn build(
         from: Vec::new(),
         addon: None,
         show_muted: true,
+        check_apply: false,
     };
     let found = collect(&suggest, global, ctx, prepared, warnings)?;
     let entries = super::verdict::entries(ctx, prepared, global, warnings);
@@ -493,6 +494,7 @@ fn act_port(
         from: vec![source.to_owned()],
         addon: entry.addon.clone(),
         show_muted: true,
+        check_apply: false,
     };
     let mut warnings = Vec::new();
     // The dashboard was just built from the same suggestions.

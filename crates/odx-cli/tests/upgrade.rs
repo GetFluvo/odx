@@ -451,3 +451,79 @@ fn migration_plans_put_dependencies_first() {
     assert_eq!(exit, Exit::Usage);
     assert!(err.contains("no target series"), "{err}");
 }
+
+#[test]
+fn own_addons_migrate_in_place() {
+    let setup = Setup::new();
+    let root = &setup.root;
+    write(
+        &root.join("addons/my_mod/migrations/17.0.1.0.1/pre.py"),
+        "\n",
+    );
+    git(root, &["init", "--quiet"]);
+    git(root, &["config", "user.name", "Me"]);
+    git(root, &["config", "user.email", "me@example.com"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "--quiet", "-m", "project"]);
+    let env = &setup.env;
+    let (exit, out, err) = setup.odx(env, &["migrate", "own", "--to", "18.0"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert_eq!(
+        out,
+        "own addons migrated in place to 18.0:\n  addons/my_mod: [MIG] committed, 0 finding(s) left to fix by hand\n"
+    );
+    assert!(
+        err.contains("warning: migrate: odx-test-no-such-program"),
+        "{err}"
+    );
+    let (_, out, _) = setup.odx(
+        env,
+        &[
+            "--json",
+            "migrate",
+            "own",
+            "--to",
+            "18.0",
+            "--no-pre-commit",
+        ],
+    );
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["addons"][0]["committed"], false);
+    // A dirty worktree, and no target series.
+    write(&root.join("addons/my_mod/x.py"), "x\n");
+    git(root, &["add", "-A"]);
+    let (exit, _, err) = setup.odx(env, &["migrate", "own", "--to", "18.0"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("uncommitted changes"), "{err}");
+    let (exit, _, _) = setup.odx(env, &["migrate", "own"]);
+    assert_eq!(exit, Exit::Usage);
+}
+
+#[cfg(unix)]
+#[test]
+fn own_addons_list_what_is_left() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let setup = Setup::new();
+    let root = &setup.root;
+    git(root, &["init", "--quiet"]);
+    git(root, &["config", "user.name", "Me"]);
+    git(root, &["config", "user.email", "me@example.com"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "--quiet", "-m", "project"]);
+    let odl = setup.tmp.path().join("odl");
+    std::fs::write(
+        &odl,
+        "#!/bin/sh\ncase \"$*\" in\n  *--fix*) exit 1;;\n  *) echo '{\"modules\":[{\"violations\":[{\"file_path\":\"addons/my_mod/x.py\",\"line\":2,\"code\":\"U1\",\"message\":\"m\"}]}]}';;\nesac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&odl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let env = setup.env.clone().with("ODX_ODL", odl.display().to_string());
+    let (exit, out, err) = setup.odx(&env, &["migrate", "own", "--to", "18.0"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.ends_with(
+            "  addons/my_mod: nothing changed, 1 finding(s) left to fix by hand\n    addons/my_mod/x.py:2: U1 m\n"
+        ),
+        "{out}"
+    );
+}
