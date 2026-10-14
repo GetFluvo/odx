@@ -109,6 +109,8 @@ pub struct Finding {
 pub struct Summary {
     /// The migration branch.
     pub branch: String,
+    /// Where the history came from: `<remote>/<from>`.
+    pub source: String,
     /// The commits of history replayed from the source series, after the
     /// squash.
     pub history: usize,
@@ -483,6 +485,7 @@ impl<'a> Worktree<'a> {
             .unwrap_or_default();
         let mut summary = Summary {
             branch: plan.branch(),
+            source: format!("{}/{}", plan.remote, plan.from),
             history,
             squashed,
             commits: Vec::new(),

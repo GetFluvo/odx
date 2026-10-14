@@ -565,7 +565,10 @@ environment = "staging"
         let err = discover(&fs, Path::new("/w"), None).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "no pyproject.toml with a [tool.odx] table in /w or its parents"
+            format!(
+                "no pyproject.toml with a [tool.odx] table in /w or its parents{}",
+                crate::error::HINT
+            )
         );
     }
 

@@ -17,6 +17,9 @@ impl fmt::Display for Problem {
     }
 }
 
+/// What works without a project, and how to make one.
+pub(crate) const HINT: &str = "; odx migrate, odx port and odx migrate plan --to also work in a plain clone of an addons repository, and `odx import` or a [tool.odx] table makes this directory an odx project";
+
 /// Errors from locating, reading or validating a project configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -42,7 +45,7 @@ pub enum ConfigError {
         message: String,
     },
     /// No `pyproject.toml` with a `[tool.odx]` table was found.
-    #[error("no pyproject.toml with a [tool.odx] table in {start} or its parents", start = start.display())]
+    #[error("no pyproject.toml with a [tool.odx] table in {start} or its parents{HINT}", start = start.display())]
     NotFound {
         /// Where the search started.
         start: PathBuf,
