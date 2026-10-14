@@ -674,6 +674,10 @@ No odx project (pyproject.toml with [tool.odx]) is needed.")]
     /// Push the migration branch checked out and open its pull request: to the
     /// remote when you may push there, else to your fork (created when missing).
     Pr(MigratePrArgs),
+    /// Pin the dependencies of the migration branch's addon that only exist as an open
+    /// migration pull request upstream: lines in `test-requirements.txt` pointing at the pull
+    /// request, in a commit `[DON'T MERGE] test-requirements.txt`, as OCA asks.
+    Pin,
     /// What moving the project to another series takes, addon by addon: available, an
     /// open migration pull request to review, or to migrate (dependencies first); own
     /// addons apart.
@@ -744,6 +748,10 @@ pub struct MigrateAddonArgs {
     /// Migrate even when an open pull request already migrates the addon.
     #[arg(long)]
     pub force: bool,
+    /// Pin dependencies that only exist as an open migration pull request upstream in
+    /// `test-requirements.txt`, the OCA way (`odx migrate pin`).
+    #[arg(long)]
+    pub pin_unreleased: bool,
     /// Then push the branch and open a draft pull request (`odx migrate pr`).
     #[arg(long)]
     pub open_pr: bool,

@@ -605,28 +605,89 @@ pub(crate) fn migrate_plan(
         .filter(|row| row.status == "migration PR")
         .collect();
     let own: Vec<&Row> = rows.iter().filter(|row| row.status == "own").collect();
-    let url_of = |name: &str| {
-        missing
+    // What each addon to migrate (or of the project's own) waits for.
+    let mut lookup = super::deps::Lookup::new(ctx, global.offline);
+    let here: Vec<&str> = ready
+        .iter()
+        .chain(&own)
+        .map(|row| row.name.as_str())
+        .chain(order.iter().map(String::as_str))
+        .collect();
+    let available = |addon: &str| here.contains(&addon);
+    let waits: BTreeMap<String, Vec<super::deps::Waiting>> = order
+        .iter()
+        .cloned()
+        .chain(own.iter().map(|row| row.name.clone()))
+        .map(|name| {
+            let waiting = lookup.waiting(&depends(&name), &assessment.current, to, &available);
+            (name, waiting)
+        })
+        .filter(|(_, waiting)| !waiting.is_empty())
+        .collect();
+    let plan = ProjectPlan {
+        current: &assessment.current,
+        to,
+        ready: &ready,
+        prs: &prs,
+        missing: &missing,
+        order: &order,
+        own: &own,
+        waits: &waits,
+    };
+    report.out = if global.json {
+        plan.json()
+    } else {
+        plan.text()
+    };
+    Ok(report)
+}
+
+/// What `odx migrate plan` found in a project.
+struct ProjectPlan<'a> {
+    current: &'a str,
+    to: &'a str,
+    ready: &'a [&'a Row],
+    prs: &'a [&'a Row],
+    missing: &'a [&'a Row],
+    order: &'a [String],
+    own: &'a [&'a Row],
+    waits: &'a BTreeMap<String, Vec<super::deps::Waiting>>,
+}
+
+impl ProjectPlan<'_> {
+    fn url_of(&self, name: &str) -> Option<String> {
+        self.missing
             .iter()
             .find(|row| row.name == name)
             .and_then(|row| row.url.clone())
-    };
-    report.out = if global.json {
+    }
+
+    fn json(&self) -> String {
         let value = serde_json::json!({
-            "current": assessment.current,
-            "target": to,
-            "available": ready.iter().map(|row| &row.name).collect::<Vec<_>>(),
-            "pull_requests": prs.iter().map(|row| serde_json::json!({
+            "current": self.current,
+            "target": self.to,
+            "available": self.ready.iter().map(|row| &row.name).collect::<Vec<_>>(),
+            "pull_requests": self.prs.iter().map(|row| serde_json::json!({
                 "addon": row.name, "number": row.pull_request, "url": row.url,
             })).collect::<Vec<_>>(),
-            "to_migrate": order.iter().map(|name| serde_json::json!({
-                "addon": name, "url": url_of(name),
+            "to_migrate": self.order.iter().map(|name| serde_json::json!({
+                "addon": name, "url": self.url_of(name),
             })).collect::<Vec<_>>(),
-            "own": own.iter().map(|row| &row.name).collect::<Vec<_>>(),
+            "own": self.own.iter().map(|row| &row.name).collect::<Vec<_>>(),
+            "waits_on": self.waits,
         });
         format!("{value}\n")
-    } else {
-        let mut out = format!("migration plan {} -> {to}\n", assessment.current);
+    }
+
+    fn waiting(&self, out: &mut String, name: &str) {
+        for waiting in self.waits.get(name).into_iter().flatten() {
+            let _ = writeln!(out, "    {}", waiting.describe(self.to));
+        }
+    }
+
+    fn text(&self) -> String {
+        let to = self.to;
+        let mut out = format!("migration plan {} -> {to}\n", self.current);
         let names = |rows: &[&Row]| {
             rows.iter()
                 .map(|row| row.name.as_str())
@@ -636,10 +697,10 @@ pub(crate) fn migrate_plan(
         let _ = writeln!(
             out,
             "available on {to} ({}): {}",
-            ready.len(),
-            names(&ready)
+            self.ready.len(),
+            names(self.ready)
         );
-        for row in &prs {
+        for row in self.prs {
             let _ = writeln!(
                 out,
                 "open migration pull request: {} #{} in {}; review, test and contribute there",
@@ -648,9 +709,13 @@ pub(crate) fn migrate_plan(
                 row.url.as_deref().unwrap_or_default()
             );
         }
-        let _ = writeln!(out, "to migrate, dependencies first ({}):", order.len());
-        for name in &order {
-            match url_of(name) {
+        let _ = writeln!(
+            out,
+            "to migrate, dependencies first ({}):",
+            self.order.len()
+        );
+        for name in self.order {
+            match self.url_of(name) {
                 Some(url) => {
                     let _ = writeln!(out, "  {name} (in {url})");
                 }
@@ -658,20 +723,26 @@ pub(crate) fn migrate_plan(
                     let _ = writeln!(out, "  {name}");
                 }
             }
+            self.waiting(&mut out, name);
         }
         let _ = writeln!(
             out,
             "own addons, migrated in place ({}): {}",
-            own.len(),
-            names(&own)
+            self.own.len(),
+            names(self.own)
         );
+        for row in self.own {
+            if self.waits.contains_key(&row.name) {
+                let _ = writeln!(out, "  {}", row.name);
+                self.waiting(&mut out, &row.name);
+            }
+        }
         let _ = writeln!(
             out,
             "next: in a clone of each addon's repository, `odx migrate addon <addon> --to {to}`"
         );
         out
-    };
-    Ok(report)
+    }
 }
 
 /// `names` ordered so that each comes after those of them it depends on;

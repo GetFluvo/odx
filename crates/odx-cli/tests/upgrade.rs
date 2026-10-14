@@ -418,9 +418,14 @@ fn migration_plans_put_dependencies_first() {
     let up = setup.tmp.path().join("up");
     write(
         &up.join("pos_dep/__manifest__.py"),
-        "{'depends': ['base', 'pos_zz']}",
+        "{'depends': ['base', 'pos_zz', 'gone_dep']}",
     );
     write(&up.join("pos_zz/__manifest__.py"), "{}");
+    write(
+        &setup.root.join("addons/my_mod/__manifest__.py"),
+        "{'depends': ['pos_x', 'gone_dep']}",
+    );
+    write(&setup.root.join("addons/my_other/__manifest__.py"), "{}");
     git(&up, &["add", "-A"]);
     git(&up, &["commit", "--quiet", "-m", "more"]);
     let env = &setup.env;
@@ -437,8 +442,11 @@ fn migration_plans_put_dependencies_first() {
              available on 18.0 (3): pos_x, web_y, old_z\n\
              open migration pull request: sale_q #12 in {api}/OCA/sale; review, test and contribute there\n\
              to migrate, dependencies first (5):\n  \
-             pos_agg (in {agg})\n  pos_zz (in {agg})\n  pos_dep (in {agg})\n  foo\n  far (in http://127.0.0.1:1/OCA/far)\n\
-             own addons, migrated in place (1): my_mod\n\
+             pos_agg (in {agg})\n  pos_zz (in {agg})\n  pos_dep (in {agg})\n    \
+             waits on gone_dep: not on 18.0, and no open migration pull request found\n  \
+             foo\n  far (in http://127.0.0.1:1/OCA/far)\n\
+             own addons, migrated in place (2): my_mod, my_other\n  my_mod\n    \
+             waits on gone_dep: not on 18.0, and no open migration pull request found\n\
              next: in a clone of each addon's repository, `odx migrate addon <addon> --to 18.0`\n"
         )
     );
