@@ -30,9 +30,12 @@ git-aggregator's `gitaggregate`: `odx git-aggregate`, or the standalone
 
 > Status: pre-alpha. Working today: the `[tool.odx]` configuration,
 > `odx import`/`export`/`add`/`drop`, `odx aggregate`, `odx lock` (with the vault and the
-> force-push guard rail), `odx verify` and the gitaggregate
-> drop-in (`odx git-aggregate`, `git-aggregate-rs`). Every command not yet
-> implemented names the roadmap phase in which it lands.
+> force-push guard rail), `odx verify`, `odx vendor`, `odx build`, `odx sniff`, `odx stats`,
+> `odx dev`, `odx sync`/`daemon`/`cache`, `odx doctor`, `odx auth`, `odx status`,
+> `odx upgrade`, `odx check-deps`, `odx suggest`, `odx verdict`, `odx dashboard`,
+> `odx port` and `odx migrate`, and the gitaggregate drop-in (`odx git-aggregate`,
+> `git-aggregate-rs`). Every command not yet implemented (`promote`, `env`, `bot`,
+> `lint`) names the roadmap phase in which it lands.
 
 ## Features
 
@@ -151,31 +154,34 @@ modules = ["pos_loyalty", "pos_loyalty_reports"]
 Everything else in `pyproject.toml` (`[project]`, `[build-system]`, other
 `[tool.*]` tables) is left alone.
 
-## Planned CLI
+## CLI
 
 ```text
-odx aggregate [--locked | --update] [--config repos.yaml]
-odx lock [--check] [--auto-update] [--no-push]
-odx vendor [--requirements]
-odx build --publish --index private
-odx verify [--vendored | --installed .venv | --requirements]
+odx aggregate [--locked | --update | --fetch-only] [-c repos.yaml]
+odx lock [--check] [--update] [--auto-update] [--no-push]
+odx vendor [--requirements] | odx build [--publish --index private]
+odx verify [--vendored | --installed .venv | --requirements | --deployed <dir>]
 odx dev [<package> --branch <name>] [--restore]
-odx add <url> --pr <n> | odx drop <repo>#<pr>
+odx add <url | owner/repo#pr> [--package <dist>] | odx drop <repo>#<pr>
 odx import repos.yaml [addons.yaml] [--write] | odx export repos.yaml
-odx dashboard [--tui | --json | --markdown] | odx dashboard act <id> --include
+odx dashboard [--format table|markdown|tui] [--checkboxes] | odx dashboard act <id> --include|--drop|--follow|--mute|--port
 odx status [--fail-on-merged]
-odx suggest [--env uat] [mute <ref> --reason "..."]
-odx verdict add OCA/contract#1480 --addon contract --target 19.0 --kind not-applicable --reason "..."
+odx suggest [--env uat] [--check-apply] [--show-suppressed]
+odx verdict add OCA/contract#1480 --addon contract --kind not-applicable --reason "..." | odx verdict upstream <id> --public-reason "..."
 odx check-deps [--licenses] [--fix]
 odx sniff | odx stats | odx upgrade --target 18.0
 odx port pr OCA/sale-workflow#1234 --to 17.0 [--open-pr]
-odx port sweep --to 19.0 --from 16.0,17.0,18.0 [--open-pr]
+odx port addon sale_x --from 18.0 --to 19.0 | odx port blacklist sale_x OCA/x#12 --reason "..."
+odx port sweep --to 19.0 --from 16.0,17.0,18.0 [--write-blacklist --open-pr]
+odx migrate plan --to 19.0 | odx migrate addon sale_x --to 19.0 [--open-pr] | odx migrate own
+odx sync [--all] | odx daemon install --interval 30m | odx cache gc
+odx doctor | odx auth login <host> | odx completions <shell>
+
+# planned
 odx promote <module>... | --feature pos-loyalty | --search "invoicing" --to prod [--open-pr] [--yes --json]
 odx env diff test prod
 odx bot run --apply
-odx sync [--all] | odx daemon install --interval 30m | odx cache gc
 odx lint [--only-changed] [--format github]
-odx doctor | odx auth login <host> | odx completions <shell>
 
 odx git-aggregate -c repos.yaml -j 4     # gitaggregate drop-in
 git-aggregate-rs -c repos.yaml -j 4      # same, standalone package
