@@ -75,9 +75,7 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             return own(to.as_deref(), &tools, global, ctx);
         }
         (Some(MigrateCommand::Plan { to, from, remote }), _, _) => {
-            let project =
-                global.config.is_some() || odx_config::find_pyproject(ctx.fs, &ctx.dir).is_ok();
-            if project {
+            if super::in_project(global, ctx) {
                 return super::upgrade::migrate_plan(to.as_deref(), global, ctx);
             }
             let Some(to) = to else {

@@ -12,6 +12,9 @@ use odx_config::Problem;
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner, redact};
 
+use crate::Context;
+use crate::cli::GlobalArgs;
+
 pub(crate) mod aggregate;
 pub(crate) mod auth;
 pub(crate) mod autoupdate;
@@ -52,6 +55,16 @@ pub(crate) fn run_checked(invocation: &Invocation, what: &str) -> Result<(), Str
         |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
     );
     Err(format!("{what} failed: {detail}"))
+}
+
+/// Whether odx runs in a project: `--config` names one, or a
+/// `pyproject.toml` with a `[tool.odx]` table is found, broken or not.
+pub(crate) fn in_project(global: &GlobalArgs, ctx: &Context<'_>) -> bool {
+    global.config.is_some()
+        || !matches!(
+            odx_config::find_pyproject(ctx.fs, &ctx.dir),
+            Err(odx_config::ConfigError::NotFound { .. })
+        )
 }
 
 /// The standard output of `invocation`, trimmed; a failure carries its

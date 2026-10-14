@@ -111,6 +111,11 @@ impl<'a> Lookup<'a> {
         }
     }
 
+    /// Whether it asks the package index and the forges at all.
+    pub(crate) const fn online(&self) -> bool {
+        self.http.is_some()
+    }
+
     /// Which of `depends` are not available on `to`; `available` says what
     /// the caller knows to be there (the target branch, the plan). Nothing
     /// is reported offline, where odx cannot tell.
