@@ -523,6 +523,9 @@ struct Assessment {
 }
 
 fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    if !super::in_project(global, ctx) {
+        return repository(args, global, ctx);
+    }
     let mut report = Report::default();
     let Assessment {
         current,
@@ -545,6 +548,117 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         text(&current, &target, &rows)
     };
     Ok(report)
+}
+
+/// `odx upgrade` in a plain clone of an addons repository: odoo-lint's
+/// readiness of its addons, and whether the dependencies they have outside
+/// the repository exist on the target series.
+fn repository(
+    args: &UpgradeArgs,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+) -> Result<Report, Report> {
+    let Some(target) = args.target.clone() else {
+        return Err(Report::error(
+            Exit::Usage,
+            "outside an odx project, name the target series with --target".to_owned(),
+        ));
+    };
+    let dirs = addon_dirs(&ctx.dir);
+    let manifests: Vec<(String, odx_analyze::manifest::Manifest)> = dirs
+        .iter()
+        .filter_map(|dir| {
+            let text = ctx
+                .fs
+                .read(&dir.join("__manifest__.py"))
+                .unwrap_or_default();
+            let name = dir.file_name().unwrap_or_default().to_string_lossy();
+            odx_analyze::manifest::parse_manifest(&String::from_utf8_lossy(&text))
+                .ok()
+                .map(|manifest| (name.into_owned(), manifest))
+        })
+        .collect();
+    // The series the addons are on, from their versions (`18.0.1.0.0`).
+    let current = manifests
+        .iter()
+        .find_map(|(_, manifest)| manifest.version.as_deref().and_then(series_of))
+        .or_else(|| super::pin::previous(&target))
+        .unwrap_or_default();
+    let mut report = Report::default();
+    let efforts = if args.no_lint || dirs.is_empty() {
+        BTreeMap::new()
+    } else {
+        lint(ctx, &dirs, &target).unwrap_or_else(|message| {
+            report.warnings.push(Problem {
+                key: "odoo-lint".to_owned(),
+                message,
+            });
+            BTreeMap::new()
+        })
+    };
+    let mut rows: Vec<Row> = manifests
+        .iter()
+        .map(|(name, _)| Row {
+            name: name.clone(),
+            kind: "own",
+            status: "own",
+            effort: efforts.get(name).copied(),
+            ..Row::default()
+        })
+        .collect();
+    let here = |addon: &str| manifests.iter().any(|(name, _)| name == addon);
+    let core = super::deps::core(&target);
+    let mut outside: Vec<String> = manifests
+        .iter()
+        .flat_map(|(_, manifest)| manifest.depends.iter().cloned())
+        .filter(|addon| !here(addon) && !core.contains(&addon.as_str()))
+        .collect();
+    outside.sort();
+    outside.dedup();
+    let mut lookup = super::deps::Lookup::new(ctx, global.offline);
+    let online = lookup.online();
+    let waiting = lookup.waiting(&outside, &current, &target, &|_| false);
+    rows.extend(outside.iter().map(|addon| {
+        let waits = waiting.iter().find(|waiting| &waiting.addon == addon);
+        let pull_request = waits.and_then(|waiting| waiting.pull_request.as_ref());
+        let status = match (online, waits, pull_request) {
+            (false, _, _) => "not checked",
+            (true, None, _) => "released",
+            (true, Some(_), Some(_)) => "migration PR",
+            (true, Some(_), None) => "missing",
+        };
+        Row {
+            name: addon.clone(),
+            kind: "dependency",
+            status,
+            url: pull_request
+                .map(|pr| format!("{}/{}", pr.origin, pr.repository))
+                .or_else(|| waits.and_then(|waiting| waiting.repository.clone())),
+            pull_request: pull_request.map(|pr| pr.number),
+            ..Row::default()
+        }
+    }));
+    if args.only_missing {
+        rows.retain(|row| matches!(row.status, "missing" | "migration PR"));
+    }
+    report.out = if global.json {
+        format!("{}\n", json(&current, &target, &rows))
+    } else {
+        text(&current, &target, &rows)
+    };
+    Ok(report)
+}
+
+/// The series of an addon version: `18.0` for `18.0.1.0.0`.
+fn series_of(version: &str) -> Option<String> {
+    let parts: Vec<&str> = version.split('.').collect();
+    let numeric = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    match parts.as_slice() {
+        [major, minor, _, _, _, ..] if numeric(major) && numeric(minor) => {
+            Some(format!("{major}.{minor}"))
+        }
+        _ => None,
+    }
 }
 
 /// `odx migrate plan`: what a move to `target` takes, addon by addon, the
@@ -922,6 +1036,14 @@ fn json(current: &str, target: &str, rows: &[Row]) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn series_of_versions() {
+        assert_eq!(series_of("18.0.1.0.0").as_deref(), Some("18.0"));
+        for version in ["1.0", "18.0.1", "x.0.1.0.0", "18..1.0.0"] {
+            assert_eq!(series_of(version), None, "{version}");
+        }
+    }
 
     fn listed(orgs: &[&str], sources: Option<Vec<IndexSource>>) -> Vec<String> {
         let index = Index {

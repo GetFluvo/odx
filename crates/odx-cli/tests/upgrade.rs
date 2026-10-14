@@ -304,8 +304,10 @@ fn target_lint_and_source_failures() {
     let (exit, _, err) = setup.odx(env, &["upgrade"]);
     assert_eq!(exit, Exit::Usage);
     assert!(err.contains("no target series"), "{err}");
-    let (exit, _, _) = setup.odx(env, &["-C", "..", "upgrade", "--target", "18.0"]);
-    assert_eq!(exit, Exit::Usage);
+    // Outside the project, the directory is a plain addons repository.
+    let (exit, out, _) = setup.odx(env, &["-C", "..", "upgrade", "--target", "18.0"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(out.starts_with("upgrade 17.0 -> 18.0\n"), "{out}");
     // The target from the configuration, renames from it too; an index
     // and OpenUpgrade that fail are reported.
     let pyproject = std::fs::read_to_string(setup.root.join("pyproject.toml")).unwrap();
@@ -534,4 +536,84 @@ fn own_addons_list_what_is_left() {
         ),
         "{out}"
     );
+}
+
+#[test]
+fn plain_addons_repositories_need_no_project() {
+    let setup = Setup::new();
+    let repo = setup.tmp.path().join("repo");
+    write(
+        &repo.join("a_mod/__manifest__.py"),
+        "{'version': '17.0.1.0.0', 'depends': ['base', 'b_mod', 'pos_x', 'sale_q', 'old_z', 'far']}",
+    );
+    write(
+        &repo.join("b_mod/__manifest__.py"),
+        "{'depends': ['pos_x']}",
+    );
+    write(&repo.join("broken/__manifest__.py"), "not a manifest");
+    let run = |dir: &Path, args: &[&str]| {
+        let mut command_line = vec!["odx"];
+        command_line.extend_from_slice(args);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let exit = odx_cli::run_with_env(command_line, &OsFs, &setup.env, dir, &mut out, &mut err);
+        (
+            exit,
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
+    };
+    let (exit, out, err) = run(&repo, &["upgrade", "--target", "18.0"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let api = &setup.api;
+    assert_eq!(
+        out,
+        format!(
+            "upgrade 17.0 -> 18.0\n\
+             a_mod: own\n\
+             b_mod: own\n\
+             far: missing in http://127.0.0.1:1/OCA/far\n\
+             old_z: missing in {api}/OCA/z\n\
+             pos_x: released\n\
+             sale_q: migration PR #12 in {api}/OCA/sale\n\
+             6 addons: 1 released, 0 available, 1 with a migration PR, 2 missing, 2 own\n"
+        )
+    );
+    // odoo-lint is not installed here.
+    assert!(err.contains("install odoo-lint"), "{err}");
+    let (_, out, _) = run(
+        &repo,
+        &[
+            "--json",
+            "upgrade",
+            "--target",
+            "18.0",
+            "--only-missing",
+            "--no-lint",
+        ],
+    );
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["addons"].as_array().unwrap().len(), 3, "{out}");
+    let (_, out, _) = run(
+        &repo,
+        &["--offline", "upgrade", "--target", "18.0", "--no-lint"],
+    );
+    assert!(out.contains("pos_x: not checked\n"), "{out}");
+    // Without addons or versions, the source is the series before.
+    let empty = setup.tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let (_, out, _) = run(&empty, &["upgrade", "--target", "18.0"]);
+    assert!(out.starts_with("upgrade 17.0 -> 18.0\n0 addons"), "{out}");
+    let (exit, _, err) = run(&repo, &["upgrade"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(
+        err.contains("name the target series with --target"),
+        "{err}"
+    );
+    // A project whose configuration is broken is not a plain repository.
+    write(
+        &repo.join("pyproject.toml"),
+        "[tool.odx]\nodoo_version = 3\n",
+    );
+    let (exit, _, _) = run(&repo, &["upgrade", "--target", "18.0"]);
+    assert_eq!(exit, Exit::Usage);
 }

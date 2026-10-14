@@ -498,6 +498,14 @@ get odoo-lint's upgrade counts (`odl upgrade-check`; `ODX_ODL` names the
 executable): how many changes are automatic, need review, or are manual.
 The target defaults to `[tool.odx.upgrade] target_odoo_version`.
 
+Outside a project, in a plain clone of an addons repository, `odx upgrade
+--target 19.0` looks at the addons in the directory instead: each gets
+odoo-lint's counts, and every dependency they have outside the repository
+(Odoo's own addons aside) is `released`, has a `migration PR #n`, or is
+`missing` on the target series; `not checked` with `--offline`. The source
+series comes from the addons' versions (`18.0.1.0.0`), else it is the one
+before the target.
+
 `[tool.odx.index] orgs` lists organizations (GitHub names such as `"OCA"`,
 or URLs such as `"https://gitlab.com/group"` or `"https://forge.example.com/org"`)
 whose repositories odx reads when an addon is still missing: the addons on
