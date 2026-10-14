@@ -30,7 +30,7 @@ Options:
           Leave out odoo-lint's upgrade fixes
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --open-pr
           Then push the branch and open a draft pull request
@@ -42,7 +42,7 @@ Options:
           With --open-pr: push to this remote instead of the target or your fork
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved

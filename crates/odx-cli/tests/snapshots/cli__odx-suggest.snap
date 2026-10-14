@@ -29,7 +29,7 @@ Options:
           Only addons matching this glob
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -43,7 +43,7 @@ Options:
           Tell for each portable suggestion whether its commits apply cleanly on the target
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved

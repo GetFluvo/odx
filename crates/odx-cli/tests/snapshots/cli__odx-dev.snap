@@ -30,7 +30,7 @@ Options:
           Do not install addons in editable mode
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --venv <DIR>
           The virtual environment for editable installs (default: `[tool.odx.dev] venv`, else `.venv`)
@@ -45,7 +45,7 @@ Options:
           Show what would change without changing anything
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved

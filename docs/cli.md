@@ -22,6 +22,15 @@ so, name the roadmap phase in which they land, and exit with code `2`.
 | `--json` | machine-readable output on stdout |
 | `-v` / `-q` | more or less logging on stderr |
 
+`--offline` and `--no-refresh` save network time only: local work such as git,
+pre-commit and odoo-lint takes as long as before. In a measured migration they
+saved about 3 % of a ten-second run.
+
+Exit codes are the same for every command: `0` success, `1` an operational
+failure (a conflict, the network, a policy refusing), `2` a usage or
+configuration error, such as a missing `[tool.odx]` project where a command
+needs one.
+
 ## Editing `pyproject.toml`
 
 `odx add` and `odx drop` edit `pyproject.toml` in place. Comments and
@@ -590,8 +599,9 @@ target series:
    it is, with a warning. `--no-squash` keeps the history as replayed;
    `[tool.odx.port] squash_authors` and `squash_subjects` name other bots.
 3. `[IMP] <addon>: pre-commit auto fixes`: the repository's pre-commit hooks
-   on the addon's files, when it has a `.pre-commit-config.yaml`
-   (`--no-pre-commit` leaves this out; `ODX_PRE_COMMIT` names the program).
+   on the addon's files, when it has a `.pre-commit-config.yaml`; the commit
+   only exists when they change something (`--no-pre-commit` leaves this out;
+   `ODX_PRE_COMMIT` names the program).
 4. `[MIG] <addon>: Migration to <to>`: odoo-lint's upgrade fixes for every
    step between the series, unsafe ones included (`odl upgrade-check --fix
    --unsafe-fixes --bump-version`, `ODX_ODL` names the program), the
@@ -599,7 +609,8 @@ target series:
    removed, and pre-commit run again.
 
 odx then lists what odoo-lint leaves to fix by hand. Nothing is pushed: you
-review the branch, finish the migration and run the tests. Both series are fetched from `--remote` (default `upstream` when
+review the branch, finish the migration and run the tests, then `odx migrate
+pr` pushes it and opens the draft pull request. Both series are fetched from `--remote` (default `upstream` when
 the clone has it, else `origin`); `--from` defaults to the series before
 `--to`. A conflict while replaying the history stops at git's own `am`
 state: resolve it, `git add` the files, then `odx migrate --continue`.

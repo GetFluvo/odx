@@ -45,7 +45,7 @@ Options:
           [default: info]
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
   -e, --expand-env
           Expand `$VAR` and `${VAR}` in the repositories file
@@ -57,7 +57,7 @@ Options:
           Variables for --expand-env (the environment takes precedence)
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
   -f, --force
           Discard local changes, and replace directories not built by odx

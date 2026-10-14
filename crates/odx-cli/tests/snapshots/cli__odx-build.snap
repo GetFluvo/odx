@@ -26,7 +26,7 @@ Options:
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --project
           Also build the project's own addons (from the committed HEAD)
@@ -38,7 +38,7 @@ Options:
           Where the wheels go (default: `dist/wheels`)
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --sbom
           Emit a CycloneDX SBOM per wheel

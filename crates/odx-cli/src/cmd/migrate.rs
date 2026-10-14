@@ -484,7 +484,7 @@ fn text(summary: &Summary) -> String {
         }
     }
     out.push_str(
-        "next: fix what is left, run the tests, then push the branch and open the pull request\n",
+        "next: fix what is left and run the tests; then `odx migrate pr` pushes the branch and opens a draft pull request\n",
     );
     out
 }

@@ -52,7 +52,8 @@ pub struct GlobalArgs {
     #[arg(short, long, global = true, value_name = "N")]
     pub jobs: Option<usize>,
 
-    /// Serve forge and index data from the cache only.
+    /// Serve forge and index data from the cache only. Only network calls are skipped:
+    /// local work (git, pre-commit, odoo-lint) takes as long as before.
     #[arg(long, global = true)]
     pub offline: bool,
 
@@ -60,7 +61,7 @@ pub struct GlobalArgs {
     #[arg(long, global = true, conflicts_with_all = ["offline", "no_refresh"])]
     pub fresh: bool,
 
-    /// Use cached data even when stale.
+    /// Use cached data even when stale. Like --offline, this saves network time only.
     #[arg(long, global = true)]
     pub no_refresh: bool,
 
@@ -665,7 +666,7 @@ The steps, on a new branch `<to>-mig-<addon>` made from `<remote>/<to>` in the c
   1. stop when an open pull request on the forge already migrates the addon (--force, --offline)
   2. replay the addon's history from `<remote>/<from>` (git format-patch | git am -3 --keep)
   3. squash the administrative commits (bots, Weblate) into the commits they follow (--no-squash)
-  4. `[IMP] <addon>: pre-commit auto fixes` (--no-pre-commit)
+  4. `[IMP] <addon>: pre-commit auto fixes`, only when pre-commit changes something (--no-pre-commit)
   5. `[MIG] <addon>: Migration to <to>`: odoo-lint's upgrade fixes, version bump, old migrations/ removed
 Then odx lists what odoo-lint leaves to fix by hand. Nothing is pushed: `odx migrate pr` does that.
 No odx project (pyproject.toml with [tool.odx]) is needed.")]

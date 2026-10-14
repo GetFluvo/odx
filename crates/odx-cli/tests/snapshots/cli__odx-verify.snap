@@ -29,7 +29,7 @@ Options:
           Check the addon directories of a deployment checkout against the vendor manifest
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --allow-shell
           Run the `custom` profile's verify hook (also allowed by `[trust]` in the user configuration)
@@ -38,7 +38,7 @@ Options:
           Ignore cached data; refresh everything before answering
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved
