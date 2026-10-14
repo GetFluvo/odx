@@ -411,3 +411,43 @@ fn organization_listings_find_what_the_package_index_does_not() {
         "{err}"
     );
 }
+
+#[test]
+fn migration_plans_put_dependencies_first() {
+    let setup = Setup::new();
+    let up = setup.tmp.path().join("up");
+    write(
+        &up.join("pos_dep/__manifest__.py"),
+        "{'depends': ['base', 'pos_zz']}",
+    );
+    write(&up.join("pos_zz/__manifest__.py"), "{}");
+    git(&up, &["add", "-A"]);
+    git(&up, &["commit", "--quiet", "-m", "more"]);
+    let env = &setup.env;
+    let (exit, _, err) = setup.odx(env, &["aggregate"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let (exit, out, err) = setup.odx(env, &["migrate", "plan", "--to", "18.0"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let api = &setup.api;
+    let agg = file_url(&up);
+    assert_eq!(
+        out,
+        format!(
+            "migration plan 17.0 -> 18.0\n\
+             available on 18.0 (3): pos_x, web_y, old_z\n\
+             open migration pull request: sale_q #12 in {api}/OCA/sale; review, test and contribute there\n\
+             to migrate, dependencies first (5):\n  \
+             pos_agg (in {agg})\n  pos_zz (in {agg})\n  pos_dep (in {agg})\n  foo\n  far (in http://127.0.0.1:1/OCA/far)\n\
+             own addons, migrated in place (1): my_mod\n\
+             next: in a clone of each addon's repository, `odx migrate addon <addon> --to 18.0`\n"
+        )
+    );
+    let (_, out, _) = setup.odx(env, &["--json", "migrate", "plan", "--to", "18.0"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["to_migrate"][2]["addon"], "pos_dep");
+    assert_eq!(value["pull_requests"][0]["number"], 12);
+    // The target from the configuration, or none.
+    let (exit, _, err) = setup.odx(env, &["migrate", "plan"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("no target series"), "{err}");
+}

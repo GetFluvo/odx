@@ -47,7 +47,7 @@ impl Kind {
 pub(crate) struct Addon {
     pub(crate) name: String,
     pub(crate) kind: Kind,
-    /// Its directory, for own addons.
+    /// Its directory, for own and aggregated addons.
     dir: Option<PathBuf>,
     /// Its repository on the current series, when known without the index.
     pub(crate) url: Option<String>,
@@ -114,7 +114,7 @@ pub(crate) fn addons(ctx: &Context<'_>, prepared: &Prepared) -> Vec<Addon> {
                 found.push(Addon {
                     name,
                     kind: Kind::Aggregated,
-                    dir: None,
+                    dir: Some(dir),
                     url: Some(repo.url.clone()),
                 });
             }
@@ -514,12 +514,201 @@ impl Run<'_> {
     }
 }
 
+/// Where every addon of the project stands on a target series.
+struct Assessment {
+    current: String,
+    target: String,
+    addons: Vec<Addon>,
+    rows: Vec<Row>,
+}
+
 fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let mut report = Report::default();
+    let Assessment {
+        current,
+        target,
+        mut rows,
+        ..
+    } = assess(
+        args.target.as_deref(),
+        args.no_lint,
+        global,
+        ctx,
+        &mut report.warnings,
+    )?;
+    if args.only_missing {
+        rows.retain(|row| matches!(row.status, "missing" | "migration PR"));
+    }
+    report.out = if global.json {
+        format!("{}\n", json(&current, &target, &rows))
+    } else {
+        text(&current, &target, &rows)
+    };
+    Ok(report)
+}
+
+/// `odx migrate plan`: what a move to `target` takes, addon by addon, the
+/// ones to migrate dependencies first.
+pub(crate) fn migrate_plan(
+    target: Option<&str>,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+) -> Result<Report, Report> {
+    let mut report = Report::default();
+    let assessment = assess(target, true, global, ctx, &mut report.warnings)?;
+    let depends = |name: &str| -> Vec<String> {
+        assessment
+            .addons
+            .iter()
+            .find(|addon| addon.name == name)
+            .and_then(|addon| addon.dir.as_ref())
+            .and_then(|dir| ctx.fs.read(&dir.join("__manifest__.py")).ok())
+            .and_then(|bytes| {
+                odx_analyze::manifest::parse_manifest(&String::from_utf8_lossy(&bytes)).ok()
+            })
+            .map(|manifest| manifest.depends)
+            .unwrap_or_default()
+    };
+    let rows = &assessment.rows;
+    let missing: Vec<&Row> = rows.iter().filter(|row| row.status == "missing").collect();
+    let names: Vec<String> = missing.iter().map(|row| row.name.clone()).collect();
+    let order = dependencies_first(&names, &depends);
+    let to = &assessment.target;
+    let ready: Vec<&Row> = rows
+        .iter()
+        .filter(|row| matches!(row.status, "released" | "available"))
+        .collect();
+    let prs: Vec<&Row> = rows
+        .iter()
+        .filter(|row| row.status == "migration PR")
+        .collect();
+    let own: Vec<&Row> = rows.iter().filter(|row| row.status == "own").collect();
+    let url_of = |name: &str| {
+        missing
+            .iter()
+            .find(|row| row.name == name)
+            .and_then(|row| row.url.clone())
+    };
+    report.out = if global.json {
+        let value = serde_json::json!({
+            "current": assessment.current,
+            "target": to,
+            "available": ready.iter().map(|row| &row.name).collect::<Vec<_>>(),
+            "pull_requests": prs.iter().map(|row| serde_json::json!({
+                "addon": row.name, "number": row.pull_request, "url": row.url,
+            })).collect::<Vec<_>>(),
+            "to_migrate": order.iter().map(|name| serde_json::json!({
+                "addon": name, "url": url_of(name),
+            })).collect::<Vec<_>>(),
+            "own": own.iter().map(|row| &row.name).collect::<Vec<_>>(),
+        });
+        format!("{value}\n")
+    } else {
+        let mut out = format!("migration plan {} -> {to}\n", assessment.current);
+        let names = |rows: &[&Row]| {
+            rows.iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let _ = writeln!(
+            out,
+            "available on {to} ({}): {}",
+            ready.len(),
+            names(&ready)
+        );
+        for row in &prs {
+            let _ = writeln!(
+                out,
+                "open migration pull request: {} #{} in {}; review, test and contribute there",
+                row.name,
+                row.pull_request.unwrap_or_default(),
+                row.url.as_deref().unwrap_or_default()
+            );
+        }
+        let _ = writeln!(out, "to migrate, dependencies first ({}):", order.len());
+        for name in &order {
+            match url_of(name) {
+                Some(url) => {
+                    let _ = writeln!(out, "  {name} (in {url})");
+                }
+                None => {
+                    let _ = writeln!(out, "  {name}");
+                }
+            }
+        }
+        let _ = writeln!(
+            out,
+            "own addons, migrated in place ({}): {}",
+            own.len(),
+            names(&own)
+        );
+        let _ = writeln!(
+            out,
+            "next: in a clone of each addon's repository, `odx migrate addon <addon> --to {to}`"
+        );
+        out
+    };
+    Ok(report)
+}
+
+/// `names` ordered so that each comes after those of them it depends on;
+/// otherwise in the given order. A cycle is broken at its first member.
+fn dependencies_first(names: &[String], depends: &dyn Fn(&str) -> Vec<String>) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut left: Vec<&String> = names.iter().collect();
+    while !left.is_empty() {
+        // What `name` still waits for among `names`.
+        let waits = |name: &str| -> Vec<String> {
+            depends(name)
+                .into_iter()
+                .filter(|dep| dep != name && names.contains(dep) && !order.contains(dep))
+                .collect()
+        };
+        let ready = left.iter().position(|name| waits(name).is_empty());
+        let next = ready.unwrap_or_else(|| {
+            left.iter()
+                .position(|name| reaches(name, name, &waits, &mut Vec::new()))
+                .unwrap_or(0)
+        });
+        order.push(left.remove(next).clone());
+    }
+    order
+}
+
+/// Whether `to` is reachable from `from` through what they wait for.
+fn reaches(
+    from: &str,
+    to: &str,
+    waits: &dyn Fn(&str) -> Vec<String>,
+    seen: &mut Vec<String>,
+) -> bool {
+    waits(from).into_iter().any(|next| {
+        if next == to {
+            return true;
+        }
+        if seen.contains(&next) {
+            return false;
+        }
+        seen.push(next.clone());
+        reaches(&next, to, waits, seen)
+    })
+}
+
+/// The project's addons on `target` (default `[tool.odx.upgrade]
+/// target_odoo_version`), with odoo-lint's counts for its own unless
+/// `no_lint`.
+fn assess(
+    target: Option<&str>,
+    no_lint: bool,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+    warnings: &mut Vec<Problem>,
+) -> Result<Assessment, Report> {
     let prepared = prepare(global, ctx)?;
     let config = &prepared.project.config;
-    let target = args
-        .target
-        .clone()
+    let target = target
+        .map(str::to_owned)
         .or_else(|| {
             config
                 .upgrade
@@ -533,7 +722,6 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
                     .to_owned(),
             )
         })?;
-    let mut report = Report::default();
     let addons = addons(ctx, &prepared);
     let http =
         ReqwestHttp::new().map(|http| CachedHttp::new(http, prepared.cache.root().join("http")));
@@ -550,18 +738,19 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             .filter(|_| !global.offline)
             .map(|http| http as &dyn Http),
     };
-    let renames = run.renames(&mut report.warnings);
-    let index = run.index(renames, &addons, global.refresh_index, &mut report.warnings);
+    let renames = run.renames(warnings);
+    let index = run.index(renames, &addons, global.refresh_index, warnings);
     // Own addons: odoo-lint's readiness.
     let own: Vec<PathBuf> = addons
         .iter()
+        .filter(|addon| addon.kind == Kind::Own)
         .filter_map(|addon| addon.dir.clone())
         .collect();
-    let efforts = if args.no_lint || own.is_empty() {
+    let efforts = if no_lint || own.is_empty() {
         BTreeMap::new()
     } else {
         lint(ctx, &own, &run.target).unwrap_or_else(|message| {
-            report.warnings.push(Problem {
+            warnings.push(Problem {
                 key: "odoo-lint".to_owned(),
                 message,
             });
@@ -569,7 +758,7 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         })
     };
     let mut kinds = BTreeMap::new();
-    let mut rows: Vec<Row> = addons
+    let rows: Vec<Row> = addons
         .iter()
         .map(|addon| match addon.kind {
             Kind::Own => Row {
@@ -582,15 +771,13 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             Kind::Aggregated | Kind::Package => run.row(addon, &index, &mut kinds),
         })
         .collect();
-    if args.only_missing {
-        rows.retain(|row| matches!(row.status, "missing" | "migration PR"));
-    }
-    report.out = if global.json {
-        format!("{}\n", json(&run.current, &run.target, &rows))
-    } else {
-        text(&run.current, &run.target, &rows)
-    };
-    Ok(report)
+    let (current, target) = (run.current, run.target);
+    Ok(Assessment {
+        current,
+        target,
+        addons,
+        rows,
+    })
 }
 
 fn text(current: &str, target: &str, rows: &[Row]) -> String {
@@ -666,6 +853,20 @@ mod tests {
             .iter()
             .map(|(site, owner)| format!("{} {owner}", site.origin()))
             .collect()
+    }
+
+    #[test]
+    fn dependencies_come_first_and_cycles_break_in_order() {
+        let names: Vec<String> = ["c", "a", "b", "d"].map(str::to_owned).to_vec();
+        let depends = |name: &str| -> Vec<String> {
+            match name {
+                "c" => vec!["a".to_owned(), "base".to_owned()],
+                "a" => vec!["b".to_owned(), "a".to_owned()],
+                "b" => vec!["a".to_owned()],
+                _ => Vec::new(),
+            }
+        };
+        assert_eq!(dependencies_first(&names, &depends), ["d", "a", "c", "b"]);
     }
 
     #[test]

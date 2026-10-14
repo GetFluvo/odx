@@ -127,6 +127,8 @@ pub enum Outcome {
 pub struct Worktree<'a> {
     runner: &'a dyn ProcessRunner,
     dir: PathBuf,
+    /// `-c user.name=... -c user.email=...` for the commits, when set.
+    identity: Vec<String>,
 }
 
 impl<'a> Worktree<'a> {
@@ -135,7 +137,20 @@ impl<'a> Worktree<'a> {
         Self {
             runner,
             dir: dir.into(),
+            identity: Vec::new(),
         }
+    }
+
+    /// Commit as `name` and `email` instead of git's configured identity.
+    #[must_use]
+    pub fn with_identity(mut self, name: &str, email: &str) -> Self {
+        self.identity = vec![
+            "-c".to_owned(),
+            format!("user.name={name}"),
+            "-c".to_owned(),
+            format!("user.email={email}"),
+        ];
+        self
     }
 
     fn bytes(&self, invocation: &Invocation) -> Result<Vec<u8>, String> {
@@ -157,6 +172,7 @@ impl<'a> Worktree<'a> {
             .env("LC_ALL", "C")
             .arg("-C")
             .arg(self.dir.as_os_str())
+            .args(&self.identity)
     }
 
     pub(crate) fn git(&self, args: &[&str]) -> Result<String, String> {

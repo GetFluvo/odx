@@ -437,7 +437,7 @@ fn dashboard(
         (dashboards, specs, String::new())
     };
     if let Some(DashboardAct::Act(act)) = &args.act {
-        return run_act(act, &dashboards, &specs, global, ctx);
+        return run_act(act, &dashboards, &specs, global, ctx, &prepared);
     }
     let dashboards: Vec<Dashboard> = dashboards
         .into_iter()
@@ -475,6 +475,34 @@ fn dashboard(
     })
 }
 
+/// `odx dashboard act <id> --port`: the suggestion found again, then
+/// ported in a clone under the cache.
+fn act_port(
+    act: &DashboardActArgs,
+    dashboard: &Dashboard,
+    entry: &Entry,
+    reference: &str,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+) -> Result<Report, Report> {
+    let source = entry.state.strip_prefix("from ").unwrap_or_default();
+    let suggest = SuggestArgs {
+        env: None,
+        series: Some(dashboard.series.clone()),
+        from: vec![source.to_owned()],
+        addon: entry.addon.clone(),
+        show_muted: true,
+    };
+    let mut warnings = Vec::new();
+    // The dashboard was just built from the same suggestions.
+    super::verdict::suggestion(&suggest, reference, global, ctx, prepared, &mut warnings).map(
+        |(found, group)| {
+            super::port::port_suggestion(ctx, global, prepared, &found, &group, act.open_pr)
+        },
+    )
+}
+
 /// `odx dashboard act <id>`: one action, as the command behind it.
 fn run_act(
     act: &DashboardActArgs,
@@ -482,6 +510,7 @@ fn run_act(
     specs: &Specs,
     global: &GlobalArgs,
     ctx: &Context<'_>,
+    prepared: &Prepared,
 ) -> Result<Report, Report> {
     let action = if act.include {
         Action::Include
@@ -513,10 +542,7 @@ fn run_act(
     let reference = rest.split_once("->").map_or(rest, |(change, _)| change);
     let (spec, package) = specs.get(&act.id).cloned().unwrap_or_default();
     match action {
-        Action::Port => Err(Report::error(
-            Exit::Usage,
-            "porting upstream lands with odx port (roadmap phase 8)".to_owned(),
-        )),
+        Action::Port => act_port(act, dashboard, entry, reference, global, ctx, prepared),
         Action::Mute => {
             let reason = act
                 .reason
@@ -637,13 +663,15 @@ fn interactive(
                 id: id.clone(),
                 include: *action == Action::Include,
                 port: *action == Action::Port,
+                open_pr: false,
                 mute: *action == Action::Mute,
                 drop: *action == Action::Drop,
                 follow: *action == Action::Follow,
                 reason: reason.clone(),
                 kind: crate::cli::VerdictKind::NotWanted,
             };
-            let report = run_act(&act, &dashboards, &specs, &fresh, ctx).unwrap_or_else(|r| r);
+            let report =
+                run_act(&act, &dashboards, &specs, &fresh, ctx, prepared).unwrap_or_else(|r| r);
             app.status = report
                 .error
                 .or_else(|| report.out.lines().next().map(str::to_owned))

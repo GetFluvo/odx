@@ -12,7 +12,7 @@ Commands:
   show      Show one verdict
   revoke    Revoke a verdict (recorded, never deleted)
   confirm   Keep a stale verdict after reviewing the changed target code
-  upstream  Propose a verdict upstream as an oca-port blacklist entry
+  upstream  Propose a verdict upstream as an oca-port blacklist entry: written and committed in a worktree of the target branch, pushed and proposed with --open-pr --yes
   sync      Pull and push the private verdict repository
   help      Print this message or the help of the given subcommand(s)
 

@@ -346,6 +346,24 @@ fn sections_and_renderers() {
 }
 
 #[test]
+fn ports_that_conflict() {
+    let setup = Setup::new();
+    setup.odx(&["aggregate"]);
+    setup.odx(&["dashboard"]);
+    // 17.0 changes the same file meanwhile: the cherry-pick stops.
+    git(&setup.up, &["checkout", "--quiet", "17.0"]);
+    change(&setup.up, &[("pos_x/b.py", "other\n")], "[IMP] pos_x: b");
+    let port = ["dashboard", "act", "fwd:OCA/pos#2->17.0", "--port"];
+    let (code, _, err) = setup.odx(&port);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("cache/ports/OCA-pos:\n") || err.contains("ports"),
+        "{err}"
+    );
+    assert!(err.contains("odx port --continue"), "{err}");
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "one end-to-end scenario, step by step"
@@ -377,15 +395,45 @@ fn actions() {
             &["dashboard", "act", "fwd:OCA/pos#2->17.0", "--mute"],
             "--mute needs --reason",
         ),
-        (
-            &["dashboard", "act", "fwd:OCA/pos#2->17.0", "--port"],
-            "lands with odx port",
-        ),
     ] {
         let (code, _, err) = setup.odx(args);
         assert_eq!(code, 2, "{args:?}");
         assert!(err.contains(message), "{args:?}: {err}");
     }
+    // Ported in a clone under the cache, once a clone can be made there.
+    let port = ["dashboard", "act", "fwd:OCA/pos#2->17.0", "--port"];
+    let clone = setup.root.join("cache/ports/OCA-pos");
+    std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
+    std::fs::write(&clone, "").unwrap();
+    let (code, _, err) = setup.odx(&port);
+    assert_eq!(code, 1);
+    assert!(err.contains("git clone failed"), "{err}");
+    std::fs::remove_file(&clone).unwrap();
+    let (code, out, err) = setup.odx(&port);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.contains("ported on branch 17.0-port-pos_x-OCA-pos-2: 1 commit(s) cherry-picked\n"),
+        "{out}"
+    );
+    assert_eq!(git(&clone, &["log", "-1", "--format=%s"]), "[FIX] pos_x: b");
+    let (code, _, err) = setup.odx(&port);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("cannot create branch 17.0-port-pos_x-OCA-pos-2"),
+        "{err}"
+    );
+    // With a pull request the forge does not take, the port stays.
+    git(&clone, &["checkout", "--quiet", "--detach"]);
+    git(&clone, &["branch", "-D", "17.0-port-pos_x-OCA-pos-2"]);
+    let mut open = port.to_vec();
+    open.push("--open-pr");
+    let (code, out, err) = setup.odx(&open);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        out.contains("ported on branch 17.0-port-pos_x-OCA-pos-2"),
+        "{out}"
+    );
+    assert!(err.contains("cannot see"), "{err}");
     let (code, out, err) = setup.odx(&[
         "dashboard",
         "act",

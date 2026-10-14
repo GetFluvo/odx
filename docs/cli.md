@@ -336,8 +336,11 @@ One view of what needs a decision, per environment series:
 Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`) that
 `odx dashboard act` takes: `--drop` and `--include` run `odx drop` and `odx
 add`, `--follow` runs `odx lock --auto-update`, `--mute` records a mute
-(`--kind`, default `not-wanted`, and a mandatory `--reason`). Porting
-upstream is always a person's decision and lands with `odx port`. With
+(`--kind`, default `not-wanted`, and a mandatory `--reason`). `--port`
+ports the change, a person's decision: its commits are cherry-picked as
+`odx port` does, in a clone of the repository under the cache
+(`<cache>/ports/<owner>-<repo>`, sharing the cache's objects), and
+`--open-pr` then pushes the branch and opens a draft pull request. With
 `--format markdown --checkboxes`, every action is a box `- [ ] <!--
 odx:<action> <id> -->` for the bot to read back once ticked. `--json` gives
 the model.
@@ -408,6 +411,20 @@ and `odx verdict list --stale` lists the entry: `confirm` keeps it,
 who, when and why. `odx suggest --show-suppressed` shows what verdicts and
 mutes hide.
 
+
+```console
+$ odx verdict upstream v:17.0:pos_x:48bfbbca --public-reason "fixed differently on 17.0"
+$ odx verdict upstream v:17.0:pos_x:48bfbbca --public-reason "..." --open-pr --yes
+```
+
+`odx verdict upstream` turns a verdict into an oca-port blacklist entry in
+the addon's repository, so the maintainers and every other user stop seeing
+the change as a port to make. odx writes the entry with **only** the public
+reason on a branch `<series>-blacklist-<addon>` of the target series, in a
+worktree of the cache, and shows both reasons; the verdict's own reason
+never leaves. With `--open-pr`, odx stops there until you add `--yes`; then
+it pushes the branch (to the repository, or your fork), opens a draft pull
+request and records it on the verdict (`[verdict.upstream]`).
 ## Checking dependencies
 
 ```console
@@ -578,6 +595,18 @@ the clone has it, else `origin`); `--from` defaults to the series before
 state: resolve it, `git add` the files, then `odx migrate --continue`.
 `odx migrate --abort` checks out what was checked out before and deletes
 the branch.
+
+```console
+$ odx migrate plan --to 18.0
+```
+
+In a project, `odx migrate plan` says what moving to the next series takes,
+addon by addon: what is already available there, which addons have an open
+migration pull request to review, test and contribute to instead of
+migrating them again, and what is left to migrate, dependencies first (from
+the manifests the aggregated repositories have); the project's own addons
+apart, as they are migrated in place. The target defaults to
+`[tool.odx.upgrade] target_odoo_version`.
 
 `odx migrate pr`, on the migration branch, pushes it and opens the pull
 request `[<to>][MIG] <addon>: Migration to <to>` against the target series:
