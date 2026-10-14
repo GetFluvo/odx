@@ -518,6 +518,12 @@ pub struct Port {
     /// Path prefix rewrites between series.
     #[serde(default)]
     pub rewrites: BTreeMap<String, String>,
+    /// Author e-mails of bots whose commits `odx migrate` squashes
+    /// (default: the OCA bots).
+    pub squash_authors: Option<Vec<String>>,
+    /// Text in a subject that marks a bot commit to squash (default: the
+    /// OCA bots' commits).
+    pub squash_subjects: Option<Vec<String>>,
 }
 
 /// Where porting decisions are recorded.

@@ -582,6 +582,13 @@ target series:
 2. The addon's history from the source series is replayed with `git
    format-patch --keep-subject | git am -3 --keep`: only the commits that
    touch the addon, with their authors and dates.
+   Administrative commits are then squashed, as OCA asks of a migration:
+   bot commits (`[BOT] post-merge updates`, regenerated README and `.pot`,
+   by the OCA bots) go into the real commit they follow, and Weblate
+   commits into the nearest earlier one of the same language by the same
+   translator, authors and dates kept. One that would conflict is kept as
+   it is, with a warning. `--no-squash` keeps the history as replayed;
+   `[tool.odx.port] squash_authors` and `squash_subjects` name other bots.
 3. `[IMP] <addon>: pre-commit auto fixes`: the repository's pre-commit hooks
    on the addon's files, when it has a `.pre-commit-config.yaml`
    (`--no-pre-commit` leaves this out; `ODX_PRE_COMMIT` names the program).

@@ -13,5 +13,6 @@ pub mod blacklist;
 pub mod git;
 pub mod migrate;
 pub mod port;
+pub mod squash;
 #[cfg(test)]
 mod testing;

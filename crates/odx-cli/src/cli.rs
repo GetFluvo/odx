@@ -697,6 +697,10 @@ pub struct MigratePrArgs {
 
 /// Arguments of `odx migrate addon`.
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are independent switches"
+)]
 pub struct MigrateAddonArgs {
     /// Addon name.
     pub addon: String,
@@ -712,6 +716,10 @@ pub struct MigrateAddonArgs {
     /// Leave out the repository's pre-commit fixes.
     #[arg(long)]
     pub no_pre_commit: bool,
+    /// Keep the administrative commits (bots, Weblate) of the history as they are instead
+    /// of squashing them.
+    #[arg(long)]
+    pub no_squash: bool,
     /// Migrate even when an open pull request already migrates the addon.
     #[arg(long)]
     pub force: bool,

@@ -10,6 +10,7 @@ use odx_core::Exit;
 use odx_core::system::OsRunner;
 use odx_forge::{ForgeClient, Http, ReqwestHttp};
 use odx_port::migrate::{Finding, Outcome, Plan, Summary, Tools, Worktree};
+use odx_port::squash::Rules;
 
 use super::propose::{
     Proposed, Pushed, default_remote, forge_repo, git, opened_json, opened_text, propose,
@@ -242,12 +243,28 @@ fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
         ));
     };
     let remote = args.remote.clone().unwrap_or_else(|| default_remote(ctx));
+    // `[tool.odx.port]` of a project around the clone may name other bots.
+    let project = odx_config::find_pyproject(ctx.fs, &ctx.dir).ok();
+    let port = project
+        .as_ref()
+        .and_then(|project| project.config.port.as_ref());
+    let defaults = Rules::default();
+    let squash = Rules {
+        authors: port
+            .and_then(|port| port.squash_authors.clone())
+            .unwrap_or(defaults.authors),
+        subjects: port
+            .and_then(|port| port.squash_subjects.clone())
+            .unwrap_or(defaults.subjects),
+    };
     Ok(Plan {
         addon: args.addon.clone(),
         from,
         to: args.to.clone(),
         remote,
         no_pre_commit: args.no_pre_commit,
+        no_squash: args.no_squash,
+        squash,
     })
 }
 
@@ -292,9 +309,17 @@ fn migration_pr(ctx: &Context<'_>, plan: &Plan, warnings: &mut Vec<Problem>) -> 
 
 fn text(summary: &Summary) -> String {
     let mut out = format!(
-        "migrated on branch {}: {} commit(s) of history\n",
+        "migrated on branch {}: {} commit(s) of history",
         summary.branch, summary.history
     );
+    if summary.squashed > 0 {
+        let _ = write!(
+            out,
+            " ({} administrative commit(s) squashed into them)",
+            summary.squashed
+        );
+    }
+    out.push('\n');
     for commit in &summary.commits {
         let _ = writeln!(out, "  {commit}");
     }
