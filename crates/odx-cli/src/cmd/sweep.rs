@@ -37,6 +37,9 @@ fn reason(class: Class) -> Option<&'static str> {
         Class::Migration => Some("migration commit; it cannot be ported"),
         Class::RepoWide => Some("repo-wide change attributed to every addon it touched"),
         Class::Translations => Some("translations only; Weblate syncs them"),
+        Class::Reverted => {
+            Some("reverted on the source series; the change and its revert cancel out")
+        }
         Class::Portable | Class::Blacklisted => None,
     }
 }
@@ -267,7 +270,8 @@ fn body(
         "\n### Blacklist kinds\n\n| Kind | Meaning |\n| --- | --- |\n\
          | repo-wide change | a commit that touched many addons or only repository files; not a change of this addon |\n\
          | migration commit | `[MIG]` or version-bump commits; cannot be ported |\n\
-         | translations | `.po`/`.pot` only; synced by Weblate |\n",
+         | translations | `.po`/`.pot` only; synced by Weblate |\n\
+         | reverted | a change and its revert on the source series; nothing to port |\n",
     );
     let _ = write!(
         body,
@@ -286,6 +290,7 @@ mod tests {
         assert_eq!(reason(Class::Blacklisted), None);
         assert!(reason(Class::Migration).unwrap().starts_with("migration"));
         assert!(reason(Class::RepoWide).unwrap().starts_with("repo-wide"));
+        assert!(reason(Class::Reverted).unwrap().starts_with("reverted"));
         assert!(
             reason(Class::Translations)
                 .unwrap()

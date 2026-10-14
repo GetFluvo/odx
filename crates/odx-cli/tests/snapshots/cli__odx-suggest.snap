@@ -39,6 +39,9 @@ Options:
           
           [alias: --show-suppressed]
 
+      --check-apply
+          Tell for each portable suggestion whether its commits apply cleanly on the target
+
       --no-refresh
           Use cached data even when stale
 

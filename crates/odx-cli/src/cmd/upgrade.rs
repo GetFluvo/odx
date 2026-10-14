@@ -48,7 +48,7 @@ pub(crate) struct Addon {
     pub(crate) name: String,
     pub(crate) kind: Kind,
     /// Its directory, for own and aggregated addons.
-    dir: Option<PathBuf>,
+    pub(crate) dir: Option<PathBuf>,
     /// Its repository on the current series, when known without the index.
     pub(crate) url: Option<String>,
 }
@@ -549,6 +549,28 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
 
 /// `odx migrate plan`: what a move to `target` takes, addon by addon, the
 /// ones to migrate dependencies first.
+/// The target series: `target`, else `[tool.odx.upgrade]
+/// target_odoo_version`.
+pub(crate) fn target_series(target: Option<&str>, prepared: &Prepared) -> Result<String, Report> {
+    target
+        .map(str::to_owned)
+        .or_else(|| {
+            prepared
+                .project
+                .config
+                .upgrade
+                .as_ref()
+                .and_then(|u| u.target_odoo_version.clone())
+        })
+        .ok_or_else(|| {
+            Report::error(
+                Exit::Usage,
+                "no target series: pass --target or set [tool.odx.upgrade] target_odoo_version"
+                    .to_owned(),
+            )
+        })
+}
+
 pub(crate) fn migrate_plan(
     target: Option<&str>,
     global: &GlobalArgs,
@@ -707,21 +729,7 @@ fn assess(
 ) -> Result<Assessment, Report> {
     let prepared = prepare(global, ctx)?;
     let config = &prepared.project.config;
-    let target = target
-        .map(str::to_owned)
-        .or_else(|| {
-            config
-                .upgrade
-                .as_ref()
-                .and_then(|u| u.target_odoo_version.clone())
-        })
-        .ok_or_else(|| {
-            Report::error(
-                Exit::Usage,
-                "no target series: pass --target or set [tool.odx.upgrade] target_odoo_version"
-                    .to_owned(),
-            )
-        })?;
+    let target = target_series(target, &prepared)?;
     let addons = addons(ctx, &prepared);
     let http =
         ReqwestHttp::new().map(|http| CachedHttp::new(http, prepared.cache.root().join("http")));

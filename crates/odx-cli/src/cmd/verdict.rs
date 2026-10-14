@@ -723,6 +723,7 @@ fn add(
         from: from.clone(),
         addon: Some(addon.clone()),
         show_muted: true,
+        check_apply: false,
     };
     let (item, group) = suggestion(&args, change, global, ctx, prepared, &mut report.warnings)?;
     let file = file_for(scope, store, &target, addon)?;
