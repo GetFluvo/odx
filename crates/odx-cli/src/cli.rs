@@ -683,6 +683,11 @@ No odx project (pyproject.toml with [tool.odx]) is needed.")]
     /// migration pull request upstream: lines in `test-requirements.txt` pointing at the pull
     /// request, in a commit `[DON'T MERGE] test-requirements.txt`, as OCA asks.
     Pin,
+    /// The return trip of a pin: where the pull requests `test-requirements.txt` pins
+    /// stand, and once every one is merged and released for the target, the `[DON'T
+    /// MERGE]` commit dropped. `--push` sends the branch to its pull request, `--merge`
+    /// merges that once its checks are green.
+    Unpin(MigrateUnpinArgs),
     /// What moving the project to another series takes, addon by addon: available, an
     /// open migration pull request to review, or to migrate (dependencies first); own
     /// addons apart.
@@ -741,6 +746,29 @@ pub struct MigrateUpdateArgs {
     /// Then push the branch where its pull request comes from.
     #[arg(long)]
     pub push: bool,
+}
+
+/// Arguments of `odx migrate unpin`.
+#[derive(Debug, Args)]
+pub struct MigrateUnpinArgs {
+    /// The target series the dependencies must be released for [default: the one the
+    /// branch name `<series>-mig-<addon>` starts with].
+    #[arg(long, value_name = "SERIES")]
+    pub to: Option<String>,
+    /// The pull request of the branch, for example `OCA/contract#1234` [default: the one
+    /// `odx migrate pr` or `odx migrate update` recorded].
+    #[arg(long, value_name = "PR")]
+    pub pr: Option<String>,
+    /// Only say where the pins stand; change nothing.
+    #[arg(long, conflicts_with_all = ["push", "merge"])]
+    pub check: bool,
+    /// Then push the branch where its pull request comes from.
+    #[arg(long)]
+    pub push: bool,
+    /// Then merge the pull request, when no pin is left, the branch is pushed and its
+    /// checks are green. Nothing is merged without this flag.
+    #[arg(long)]
+    pub merge: bool,
 }
 
 /// Arguments of `odx migrate pr`.

@@ -1324,3 +1324,368 @@ esac
     let subjects = git(&work, &["log", "-4", "--format=%s"]);
     assert!(!subjects.contains("[UPD]"), "{subjects}");
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one end-to-end scenario, step by step"
+)]
+fn pins_come_back_out_once_released() {
+    let forge = Forge::new();
+    let api = forge.api.clone();
+    let index = forge.tmp.path().join("index");
+    let pypi = file_url(&index);
+    let env = [("ODX_PYPI_URL", pypi.as_str())];
+    let run = |args: &[&str]| binary_with(&forge.work, &forge.up, &api, &env, args);
+    let (ok, _, err) = run(&[
+        "migrate",
+        "addon",
+        "my_addon",
+        "--to",
+        "19.0",
+        "--no-pre-commit",
+    ]);
+    assert!(ok, "{err}");
+    // Nothing pinned yet; no pull request recorded.
+    let (ok, out, err) = run(&["migrate", "unpin"]);
+    assert!(ok, "{err}");
+    assert_eq!(out, "no pins in test-requirements.txt\n");
+    let pin =
+        format!("odoo-addon-dep_x @ git+{api}/OCA/deps.git@refs/pull/31/head#subdirectory=dep_x");
+    write(
+        &forge.work.join("test-requirements.txt"),
+        &format!("{pin}\n"),
+    );
+    git(&forge.work, &["add", "-A"]);
+    git(
+        &forge.work,
+        &[
+            "commit",
+            "--quiet",
+            "-m",
+            "[DON'T MERGE] test-requirements.txt",
+        ],
+    );
+    let (ok, _, err) = run(&["migrate", "pr"]);
+    assert!(ok, "{err}");
+    write(&forge.work.join("my_addon/later.py"), "later\n");
+    git(&forge.work, &["add", "-A"]);
+    git(
+        &forge.work,
+        &["commit", "--quiet", "-m", "[IMP] my_addon: later"],
+    );
+    let pull = |state: &str, merged: bool| {
+        forge.route(
+            "GET /api/v3/repos/OCA/deps/pulls/31",
+            200,
+            &format!(
+                r#"{{"number":31,"title":"[19.0][MIG] dep_x","state":"{state}","merged":{merged},"base":{{"ref":"19.0"}},"head":{{"sha":"x"}}}}"#
+            ),
+        );
+    };
+    let ours = |sha: &str, checks: &str| {
+        forge.route(
+            "GET /api/v3/repos/OCA/repo/pulls/9",
+            200,
+            &format!(
+                r#"{{"number":9,"title":"[19.0][MIG] my_addon","state":"open","base":{{"ref":"19.0"}},"head":{{"sha":"{sha}"}}}}"#
+            ),
+        );
+        let head = git(&forge.work, &["rev-parse", "HEAD"]);
+        forge.route(
+            &format!("GET /api/v3/repos/OCA/repo/commits/{head}/check-runs"),
+            200,
+            &format!(r#"{{"check_runs":[{{"name":"tests","status":"completed","conclusion":"{checks}"}}]}}"#),
+        );
+        forge.route(
+            &format!("GET /api/v3/repos/OCA/repo/commits/{head}/status"),
+            200,
+            r#"{"statuses":[]}"#,
+        );
+    };
+    let page = format!("{api}/OCA/repo#9");
+    let host = api.trim_start_matches("http://");
+    // Open upstream: the pins stay, the merge is refused.
+    pull("open", false);
+    ours("old", "success");
+    let (ok, out, err) = run(&["migrate", "unpin"]);
+    assert!(ok, "{err}");
+    assert_eq!(
+        out,
+        format!(
+            "pins in test-requirements.txt:\n  dep_x: {host}/OCA/deps#31 open\n\
+             keep the pins until every pull request is merged and released; run `odx migrate unpin` again then\n\
+             {page}: checks green, on a commit the pull request does not have yet\n"
+        )
+    );
+    let (ok, _, err) = run(&["migrate", "unpin", "--merge"]);
+    assert!(!ok);
+    assert!(err.contains("still pins pull requests"), "{err}");
+    // Merged, not released yet.
+    pull("closed", true);
+    let (_, out, _) = run(&["migrate", "unpin", "--check"]);
+    assert!(out.contains("merged, not released for 19.0 yet"), "{out}");
+    // Released: --check says so, then the commit goes.
+    write(
+        &index.join("odoo-addon-dep-x/json"),
+        r#"{"releases": {"19.0.1.0.0": []}}"#,
+    );
+    write(
+        &index.join("odoo-addon-dep-x/19.0.1.0.0/json"),
+        &format!(r#"{{"info": {{"home_page": "{api}/OCA/deps"}}}}"#),
+    );
+    let (_, out, _) = run(&["migrate", "unpin", "--check"]);
+    assert!(out.contains("every pin can go"), "{out}");
+    std::fs::write(forge.work.join("my_addon/later.py"), "changed\n").unwrap();
+    let (ok, _, err) = run(&["migrate", "unpin"]);
+    assert!(!ok);
+    assert!(err.contains("uncommitted changes"), "{err}");
+    git(&forge.work, &["checkout", "--", "my_addon/later.py"]);
+    // What the pull request has that the branch does not is kept.
+    let pushed = git(&forge.up, &["rev-parse", "19.0-mig-my_addon"]);
+    let elsewhere = git(&forge.up, &["rev-parse", "18.0"]);
+    git(
+        &forge.up,
+        &["update-ref", "refs/heads/19.0-mig-my_addon", &elsewhere],
+    );
+    let (ok, _, err) = run(&["migrate", "unpin", "--push"]);
+    assert!(!ok);
+    assert!(err.contains("has commits this branch does not"), "{err}");
+    git(
+        &forge.up,
+        &["update-ref", "refs/heads/19.0-mig-my_addon", &pushed],
+    );
+    let (ok, out, err) = run(&["--json", "migrate", "unpin", "--push"]);
+    assert!(ok, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["status"], "unpinned", "{out}");
+    assert_eq!(value["dropped"], "commit", "{out}");
+    assert_eq!(value["pushed_to"], "origin 19.0-mig-my_addon", "{out}");
+    let subjects = git(&forge.work, &["log", "-3", "--format=%s"]);
+    assert!(!subjects.contains("DON'T MERGE"), "{subjects}");
+    assert!(!forge.work.join("test-requirements.txt").exists());
+    assert_eq!(
+        git(
+            &forge.up,
+            &["log", "-1", "--format=%s", "19.0-mig-my_addon"]
+        ),
+        "[IMP] my_addon: later"
+    );
+    // Merging waits for green checks on the pushed head.
+    let head = git(&forge.work, &["rev-parse", "HEAD"]);
+    ours(&head, "failure");
+    let (ok, _, err) = run(&["migrate", "unpin", "--merge"]);
+    assert!(!ok);
+    assert!(err.contains("checks red (tests failing)"), "{err}");
+    assert!(err.contains("its checks are not green"), "{err}");
+    ours("elsewhere", "success");
+    let (ok, _, err) = run(&["migrate", "unpin", "--merge"]);
+    assert!(!ok);
+    assert!(err.contains("push the branch first"), "{err}");
+    ours(&head, "success");
+    let (ok, _, err) = run(&["migrate", "unpin", "--merge"]);
+    assert!(!ok);
+    assert!(err.contains("ocabot merge"), "{err}");
+    forge.route("PUT /api/v3/repos/OCA/repo/pulls/9/merge", 200, "{}");
+    let (ok, out, err) = run(&["migrate", "unpin", "--merge"]);
+    assert!(ok, "{err}");
+    assert!(out.ends_with(&format!("merged {page}\n")), "{out}");
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one end-to-end scenario, step by step"
+)]
+fn pins_without_their_commit_or_with_later_changes() {
+    let forge = Forge::new();
+    let api = forge.api.clone();
+    let index = forge.tmp.path().join("index");
+    let pypi = file_url(&index);
+    let env = [("ODX_PYPI_URL", pypi.as_str())];
+    let run = |args: &[&str]| binary_with(&forge.work, &forge.up, &api, &env, args);
+    let (ok, _, err) = run(&[
+        "migrate",
+        "addon",
+        "my_addon",
+        "--to",
+        "19.0",
+        "--no-pre-commit",
+    ]);
+    assert!(ok, "{err}");
+    forge.route(
+        "GET /api/v3/repos/OCA/deps/pulls/31",
+        200,
+        r#"{"number":31,"title":"x","state":"closed","merged":true,"base":{"ref":"19.0"}}"#,
+    );
+    write(
+        &index.join("odoo-addon-dep-x/json"),
+        r#"{"releases": {"19.0.1.0.0": []}}"#,
+    );
+    write(
+        &index.join("odoo-addon-dep-x/19.0.1.0.0/json"),
+        &format!(r#"{{"info": {{"home_page": "{api}/OCA/deps"}}}}"#),
+    );
+    let pin = format!("odoo-addon-dep_x @ git+{api}/OCA/deps.git@refs/pull/31/head");
+    // A pin in a commit of another title: its lines go in a commit.
+    write(
+        &forge.work.join("test-requirements.txt"),
+        &format!("requests\n{pin}\n"),
+    );
+    git(&forge.work, &["add", "-A"]);
+    git(&forge.work, &["commit", "--quiet", "-m", "pin"]);
+    // Without a recorded push target, nothing changes.
+    let (ok, _, err) = run(&["migrate", "unpin", "--push"]);
+    assert!(!ok);
+    assert!(err.contains("odx does not know where"), "{err}");
+    let keys =
+        ["PushTo", "PushBranch"].map(|key| format!("branch.19.0-mig-my_addon.odxMigrate{key}"));
+    git(&forge.work, &["config", &keys[0], "/nowhere"]);
+    git(&forge.work, &["config", &keys[1], "theirs"]);
+    let (ok, _, err) = run(&["migrate", "unpin", "--push"]);
+    assert!(!ok);
+    assert!(err.contains("nowhere"), "{err}");
+    let (ok, out, err) = run(&["migrate", "unpin"]);
+    assert!(ok, "{err}");
+    assert!(out.contains("removed the pins in a commit [REM]"), "{out}");
+    assert!(
+        out.ends_with("`odx migrate unpin --push` sends the branch to its pull request\n"),
+        "{out}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(forge.work.join("test-requirements.txt")).unwrap(),
+        "requests\n"
+    );
+    // The pin commit, with a later change to the file: dropping it would
+    // conflict, so the lines go in a commit.
+    write(
+        &forge.work.join("test-requirements.txt"),
+        &format!("requests\n{pin}\n"),
+    );
+    git(
+        &forge.work,
+        &[
+            "commit",
+            "--quiet",
+            "-am",
+            "[DON'T MERGE] test-requirements.txt",
+        ],
+    );
+    write(
+        &forge.work.join("test-requirements.txt"),
+        &format!("requests>=2\n{pin}\n"),
+    );
+    git(&forge.work, &["commit", "--quiet", "-am", "[IMP] requests"]);
+    let (ok, out, err) = run(&["migrate", "unpin"]);
+    assert!(ok, "{err}");
+    assert!(out.contains("removed the pins in a commit [REM]"), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(forge.work.join("test-requirements.txt")).unwrap(),
+        "requests>=2\n"
+    );
+    // A pin in an earlier commit too: dropping the pin commit would leave
+    // it, so the pins go in a commit, the file with them; a remote may
+    // still refuse the push.
+    let file = forge.work.join("test-requirements.txt");
+    let other = format!("odoo-addon-dep-x @ git+{api}/OCA/deps.git@refs/pull/31/head");
+    write(&file, &format!("{pin}\n"));
+    git(&forge.work, &["commit", "--quiet", "-am", "pin again"]);
+    write(&file, &format!("{pin}\n{other}\n"));
+    git(
+        &forge.work,
+        &[
+            "commit",
+            "--quiet",
+            "-am",
+            "[DON'T MERGE] test-requirements.txt",
+        ],
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let hook = forge.up.join(".git/hooks/pre-receive");
+        write(&hook, "#!/bin/sh\nexit 1\n");
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&forge.work, &["config", &keys[0], &file_url(&forge.up)]);
+        let (ok, _, err) = run(&["migrate", "unpin", "--push"]);
+        assert!(!ok);
+        assert!(err.contains("git push"), "{err}");
+        std::fs::remove_file(&hook).unwrap();
+    }
+    #[cfg(not(unix))]
+    {
+        let (ok, _, err) = run(&["migrate", "unpin"]);
+        assert!(ok, "{err}");
+    }
+    assert!(!file.exists());
+    assert_eq!(
+        git(&forge.work, &["log", "-2", "--format=%s"]),
+        "[REM] test-requirements.txt: pins of released dependencies\n[DON'T MERGE] test-requirements.txt"
+    );
+    // Pins odx cannot follow, and arguments it cannot use.
+    forge.route(
+        "GET /api/v3/repos/OCA/deps/pulls/32",
+        200,
+        r#"{"number":32,"title":"x","state":"closed","merged":false,"base":{"ref":"19.0"}}"#,
+    );
+    forge.route(
+        "GET /api/v3/repos/OCA/deps/pulls/33",
+        200,
+        r#"{"number":33,"title":"x","state":"closed","merged":true,"base":{"ref":"19.0"}}"#,
+    );
+    write(&index.join("odoo-addon-w/json"), "not json");
+    write(
+        &file,
+        &format!(
+            "odoo-addon-x @ git+nowhere.git@refs/pull/1/head\n\
+             odoo-addon-y @ git+{api}/OCA/gone.git@refs/pull/2/head\n\
+             odoo-addon-z @ git+{api}/OCA/deps.git@refs/pull/32/head\n\
+             odoo-addon-w @ git+{api}/OCA/deps.git@refs/pull/33/head\n"
+        ),
+    );
+    git(&forge.work, &["add", "-A"]);
+    git(&forge.work, &["commit", "--quiet", "-am", "odd pin"]);
+    let (ok, out, _) = run(&["migrate", "unpin"]);
+    assert!(ok);
+    assert!(
+        out.contains("x: nowhere#1 unknown: nowhere is no forge repository"),
+        "{out}"
+    );
+    assert!(out.contains("/OCA/gone#2 unknown: "), "{out}");
+    assert!(
+        out.contains("/OCA/deps#32 closed without being merged"),
+        "{out}"
+    );
+    assert!(out.contains("/OCA/deps#33 unknown: "), "{out}");
+    git(&forge.work, &["checkout", "--quiet", "-b", "elsewhere"]);
+    for (args, expected) in [
+        (&["migrate", "unpin"][..], "name the target with --to"),
+        (&["--offline", "migrate", "unpin"], "cannot run offline"),
+        (
+            &["migrate", "unpin", "--pr", "nope"],
+            "<owner>/<repo>#<number>",
+        ),
+        (
+            &["migrate", "unpin", "--pr", "OCA/nowhere#1"],
+            "points at OCA/nowhere",
+        ),
+    ] {
+        let (ok, _, err) = run(args);
+        assert!(!ok, "{args:?}");
+        assert!(err.contains(expected), "{args:?}: {err}");
+    }
+    let (ok, out, err) = run(&["migrate", "unpin", "--to", "19.0", "--pr", "OCA/repo#5"]);
+    assert!(ok, "{err}");
+    assert!(out.contains("OCA/repo#5: cannot read its checks"), "{out}");
+    let (ok, _, err) = run(&[
+        "migrate",
+        "unpin",
+        "--to",
+        "19.0",
+        "--pr",
+        "OCA/repo#5",
+        "--merge",
+    ]);
+    assert!(!ok);
+    assert!(err.contains("not merging"), "{err}");
+}

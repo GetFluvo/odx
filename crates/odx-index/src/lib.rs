@@ -7,6 +7,7 @@
 //! older names to look for ([`AddonIndex::aliases`]). [`build`] fills one
 //! series from the sources in [`sources`], in order of trust: configured
 //! overrides, the local object cache, the package index.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -370,6 +371,16 @@ pub(crate) mod testing {
         }
 
         fn post(
+            &self,
+            url: &str,
+            headers: &[(&str, String)],
+            _: &Json,
+        ) -> Result<HttpResponse, ForgeError> {
+            self.get(url, headers)
+        }
+
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        fn put(
             &self,
             url: &str,
             headers: &[(&str, String)],

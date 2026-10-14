@@ -12,6 +12,7 @@ Commands:
   pr      Push the migration branch checked out and open its pull request: to the remote when you may push there, else to your fork (created when missing)
   update  Bring an open migration up to date with what the addon got on the source series since: each new commit replayed with its author, bot commits left out, then odoo-lint's fixes for the target in a `[FW]` commit. On the migration branch checked out, or on someone else's migration pull request
   pin     Pin the dependencies of the migration branch's addon that only exist as an open migration pull request upstream: lines in `test-requirements.txt` pointing at the pull request, in a commit `[DON'T MERGE] test-requirements.txt`, as OCA asks
+  unpin   The return trip of a pin: where the pull requests `test-requirements.txt` pins stand, and once every one is merged and released for the target, the `[DON'T MERGE]` commit dropped. `--push` sends the branch to its pull request, `--merge` merges that once its checks are green
   plan    What moving the project to another series takes, addon by addon: available, an open migration pull request to review, or to migrate (dependencies first); own addons apart
   own     Migrate the project's own addons in place: odoo-lint's upgrade fixes and version bump, old migration scripts removed, one `[MIG]` commit per addon; no pull request
   help    Print this message or the help of the given subcommand(s)
@@ -35,17 +36,17 @@ Options:
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
 
-      --continue
-          Go on after resolving a conflict in the addon's history
-
       --refresh-index
           Rebuild the addon index for the series involved
 
-      --abort
-          Give up the migration in progress and delete its branch
+      --continue
+          Go on after resolving a conflict in the addon's history
 
       --json
           Machine-readable output on stdout
+
+      --abort
+          Give up the migration in progress and delete its branch
 
   -v, --verbose...
           Increase log verbosity (repeatable)

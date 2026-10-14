@@ -87,6 +87,9 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             return repository_plan(ctx, global, to, from.as_deref(), remote.as_deref());
         }
         (Some(MigrateCommand::Pin), _, _) => return pin_command(global, ctx),
+        (Some(MigrateCommand::Unpin(unpin)), _, _) => {
+            return super::unpin::run(unpin, global, ctx);
+        }
         (Some(MigrateCommand::Update(update)), _, _) => {
             return super::update::run(update, global, ctx, &tools);
         }
@@ -734,8 +737,9 @@ fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pus
         },
     )
     .inspect(|pushed| {
-        // Remembered for `odx migrate update --push`.
+        // Remembered for `odx migrate update --push` and `odx migrate unpin`.
         pin::remember(ctx, &branch, &pushed.to, &branch);
+        pin::remember_pull_request(ctx, &branch, &upstream, pushed.opened.number);
     })
 }
 

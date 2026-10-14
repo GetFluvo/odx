@@ -45,6 +45,18 @@ pub trait Http: fmt::Debug + Send + Sync {
         headers: &[(&str, String)],
         body: &serde_json::Value,
     ) -> Result<HttpResponse, ForgeError>;
+
+    /// PUT `body` as JSON to `url` with `headers`.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::Http`] when no response arrives (DNS, TLS, connection).
+    fn put(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError>;
 }
 
 /// [`Http`] over `reqwest` with rustls, verifying certificates against the
@@ -124,6 +136,15 @@ impl Http for ReqwestHttp {
         body: &serde_json::Value,
     ) -> Result<HttpResponse, ForgeError> {
         Self::execute(self.client.post(url).json(body), headers)
+    }
+
+    fn put(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        Self::execute(self.client.put(url).json(body), headers)
     }
 }
 

@@ -209,6 +209,53 @@ impl ForgeClient<'_> {
     }
 }
 
+impl ForgeClient<'_> {
+    /// Merge pull request `number` of `repo`, its commits rebased where the
+    /// forge lets the caller choose (GitHub, Gitea/Forgejo); GitLab merges
+    /// as the project is set up.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::Status`] when the forge refuses (no permission, checks
+    /// required, conflicts), and network errors.
+    pub fn merge_pull_request(
+        &self,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        number: u64,
+    ) -> Result<(), ForgeError> {
+        let base = Self::repo_api(repo, kind);
+        let response = match kind {
+            ForgeKind::Github => self.put(
+                &format!("{base}/pulls/{number}/merge"),
+                repo,
+                kind,
+                &json!({"merge_method": "rebase"}),
+            ),
+            ForgeKind::Gitea => self.post(
+                &format!("{base}/pulls/{number}/merge"),
+                repo,
+                kind,
+                &json!({"Do": "rebase"}),
+            ),
+            ForgeKind::Gitlab => self.put(
+                &format!("{base}/merge_requests/{number}/merge"),
+                repo,
+                kind,
+                &json!({}),
+            ),
+        }?;
+        if matches!(response.status, 200..=204) {
+            Ok(())
+        } else {
+            Err(ForgeError::Status {
+                host: repo.host.clone(),
+                status: response.status,
+            })
+        }
+    }
+}
+
 /// The title, with `prefix` for a draft.
 fn draft_title(prefix: &str, proposal: &Proposal<'_>) -> String {
     let prefix = if proposal.draft { prefix } else { "" };
@@ -240,6 +287,54 @@ mod tests {
 
     fn repo(url: &str) -> RepoUrl {
         RepoUrl::parse(url).unwrap()
+    }
+
+    #[test]
+    fn merges() {
+        let cases = [
+            (
+                "https://github.com/OCA/pos",
+                ForgeKind::Github,
+                r#"PUT https://api.github.com/repos/OCA/pos/pulls/7/merge {"merge_method":"rebase"}"#,
+            ),
+            (
+                "https://codeberg.org/o/r",
+                ForgeKind::Gitea,
+                r#"POST https://codeberg.org/api/v1/repos/o/r/pulls/7/merge {"Do":"rebase"}"#,
+            ),
+            (
+                "https://gitlab.com/g/r",
+                ForgeKind::Gitlab,
+                "PUT https://gitlab.com/api/v4/projects/g%2Fr/merge_requests/7/merge {}",
+            ),
+        ];
+        for (url, kind, asked) in cases {
+            let (merged, urls) = client_run(vec![(200, "{}")], |c| {
+                c.merge_pull_request(&repo(url), kind, 7)
+            });
+            assert_eq!(merged, Ok(()));
+            assert_eq!(urls, [asked]);
+        }
+        let github = repo("https://github.com/OCA/pos");
+        let (merged, _) = client_run(vec![(405, "{}")], |c| {
+            c.merge_pull_request(&github, ForgeKind::Github, 7)
+        });
+        assert_eq!(
+            merged,
+            Err(ForgeError::Status {
+                host: "github.com".to_owned(),
+                status: 405
+            })
+        );
+        let http = Scripted::new(vec![Err(ForgeError::Http("down".to_owned()))]);
+        let env = MapEnv::default();
+        let runner = ScriptedRunner::default();
+        let client = ForgeClient::new(&http, &env, &runner, &std::thread::sleep);
+        assert!(
+            client
+                .merge_pull_request(&github, ForgeKind::Github, 7)
+                .is_err()
+        );
     }
 
     #[test]

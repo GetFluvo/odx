@@ -102,6 +102,7 @@ fn check_out(
     for (key, value) in [("odxMigrateFrom", &from), ("odxMigrateRemote", &remote)] {
         let _ = output_of(&git(ctx).args(["config", &format!("branch.{name}.{key}"), value]));
     }
+    pin::remember_pull_request(ctx, &name, &repo, number);
     if let Some(head_repository) = &found.head_repository {
         pin::remember(
             ctx,

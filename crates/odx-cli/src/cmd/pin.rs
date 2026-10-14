@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use odx_core::Exit;
 use odx_core::system::OsRunner;
+use odx_forge::RepoUrl;
 
 use super::deps::{Lookup, Waiting};
 use super::propose::{default_remote, git};
@@ -20,7 +21,7 @@ use crate::cli::GlobalArgs;
 pub(crate) const SUBJECT: &str = "[DON'T MERGE] test-requirements.txt";
 
 /// What the pull request should say about the temporary red check.
-pub(crate) const RED_CHECK: &str = "OCA CI's check for unreleased dependencies stays red while the `[DON'T MERGE] test-requirements.txt` commit is there; that is expected: drop the commit once the pull requests it names are merged and released";
+pub(crate) const RED_CHECK: &str = "OCA CI's check for unreleased dependencies stays red while the `[DON'T MERGE] test-requirements.txt` commit is there; that is expected: `odx migrate unpin` drops the commit once the pull requests it names are merged and released";
 
 /// The migration branch checked out, as `odx migrate addon` made it.
 #[derive(Debug, Clone)]
@@ -71,6 +72,26 @@ pub(crate) fn remember(ctx: &Context<'_>, branch: &str, to: &str, head: &str) {
     for (key, value) in [("odxMigratePushTo", to), ("odxMigratePushBranch", head)] {
         let _ = output_of(&git(ctx).args(["config", &format!("branch.{branch}.{key}"), value]));
     }
+}
+
+/// Remember on `branch` the pull request it is the head of.
+pub(crate) fn remember_pull_request(ctx: &Context<'_>, branch: &str, repo: &RepoUrl, number: u64) {
+    let value = format!("{}/{}#{number}", repo.origin(), repo.path);
+    let key = format!("branch.{branch}.odxMigratePullRequest");
+    let _ = output_of(&git(ctx).args(["config", &key, &value]));
+}
+
+/// The pull request [`remember_pull_request`] recorded on `branch`.
+pub(crate) fn recorded_pull_request(ctx: &Context<'_>, branch: &str) -> Option<(RepoUrl, u64)> {
+    let key = format!("branch.{branch}.odxMigratePullRequest");
+    let value = output_of(&git(ctx).args(["config", "--get", &key])).ok()?;
+    recorded(&value)
+}
+
+/// A recorded pull request: `<repository URL>#<number>`.
+fn recorded(value: &str) -> Option<(RepoUrl, u64)> {
+    let (url, number) = value.rsplit_once('#')?;
+    Some((RepoUrl::parse(url)?, number.parse().ok()?))
 }
 
 /// Where `branch` is pushed, as [`remember`] recorded it.
@@ -247,5 +268,10 @@ mod tests {
             )
         );
         assert_eq!(previous("0.0"), None);
+        for value in ["no number", "not a url#1", "https://github.com/o/r#x"] {
+            assert!(recorded(value).is_none(), "{value}");
+        }
+        let (repo, number) = recorded("https://github.com/o/r#7").unwrap();
+        assert_eq!((repo.path.as_str(), number), ("o/r", 7));
     }
 }
