@@ -160,7 +160,7 @@ pub(crate) fn run_sweep(
     let opened = if written && args.open_pr {
         let upstream = forge_repo(ctx, &remote)
             .ok_or_else(|| failed(format!("the remote {remote} is not on a forge")))?;
-        let froms = sources.join(",");
+        let series_list = sources.join(",");
         Some(propose(
             ctx,
             &Proposed {
@@ -174,7 +174,7 @@ pub(crate) fn run_sweep(
                     "[{to}][FW] blacklist port suggestions from {}",
                     sources.join("/")
                 ),
-                body: body(&entries, &rows, to, &froms),
+                body: body(&entries, &rows, to, &series_list),
             },
         )?)
     } else {
@@ -249,10 +249,10 @@ fn body(
     entries: &BTreeMap<String, Vec<(String, String)>>,
     rows: &[Row],
     to: &str,
-    froms: &str,
+    series_list: &str,
 ) -> String {
     let mut body = format!(
-        "Blacklist entries for the false positives a sweep of {froms} against {to} found, made with odx.\n\n## Blacklist\n\n| Addon | Entry | Kind | Reason |\n| --- | --- | --- | --- |\n"
+        "Blacklist entries for the false positives a sweep of {series_list} against {to} found, made with odx.\n\n## Blacklist\n\n| Addon | Entry | Kind | Reason |\n| --- | --- | --- | --- |\n"
     );
     for (addon, list) in entries {
         for (key, why) in list {
@@ -269,7 +269,10 @@ fn body(
          | migration commit | `[MIG]` or version-bump commits; cannot be ported |\n\
          | translations | `.po`/`.pot` only; synced by Weblate |\n",
     );
-    let _ = write!(body, "\n<!-- odx:port sweep --to {to} --from {froms} -->\n");
+    let _ = write!(
+        body,
+        "\n<!-- odx:port sweep --to {to} --from {series_list} -->\n"
+    );
     body
 }
 
