@@ -66,6 +66,15 @@ pub(crate) fn core(series: &str) -> Vec<&'static str> {
         .unwrap_or_default()
 }
 
+/// The package index's JSON API: `ODX_PYPI_URL`, else PyPI.
+pub(crate) fn pypi(ctx: &Context<'_>) -> String {
+    ctx.env
+        .var("ODX_PYPI_URL")
+        .as_deref()
+        .unwrap_or("https://pypi.org/pypi")
+        .to_owned()
+}
+
 /// A pull request's page and the ref of its head, per forge.
 pub(crate) fn refs(kind: ForgeKind, base: &str, number: u64) -> (String, String) {
     match kind {
@@ -97,12 +106,7 @@ pub(crate) struct Lookup<'a> {
 impl<'a> Lookup<'a> {
     /// A lookup; `offline` asks nothing.
     pub(crate) fn new(ctx: &'a Context<'a>, offline: bool) -> Self {
-        let pypi = ctx
-            .env
-            .var("ODX_PYPI_URL")
-            .as_deref()
-            .unwrap_or("https://pypi.org/pypi")
-            .to_owned();
+        let pypi = pypi(ctx);
         Self {
             ctx,
             http: ReqwestHttp::new().ok().filter(|_| !offline),

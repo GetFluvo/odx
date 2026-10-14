@@ -631,6 +631,29 @@ and released. `odx migrate pr` then adds a `Depends on:` checklist of those
 pull requests to the description. OCA CI's check for unreleased
 dependencies stays red while the commit is there; that is expected.
 
+`odx migrate unpin` is the return trip, run when you want to know (odx
+watches nothing in the background). It says where each pinned pull request
+stands (open, merged but not released for the target yet, merged and
+released, or closed without being merged), and once every one is merged
+and released it drops the `[DON'T MERGE] test-requirements.txt` commit, or
+removes the pins in a commit `[REM] test-requirements.txt: pins of released
+dependencies` when the commit cannot be dropped cleanly. `--check` only
+reports. `--push` then sends the branch where its pull request comes from,
+replacing it only when it has nothing the branch lacks; the checks of the
+pull request on the branch's head follow. `--merge` merges the pull request
+(rebased, where the forge lets odx choose) only when no pin is left, the
+branch is pushed and its checks are green: nothing is merged without it.
+On OCA, maintainers merge with `/ocabot merge` instead. The pull request is
+the one `odx migrate pr` or `odx migrate update` recorded on the branch, or
+`--pr <owner>/<repo>#<number>`; the target series comes from the branch
+name, or `--to`.
+
+```console
+$ odx migrate unpin --check
+$ odx migrate unpin --push
+$ odx migrate unpin --merge
+```
+
 odx then lists what odoo-lint leaves to fix by hand. Nothing is pushed: you
 review the branch, finish the migration and run the tests, then `odx migrate
 pr` pushes it and opens the draft pull request. Both series are fetched from `--remote` (default `upstream` when

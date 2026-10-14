@@ -208,6 +208,16 @@ pub(crate) mod tests {
         ) -> Result<HttpResponse, ForgeError> {
             self.get(url, headers)
         }
+
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        fn put(
+            &self,
+            url: &str,
+            headers: &[(&str, String)],
+            _: &serde_json::Value,
+        ) -> Result<HttpResponse, ForgeError> {
+            self.get(url, headers)
+        }
     }
 
     pub(crate) fn sha(bytes: &[u8]) -> String {

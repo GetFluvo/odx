@@ -206,6 +206,16 @@ impl<'a> ForgeClient<'a> {
         self.http.post(url, &self.headers(repo, kind), body)
     }
 
+    pub(crate) fn put(
+        &self,
+        url: &str,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        body: &Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        self.http.put(url, &self.headers(repo, kind), body)
+    }
+
     fn get(&self, url: &str, repo: &RepoUrl, kind: ForgeKind) -> Result<HttpResponse, ForgeError> {
         let headers = self.headers(repo, kind);
         for _ in 0..ATTEMPTS {

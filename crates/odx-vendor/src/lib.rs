@@ -5,6 +5,7 @@
 //! checked) and commits, records what it wrote in the vendor manifest, and
 //! bumps an addon's version when its content changed without one, so the
 //! platform updates it.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod archive;
 pub mod content;

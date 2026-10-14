@@ -1,0 +1,59 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+The return trip of a pin: where the pull requests `test-requirements.txt` pins stand, and once every one is merged and released for the target, the `[DON'T MERGE]` commit dropped. `--push` sends the branch to its pull request, `--merge` merges that once its checks are green
+
+Usage: odx migrate unpin [OPTIONS]
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --to <SERIES>
+          The target series the dependencies must be released for [default: the one the branch name `<series>-mig-<addon>` starts with]
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --pr <PR>
+          The pull request of the branch, for example `OCA/contract#1234` [default: the one `odx migrate pr` or `odx migrate update` recorded]
+
+      --check
+          Only say where the pins stand; change nothing
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --push
+          Then push the branch where its pull request comes from
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --merge
+          Then merge the pull request, when no pin is left, the branch is pushed and its checks are green. Nothing is merged without this flag
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
