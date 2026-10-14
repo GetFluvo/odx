@@ -80,6 +80,9 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             return repository_plan(ctx, global, to, from.as_deref(), remote.as_deref());
         }
         (Some(MigrateCommand::Pin), _, _) => return pin_command(global, ctx),
+        (Some(MigrateCommand::Update(update)), _, _) => {
+            return super::update::run(update, global, ctx, &tools);
+        }
         (Some(MigrateCommand::Pr(pr)), _, _) => {
             let opened = open_pr(ctx, &tools, pr)?;
             return Ok(Report {
@@ -169,6 +172,8 @@ fn finished(
     };
     let mut out = if global.json {
         json(summary, &waits, &pinned, opened.as_ref())
+    } else if summary.update {
+        super::update::text(summary, None)
     } else {
         text(summary, &waits, &pinned)
     };
@@ -475,6 +480,24 @@ fn open_migrations(
     }
 }
 
+/// What makes a commit administrative: the OCA bots, or the ones
+/// `[tool.odx.port]` of a project around the clone names.
+pub(crate) fn squash_rules(ctx: &Context<'_>) -> Rules {
+    let project = odx_config::find_pyproject(ctx.fs, &ctx.dir).ok();
+    let port = project
+        .as_ref()
+        .and_then(|project| project.config.port.as_ref());
+    let defaults = Rules::default();
+    Rules {
+        authors: port
+            .and_then(|port| port.squash_authors.clone())
+            .unwrap_or(defaults.authors),
+        subjects: port
+            .and_then(|port| port.squash_subjects.clone())
+            .unwrap_or(defaults.subjects),
+    }
+}
+
 /// The plan for `args`, with the defaults filled in.
 fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
     let Some(from) = args.from.clone().or_else(|| previous(&args.to)) else {
@@ -487,20 +510,7 @@ fn plan(args: &MigrateAddonArgs, ctx: &Context<'_>) -> Result<Plan, Report> {
         ));
     };
     let remote = args.remote.clone().unwrap_or_else(|| default_remote(ctx));
-    // `[tool.odx.port]` of a project around the clone may name other bots.
-    let project = odx_config::find_pyproject(ctx.fs, &ctx.dir).ok();
-    let port = project
-        .as_ref()
-        .and_then(|project| project.config.port.as_ref());
-    let defaults = Rules::default();
-    let squash = Rules {
-        authors: port
-            .and_then(|port| port.squash_authors.clone())
-            .unwrap_or(defaults.authors),
-        subjects: port
-            .and_then(|port| port.squash_subjects.clone())
-            .unwrap_or(defaults.subjects),
-    };
+    let squash = squash_rules(ctx);
     Ok(Plan {
         addon: args.addon.clone(),
         from,
@@ -609,7 +619,7 @@ fn text(summary: &Summary, waits: &[Waiting], pinned: &[String]) -> String {
 
 /// `took 10.7 s: history 0.4 s, squash 0.2 s, pre-commit 4.7 s, odoo-lint
 /// 0.3 s`, with why pre-commit is slow the first time.
-fn timings(timings: &[(String, u64)]) -> String {
+pub(crate) fn timings(timings: &[(String, u64)]) -> String {
     let seconds = |ms: u64| format!("{}.{} s", ms / 1000, ms % 1000 / 100);
     let total: u64 = timings.iter().map(|(_, ms)| ms).sum();
     let phases: Vec<String> = timings
@@ -716,6 +726,10 @@ fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pus
             body: body(addon, &from, to, &findings, &pin::depends_on(ctx)),
         },
     )
+    .inspect(|pushed| {
+        // Remembered for `odx migrate update --push`.
+        pin::remember(ctx, &branch, &pushed.to, &branch);
+    })
 }
 
 #[cfg(test)]

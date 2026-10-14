@@ -16,3 +16,4 @@ pub mod port;
 pub mod squash;
 #[cfg(test)]
 mod testing;
+pub mod update;

@@ -21,7 +21,11 @@ fn git(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success());
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
@@ -974,4 +978,330 @@ fn dependencies_wait_and_get_pinned() {
     let (ok, _, err) = run(&["migrate", "pin"]);
     assert!(!ok);
     assert!(err.contains("is no migration branch"), "{err}");
+}
+
+/// A commit by Jane on 18.0 of `up`, touching `my_addon`.
+fn upstream_fix(up: &Path, file: &str, text: &str, subject: &str) {
+    git(up, &["checkout", "--quiet", "18.0"]);
+    write(&up.join("my_addon").join(file), text);
+    git(up, &["add", "-A"]);
+    git(
+        up,
+        &[
+            "commit",
+            "--quiet",
+            "--author",
+            "Jane <jane@example.com>",
+            "-m",
+            subject,
+        ],
+    );
+    git(up, &["checkout", "--quiet", "--detach"]);
+}
+
+#[test]
+fn migrations_are_brought_up_to_date() {
+    let (_tmp, up, work) = fixture();
+    let env = env();
+    let (exit, _, err) = odx(
+        &work,
+        &env,
+        &[
+            "migrate",
+            "addon",
+            "my_addon",
+            "--to",
+            "19.0",
+            "--no-pre-commit",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    upstream_fix(&up, "b.py", "b\n", "[FIX] my_addon: b");
+    let (exit, out, err) = odx(
+        &work,
+        &env,
+        &["migrate", "update", "--no-pre-commit", "--no-squash"],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.starts_with("updated 19.0-mig-my_addon from origin/18.0: 1 new commit(s)\n"),
+        "{out}"
+    );
+    assert!(out.contains("--push"), "{out}");
+    assert_eq!(
+        git(&work, &["log", "-1", "--format=%an|%s"]),
+        "Jane|[FIX] my_addon: b"
+    );
+    let (_, out, _) = odx(&work, &env, &["migrate", "update"]);
+    assert!(
+        out.starts_with("19.0-mig-my_addon is up to date with origin/18.0\n"),
+        "{out}"
+    );
+    let (_, out, _) = odx(
+        &work,
+        &env,
+        &[
+            "--json", "migrate", "update", "--from", "18.0", "--remote", "origin",
+        ],
+    );
+    assert!(out.contains("\"status\":\"updated\""), "{out}");
+    // Pushing needs to know where.
+    let (exit, _, err) = odx(&work, &env, &["migrate", "update", "--push"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("does not know where"), "{err}");
+    // A push that fails says what to do instead.
+    for (key, value) in [("PushTo", "/nowhere"), ("PushBranch", "theirs")] {
+        let key = format!("branch.19.0-mig-my_addon.odxMigrate{key}");
+        git(&work, &["config", &key, value]);
+    }
+    let (exit, _, err) = odx(&work, &env, &["migrate", "update", "--push"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("open a pull request against their branch"),
+        "{err}"
+    );
+    // A conflict stops; continuing reports the update.
+    std::fs::write(work.join("my_addon/b.py"), "b, 19.0\n").unwrap();
+    git(&work, &["commit", "--quiet", "-am", "[IMP] my_addon: 19.0"]);
+    upstream_fix(&up, "b.py", "b, fixed\n", "[FIX] my_addon: b again");
+    let (exit, _, err) = odx(&work, &env, &["migrate", "update"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("odx migrate --continue"), "{err}");
+    std::fs::write(work.join("my_addon/b.py"), "b, 19.0, fixed\n").unwrap();
+    git(&work, &["add", "-A"]);
+    let (exit, out, err) = odx(&work, &env, &["migrate", "--continue"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.starts_with("updated 19.0-mig-my_addon from origin/18.0: 1 new commit(s)"),
+        "{out}"
+    );
+    // Elsewhere: not a migration branch, or one odx cannot place.
+    git(
+        &work,
+        &["checkout", "--quiet", "-b", "19.0-mig-other", "origin/19.0"],
+    );
+    let (exit, _, err) = odx(&work, &env, &["migrate", "update"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("--since"), "{err}");
+    git(&work, &["checkout", "--quiet", "19.0"]);
+    let (exit, _, err) = odx(&work, &env, &["migrate", "update"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("is no migration branch"), "{err}");
+}
+
+#[test]
+fn someone_elses_migration_pull_request() {
+    let forge = Forge::new();
+    let api = forge.api.clone();
+    let run = |args: &[&str]| forge.odx(args);
+    // Someone's migration, as pull request 7 from their fork.
+    let (ok, _, err) = run(&[
+        "migrate",
+        "addon",
+        "my_addon",
+        "--to",
+        "19.0",
+        "--no-pre-commit",
+        "--force",
+    ]);
+    assert!(ok, "{err}");
+    git(
+        &forge.work,
+        &[
+            "push",
+            "--quiet",
+            &file_url(&forge.up),
+            "19.0-mig-my_addon:refs/pull/7/head",
+        ],
+    );
+    git(
+        &forge.work,
+        &[
+            "push",
+            "--quiet",
+            &file_url(&forge.tmp.path().join("fork")),
+            "19.0-mig-my_addon:theirs",
+        ],
+    );
+    git(&forge.work, &["checkout", "--quiet", "19.0"]);
+    git(&forge.work, &["branch", "-D", "19.0-mig-my_addon"]);
+    forge.route(
+        "GET /api/v3/repos/OCA/repo/pulls/7",
+        200,
+        &format!(
+            r#"{{"number":7,"title":"[19.0][MIG] my_addon: Migration to 19.0","state":"open","base":{{"ref":"19.0"}},"head":{{"sha":"x","ref":"theirs","repo":{{"html_url":"{api}/me/repo"}}}},"maintainer_can_modify":true}}"#
+        ),
+    );
+    upstream_fix(&forge.up, "b.py", "b\n", "[FIX] my_addon: b");
+    let (ok, out, err) = run(&[
+        "migrate",
+        "update",
+        "OCA/repo#7",
+        "--push",
+        "--no-pre-commit",
+    ]);
+    assert!(ok, "{err}");
+    assert!(
+        out.starts_with("updated 19.0-mig-my_addon from origin/18.0: 1 new commit(s)\n"),
+        "{out}"
+    );
+    assert!(
+        out.ends_with(&format!("pushed to {api}/me/repo.git theirs\n")),
+        "{out}"
+    );
+    assert_eq!(
+        git(
+            &forge.tmp.path().join("fork"),
+            &["log", "-1", "--format=%s", "theirs"]
+        ),
+        "[FIX] my_addon: b"
+    );
+    // The branch is here now; other refusals.
+    let (ok, _, err) = run(&["migrate", "update", "OCA/repo#7"]);
+    assert!(!ok);
+    assert!(err.contains("exists here"), "{err}");
+    git(&forge.work, &["checkout", "--quiet", "19.0"]);
+    for (args, expected) in [
+        (
+            &["migrate", "update", "repo#7"][..],
+            "<owner>/<repo>#<number>",
+        ),
+        (
+            &["migrate", "update", "OCA/elsewhere#7"],
+            "no remote of this clone points at OCA/elsewhere",
+        ),
+        (&["migrate", "update", "OCA/repo#8"], "cannot see"),
+    ] {
+        let (ok, _, err) = run(args);
+        assert!(!ok);
+        assert!(err.contains(expected), "{err}");
+    }
+    forge.route(
+        "GET /api/v3/repos/OCA/repo/pulls/8",
+        200,
+        r#"{"number":8,"title":"[19.0][IMP] my_addon","state":"open","base":{"ref":"19.0"}}"#,
+    );
+    let (ok, _, err) = run(&["migrate", "update", "OCA/repo#8"]);
+    assert!(!ok);
+    assert!(err.contains("names no `[MIG] <addon>`"), "{err}");
+}
+
+#[test]
+fn migration_pull_requests_odx_cannot_update() {
+    let forge = Forge::new();
+    let run = |args: &[&str]| forge.odx(args);
+    // A head that cannot be fetched; one from a repository the forge no
+    // longer shows, checked out but not pushed anywhere.
+    git(
+        &forge.work,
+        &[
+            "push",
+            "--quiet",
+            &file_url(&forge.up),
+            "19.0:refs/pull/10/head",
+        ],
+    );
+    for number in [9, 10] {
+        forge.route(
+            &format!("GET /api/v3/repos/OCA/repo/pulls/{number}"),
+            200,
+            &format!(
+                r#"{{"number":{number},"title":"[19.0][MIG] addon_{number}","state":"open","base":{{"ref":"19.0"}}}}"#
+            ),
+        );
+    }
+    let (ok, _, err) = run(&["migrate", "update", "OCA/repo#9"]);
+    assert!(!ok);
+    assert!(err.contains("cannot fetch"), "{err}");
+    let (ok, _, err) = run(&["migrate", "update", "OCA/repo#10"]);
+    assert!(!ok);
+    assert!(err.contains("--since"), "{err}");
+    assert_eq!(
+        git(&forge.work, &["branch", "--show-current"]),
+        "19.0-mig-addon_10"
+    );
+    git(&forge.work, &["checkout", "--quiet", "19.0"]);
+    git(&forge.work, &["remote", "add", "local", "/nowhere"]);
+    let (ok, _, err) = run(&["migrate", "update", "OCA/repo#7", "--remote", "local"]);
+    assert!(!ok);
+    assert!(err.contains("not on a forge"), "{err}");
+}
+
+#[test]
+fn updates_leave_bots_out_and_bring_target_fixes() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (tmp, up, work) = fixture();
+    let odl = tmp.path().join("odl");
+    std::fs::write(
+        &odl,
+        r#"#!/bin/sh
+case "$*" in
+  *--bump-version*) exit 0;;
+  *--fix*) echo fixed >> my_addon/fixed.py; exit 0;;
+  *) echo '{"modules":[{"name":"my_addon","violations":[{"file_path":"my_addon/data.xml","line":3,"column":1,"code":"U1908","name":"x","message":"use odoo.fields.Domain"}]}]}'; exit 1;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&odl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let env = env().with("ODX_ODL", odl.display().to_string());
+    let (exit, _, err) = odx(
+        &work,
+        &env,
+        &[
+            "migrate",
+            "addon",
+            "my_addon",
+            "--to",
+            "19.0",
+            "--no-pre-commit",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    upstream_fix(&up, "b.py", "b\n", "[FIX] my_addon: b");
+    git(&up, &["checkout", "--quiet", "18.0"]);
+    for (email, text, subject) in [
+        ("nl@example.com", "a\n", "Translated using Weblate (Dutch)"),
+        ("oca-ci@odoo-community.org", "", "[UPD] Update my_addon.pot"),
+        (
+            "nl@example.com",
+            "a, b\n",
+            "Translated using Weblate (Dutch)",
+        ),
+    ] {
+        let file = if text.is_empty() {
+            "i18n/my_addon.pot"
+        } else {
+            "i18n/nl.po"
+        };
+        write(
+            &up.join("my_addon").join(file),
+            &format!("{text}{subject}\n"),
+        );
+        git(&up, &["add", "-A"]);
+        let author = format!("Someone <{email}>");
+        git(
+            &up,
+            &["commit", "--quiet", "--author", &author, "-m", subject],
+        );
+    }
+    git(&up, &["checkout", "--quiet", "--detach"]);
+    let (exit, out, err) = odx(&work, &env, &["migrate", "update", "--no-pre-commit"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    assert!(
+        out.starts_with(
+            "updated 19.0-mig-my_addon from origin/18.0: 2 new commit(s) (1 administrative commit(s) squashed into them)\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("  [FW] my_addon: 19.0 fixes for the changes from 18.0"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  left by hand: my_addon/data.xml:3: U1908"),
+        "{out}"
+    );
+    let subjects = git(&work, &["log", "-4", "--format=%s"]);
+    assert!(!subjects.contains("[UPD]"), "{subjects}");
 }

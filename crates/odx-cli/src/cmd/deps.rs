@@ -67,7 +67,7 @@ pub(crate) fn core(series: &str) -> Vec<&'static str> {
 }
 
 /// A pull request's page and the ref of its head, per forge.
-fn refs(kind: ForgeKind, base: &str, number: u64) -> (String, String) {
+pub(crate) fn refs(kind: ForgeKind, base: &str, number: u64) -> (String, String) {
     match kind {
         ForgeKind::Gitlab => (
             format!("{base}/-/merge_requests/{number}"),

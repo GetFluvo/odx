@@ -674,6 +674,11 @@ No odx project (pyproject.toml with [tool.odx]) is needed.")]
     /// Push the migration branch checked out and open its pull request: to the
     /// remote when you may push there, else to your fork (created when missing).
     Pr(MigratePrArgs),
+    /// Bring an open migration up to date with what the addon got on the source series
+    /// since: each new commit replayed with its author, bot commits left out, then
+    /// odoo-lint's fixes for the target in a `[FW]` commit. On the migration branch checked
+    /// out, or on someone else's migration pull request.
+    Update(MigrateUpdateArgs),
     /// Pin the dependencies of the migration branch's addon that only exist as an open
     /// migration pull request upstream: lines in `test-requirements.txt` pointing at the pull
     /// request, in a commit `[DON'T MERGE] test-requirements.txt`, as OCA asks.
@@ -707,6 +712,35 @@ No odx project (pyproject.toml with [tool.odx]) is needed.")]
         #[arg(long)]
         no_pre_commit: bool,
     },
+}
+
+/// Arguments of `odx migrate update`.
+#[derive(Debug, Args)]
+pub struct MigrateUpdateArgs {
+    /// A migration pull request to update instead of the branch checked out, for example
+    /// `OCA/contract#1234`; its head becomes the local branch `<to>-mig-<addon>`.
+    pub pr: Option<String>,
+    /// The source series [default: the one recorded on the branch, else the series before
+    /// the target].
+    #[arg(long, value_name = "SERIES")]
+    pub from: Option<String>,
+    /// The remote the source series comes from [default: the one recorded on the branch,
+    /// the one pointing at the pull request's repository, else `upstream` or `origin`].
+    #[arg(long, value_name = "NAME")]
+    pub remote: Option<String>,
+    /// The last commit of the source series the branch has, when odx cannot tell (a
+    /// migration made in one commit).
+    #[arg(long, value_name = "COMMIT")]
+    pub since: Option<String>,
+    /// Keep the administrative commits as they are.
+    #[arg(long)]
+    pub no_squash: bool,
+    /// Leave out the repository's pre-commit fixes.
+    #[arg(long)]
+    pub no_pre_commit: bool,
+    /// Then push the branch where its pull request comes from.
+    #[arg(long)]
+    pub push: bool,
 }
 
 /// Arguments of `odx migrate pr`.
