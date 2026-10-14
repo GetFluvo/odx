@@ -30,7 +30,7 @@ Options:
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --to <ENV>
           Target environment
@@ -42,7 +42,7 @@ Options:
           Also promote code by patch-id
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --no-with-odoo
           Do not promote the Odoo core revision

@@ -26,7 +26,7 @@ Options:
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --update
           Re-resolve every entry instead of keeping existing pins
@@ -41,7 +41,7 @@ Options:
           Also write one git bundle per repository with its locked commits into DIR
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --no-uv
           Do not run `uv lock` after rewriting package sources

@@ -123,7 +123,7 @@ fn migrates_an_addon() {
         "migrated on branch 19.0-mig-my_addon from origin/18.0: 2 commit(s) of history\n  \
          [MIG] my_addon: Migration to 19.0\n\
          odoo-lint finds nothing left to do by hand\n\
-         next: fix what is left, run the tests, then push the branch and open the pull request\n"
+         next: fix what is left and run the tests; then `odx migrate pr` pushes the branch and opens a draft pull request\n"
     );
     assert!(err.contains("the pre-commit fixes are left out"), "{err}");
     assert!(err.contains("install odoo-lint"), "{err}");

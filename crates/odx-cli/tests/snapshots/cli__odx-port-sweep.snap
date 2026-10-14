@@ -29,7 +29,7 @@ Options:
           Only the addons matching this glob
 
       --offline
-          Serve forge and index data from the cache only
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -38,7 +38,7 @@ Options:
           Blacklist the false positives (oca-port files) in commits on the branch `<to>-sweep`
 
       --no-refresh
-          Use cached data even when stale
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --open-pr
           Then push the branch and open a draft pull request
