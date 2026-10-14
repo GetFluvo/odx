@@ -2,7 +2,7 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Propose a verdict upstream as an oca-port blacklist entry
+Propose a verdict upstream as an oca-port blacklist entry: written and committed in a worktree of the target branch, pushed and proposed with --open-pr --yes
 
 Usage: odx verdict upstream [OPTIONS] --public-reason <PUBLIC_REASON> <ID>
 
@@ -25,6 +25,9 @@ Options:
 
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --yes
+          Confirm what --open-pr publishes; without it odx shows both reasons and stops
 
       --offline
           Serve forge and index data from the cache only

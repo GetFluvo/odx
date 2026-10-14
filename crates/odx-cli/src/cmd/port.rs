@@ -17,10 +17,11 @@ use odx_port::git::Repo;
 use odx_port::migrate::{Finding, Tools, Worktree};
 use odx_port::port::{PortOutcome, PortPlan, Ported};
 
+use super::aggregate::Prepared;
 use super::propose::{
     Proposed, Pushed, default_remote, forge_repo, git, opened_json, opened_text, propose,
 };
-use super::suggest::repository_name;
+use super::suggest::{Found, repository_name};
 use super::{Report, output_of};
 use crate::Context;
 use crate::cli::{GlobalArgs, PortArgs, PortCommand, PortOptions};
@@ -354,6 +355,102 @@ fn pull_request(
     let pr = client.pull_request(repo, kind, number)?;
     let commits = client.pull_request_commits(repo, kind, number)?;
     Ok((kind, pr.title, pr.base, commits))
+}
+
+/// `odx dashboard act <id> --port`: the suggestion's commits ported in a
+/// clone of the target repository under the cache (sharing the cache's
+/// objects), on `<to>-port-<n>`, then its pull request with `open_pr`.
+pub(crate) fn port_suggestion(
+    ctx: &Context<'_>,
+    global: &GlobalArgs,
+    prepared: &Prepared,
+    found: &Found,
+    group: &Group,
+    open_pr: bool,
+) -> Report {
+    let name: String = repository_name(&found.target_url)
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let clone = prepared.cache.root().join("ports").join(name);
+    if !clone.join(".git").exists() {
+        let made = super::run_checked(
+            &odx_core::Invocation::new("git")
+                .args(["clone", "--quiet", "--reference"])
+                .arg(found.repo_dir.as_os_str())
+                .arg(&found.target_url)
+                .arg(clone.as_os_str()),
+            "git clone",
+        );
+        if let Err(e) = made {
+            return failed(e);
+        }
+    }
+    let here = Context {
+        fs: ctx.fs,
+        env: ctx.env,
+        dir: clone.clone(),
+        config: None,
+    };
+    let to = &found.target;
+    let key: String = group
+        .key
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let options = PortOptions {
+        to: to.clone(),
+        remote: None,
+        no_migrate: false,
+        open_pr,
+        push_remote: None,
+    };
+    let commits: Vec<String> = group.commits.iter().rev().map(|c| c.sha.clone()).collect();
+    let plan = PortPlan {
+        branch: format!("{to}-port-{}-{key}", found.addon),
+        to: to.clone(),
+        remote: "origin".to_owned(),
+        commits,
+        addons: vec![found.addon.clone()],
+        no_migrate: false,
+        meta: meta(
+            &options,
+            "origin",
+            format!("[{to}][FW] {}", group.title),
+            format!(
+                "Port of {} ({}) to {to}, made with odx: {} commit(s) cherry-picked with their authors, then odoo-lint's upgrade fixes.\n",
+                group.key,
+                found.source,
+                group.commits.len()
+            ),
+            format!("port of {} --to {to}", group.key),
+        ),
+    };
+    let tools = Tools {
+        odl: ctx
+            .env
+            .var("ODX_ODL")
+            .as_deref()
+            .unwrap_or("odl")
+            .to_owned(),
+        pre_commit: None,
+    };
+    let meta = plan.meta.clone();
+    // Committed as the user, or as odx when git knows no one.
+    let identity = |key: &str, default: &str| {
+        output_of(&git(&here).args(["config", "--default", default, key])).unwrap_or_default()
+    };
+    let outcome = Worktree::new(&OsRunner, &clone)
+        .with_identity(
+            &identity("user.name", "odx"),
+            &identity("user.email", "unknown"),
+        )
+        .port(plan, &tools);
+    let where_ = format!("in {}:\n", clone.display());
+    match outcome {
+        Ok(PortOutcome::Done(ported)) => finished(&here, global, &ported, &meta, where_),
+        Ok(PortOutcome::Stopped(message)) | Err(message) => failed(format!("{where_}{message}")),
+    }
 }
 
 /// The plan for `odx port pr`.

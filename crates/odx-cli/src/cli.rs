@@ -460,9 +460,13 @@ pub struct DashboardActArgs {
     /// Add the pull request to the project.
     #[arg(long)]
     pub include: bool,
-    /// Port the change upstream.
+    /// Port the change: cherry-picked onto a branch of the target series in a clone under
+    /// the cache.
     #[arg(long)]
     pub port: bool,
+    /// With --port: then push the branch and open a draft pull request.
+    #[arg(long, requires = "port")]
+    pub open_pr: bool,
     /// Record a mute (or, with an organisation kind, a verdict).
     #[arg(long)]
     pub mute: bool,
@@ -599,7 +603,8 @@ pub enum VerdictCommand {
         /// Verdict id.
         id: String,
     },
-    /// Propose a verdict upstream as an oca-port blacklist entry.
+    /// Propose a verdict upstream as an oca-port blacklist entry: written and committed in
+    /// a worktree of the target branch, pushed and proposed with --open-pr --yes.
     Upstream {
         /// Verdict id.
         id: String,
@@ -609,6 +614,9 @@ pub enum VerdictCommand {
         /// Open the pull request on the upstream repository.
         #[arg(long)]
         open_pr: bool,
+        /// Confirm what --open-pr publishes; without it odx shows both reasons and stops.
+        #[arg(long, requires = "open_pr")]
+        yes: bool,
     },
     /// Pull and push the private verdict repository.
     Sync,
@@ -653,6 +661,14 @@ pub enum MigrateCommand {
     /// Push the migration branch checked out and open its pull request: to the
     /// remote when you may push there, else to your fork (created when missing).
     Pr(MigratePrArgs),
+    /// What moving the project to another series takes, addon by addon: available, an
+    /// open migration pull request to review, or to migrate (dependencies first); own
+    /// addons apart.
+    Plan {
+        /// Target series [default: `[tool.odx.upgrade] target_odoo_version`].
+        #[arg(long, value_name = "SERIES")]
+        to: Option<String>,
+    },
 }
 
 /// Arguments of `odx migrate pr`.

@@ -16,6 +16,7 @@ use odx_core::{Exit, Invocation};
 use odx_forge::{CachedHttp, ForgeClient, RepoUrl, ReqwestHttp, Visibility};
 use odx_git::{Forge, Source};
 use odx_port::git::Repo;
+use odx_port::migrate::Worktree;
 use odx_verdicts::{
     Entry, Kind, Recheck, Revoked, Scope, Standing, append, confirm, mutes_file, read, read_all,
     revoke, update, verdict_file,
@@ -23,6 +24,7 @@ use odx_verdicts::{
 use sha2::{Digest as _, Sha256};
 
 use super::aggregate::{Prepared, prepare};
+use super::propose::{Proposed, opened_text, propose};
 use super::suggest::{Found, collect};
 use super::{Report, output_of};
 use crate::Context;
@@ -320,11 +322,25 @@ fn verdict(
                 entry.target_series
             );
         }
-        VerdictCommand::Upstream { .. } => {
-            return Err(failed(
-                Exit::Usage,
-                "odx verdict upstream lands with odx port (roadmap phase 8)",
-            ));
+        VerdictCommand::Upstream {
+            id,
+            public_reason,
+            open_pr,
+            yes,
+        } => {
+            let all = entries(ctx, &prepared, global, &mut report.warnings);
+            let entry = all
+                .into_iter()
+                .map(|(_, entry)| entry)
+                .find(|entry| entry.id == *id)
+                .ok_or_else(|| failed(Exit::Usage, format!("no verdict or mute {id}")))?;
+            let request = Upstreaming {
+                entry: &entry,
+                public_reason,
+                open_pr: *open_pr,
+                yes: *yes,
+            };
+            report.out = upstream(ctx, global, &prepared, &store, &request)?;
         }
         VerdictCommand::Sync => {
             sync(&store, global.offline).map_err(|e| failed(Exit::Failure, e))?;
@@ -376,6 +392,169 @@ fn list(
         out.push('\n');
     }
     out
+}
+
+/// What `odx verdict upstream` proposes.
+struct Upstreaming<'a> {
+    entry: &'a Entry,
+    public_reason: &'a str,
+    open_pr: bool,
+    yes: bool,
+}
+
+/// Check out a branch of the entry's target series in a worktree of the
+/// cache, a previous one replaced: its path and name.
+fn upstream_branch(
+    prepared: &Prepared,
+    entry: &Entry,
+    repo: &str,
+) -> Result<(PathBuf, String), Report> {
+    let bare = prepared.cache.repo_dir(repo);
+    let target = Source::Branch(entry.target_series.clone()).local_ref(Forge::detect(repo), None);
+    let sanitized: String = entry
+        .id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let path = prepared.cache.root().join("upstream").join(&sanitized);
+    let branch = format!("{}-blacklist-{}", entry.target_series, entry.addon);
+    let _ = git(
+        &bare,
+        &["worktree", "remove", "--force", &path.to_string_lossy()],
+    );
+    let _ = std::fs::remove_dir_all(&path);
+    git(
+        &bare,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-B",
+            &branch,
+            &path.to_string_lossy(),
+            &target,
+        ],
+    )
+    .map_err(|e| {
+        failed(
+            Exit::Failure,
+            format!(
+                "the {} branch of {repo} is not in the cache ({e}); run odx suggest first",
+                entry.target_series
+            ),
+        )
+    })?;
+    Ok((path, branch))
+}
+
+/// Write the verdict's blacklist entry on a branch of the target series in
+/// a worktree of the cache, with only the public reason; with `--open-pr
+/// --yes`, push it, open the pull request and record it on the verdict.
+fn upstream(
+    ctx: &Context<'_>,
+    global: &GlobalArgs,
+    prepared: &Prepared,
+    store: &Store,
+    request: &Upstreaming<'_>,
+) -> Result<String, Report> {
+    let entry = request.entry;
+    if request.public_reason.trim().is_empty() {
+        return Err(failed(Exit::Usage, "the public reason is empty"));
+    }
+    let Some(recheck) = entry.recheck.as_ref() else {
+        return Err(failed(
+            Exit::Failure,
+            format!(
+                "{} does not record its repository (no re-check); it cannot be proposed upstream",
+                entry.id
+            ),
+        ));
+    };
+    let (path, branch) = upstream_branch(prepared, entry, &recheck.repo)?;
+    let bare = prepared.cache.repo_dir(&recheck.repo);
+    let name = git(&bare, &["config", "--default", "odx", "user.name"]).unwrap_or_default();
+    let subject = Worktree::new(&OsRunner, &path)
+        .with_identity(&name, &author(&bare))
+        .blacklist(
+            &entry.addon,
+            &[(entry.change.clone(), request.public_reason.to_owned())],
+        )
+        .map_err(|e| failed(Exit::Failure, e))?;
+    let mut out = format!(
+        "{} on {} of {}: {subject}\n  in {} (branch {branch})\n  public reason: {}\n  private reason, which stays private: {}\n",
+        entry.change,
+        entry.target_series,
+        recheck.repo,
+        path.display(),
+        request.public_reason,
+        entry.reason
+    );
+    if !request.open_pr {
+        return Ok(out);
+    }
+    if !request.yes {
+        out.push_str("nothing left this machine: run again with --yes to push it and open the pull request\n");
+        return Ok(out);
+    }
+    let upstream = RepoUrl::parse(&recheck.repo)
+        .ok_or_else(|| failed(Exit::Failure, format!("{} is not on a forge", recheck.repo)))?;
+    let here = Context {
+        fs: ctx.fs,
+        env: ctx.env,
+        dir: path,
+        config: None,
+    };
+    let body = format!(
+        "Blacklist entry for a change the maintainers of a project judged not to port to {}, made with odx.\n\n## Blacklist\n\n| Addon | Entry | Reason |\n| --- | --- | --- |\n| {} | {} | {} |\n",
+        entry.target_series, entry.addon, entry.change, request.public_reason
+    );
+    let pushed = propose(
+        &here,
+        &Proposed {
+            branch: &branch,
+            base: &entry.target_series,
+            remote: &recheck.repo,
+            upstream: &upstream,
+            push_remote: None,
+            draft: true,
+            title: format!(
+                "[{}][FW] {}: blacklist {}",
+                entry.target_series, entry.addon, entry.change
+            ),
+            body,
+        },
+    )?;
+    out.push_str(&opened_text(&pushed));
+    let pr = format!("{}#{}", upstream.path, pushed.opened.number);
+    let today = today();
+    change(
+        ctx,
+        global,
+        prepared,
+        store,
+        &entry.id,
+        "upstream",
+        |table| {
+            odx_verdicts::upstream(table, &pr, &today);
+        },
+    )
+    .map_err(|report| {
+        failed(
+            Exit::Failure,
+            format!(
+                "opened {}, but could not record it on {}: {}",
+                pushed.opened.url,
+                entry.id,
+                report.error.unwrap_or_default()
+            ),
+        )
+    })?;
+    let _ = writeln!(
+        out,
+        "recorded on {}: blacklisted upstream in {pr}",
+        entry.id
+    );
+    Ok(out)
 }
 
 /// Apply `edit` to entry `id` wherever it lives, and publish it.
@@ -449,7 +628,7 @@ fn file_for(scope: Scope, store: &Store, target: &str, addon: &str) -> Result<Pa
 }
 
 /// The suggestion `change` of `args`'s addon and series.
-fn suggestion(
+pub(crate) fn suggestion(
     args: &SuggestArgs,
     change: &str,
     global: &GlobalArgs,
@@ -572,6 +751,7 @@ fn add(
         environments: (scope == Scope::Env).then(|| environments.clone()),
         recheck,
         revoked: None,
+        upstream: None,
     };
     let message = format!(
         "verdict: {} ({}) for {addon} on {target}",

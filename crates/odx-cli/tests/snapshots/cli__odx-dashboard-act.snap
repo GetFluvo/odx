@@ -21,31 +21,40 @@ Options:
           The pyproject.toml or repos.yaml to use
 
       --port
-          Port the change upstream
+          Port the change: cherry-picked onto a branch of the target series in a clone under the cache
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
+      --open-pr
+          With --port: then push the branch and open a draft pull request
+
       --mute
           Record a mute (or, with an organisation kind, a verdict)
-
-      --drop
-          Remove the override from the project
 
       --offline
           Serve forge and index data from the cache only
 
-      --follow
-          Take the index update
+      --drop
+          Remove the override from the project
 
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --follow
+          Take the index update
 
       --no-refresh
           Use cached data even when stale
 
       --reason <REASON>
           Why (mandatory with --mute)
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
 
       --kind <KIND>
           Kind of the mute or verdict
@@ -60,12 +69,6 @@ Options:
           - deferred:        Review later; re-checked on expiry and on target code changes
           
           [default: not-wanted]
-
-      --refresh-index
-          Rebuild the addon index for the series involved
-
-      --json
-          Machine-readable output on stdout
 
   -v, --verbose...
           Increase log verbosity (repeatable)

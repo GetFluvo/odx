@@ -94,6 +94,15 @@ pub struct Recheck {
     pub target_tree: String,
 }
 
+/// Where a verdict was proposed upstream, as an oca-port blacklist entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Upstream {
+    /// The pull request: `<owner>/<repo>#<n>`.
+    pub pr: String,
+    /// When (`YYYY-MM-DD`).
+    pub date: String,
+}
+
 /// A revocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Revoked {
@@ -140,6 +149,9 @@ pub struct Entry {
     /// Set when revoked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked: Option<Revoked>,
+    /// Set when proposed upstream (`odx verdict upstream`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<Upstream>,
 }
 
 /// Where an entry stands for a suggestion.
@@ -222,6 +234,12 @@ impl Entry {
             inner.insert("files", value(strings(&recheck.files)));
             inner.insert("target_tree", value(&recheck.target_tree));
             table.insert("recheck", Item::Table(inner));
+        }
+        if let Some(revoked) = &self.revoked {
+            revoke(&mut table, revoked);
+        }
+        if let Some(proposed) = &self.upstream {
+            upstream(&mut table, &proposed.pr, &proposed.date);
         }
         table
     }
@@ -369,6 +387,14 @@ pub fn revoke(table: &mut Table, revoked: &Revoked) {
     table.insert("revoked", Item::Table(inner));
 }
 
+/// Record on a table that the verdict was proposed upstream in `pr`.
+pub fn upstream(table: &mut Table, pr: &str, date: &str) {
+    let mut inner = Table::new();
+    inner.insert("pr", value(pr));
+    inner.insert("date", value(date));
+    table.insert("upstream", Item::Table(inner));
+}
+
 /// Record a reviewed target tree on a table (after confirming a stale
 /// entry).
 pub fn confirm(table: &mut Table, tree: &str, date: &str) {
@@ -403,6 +429,7 @@ mod tests {
                 target_tree: "9a8b".to_owned(),
             }),
             revoked: None,
+            upstream: None,
         }
     }
 
@@ -496,12 +523,30 @@ mod tests {
             .unwrap()
         );
         assert!(update(&file, &second.id, |table| confirm(table, "x", "2026-10-14")).unwrap());
+        assert!(
+            update(&file, &second.id, |table| upstream(
+                table,
+                "OCA/contract#9",
+                "2026-10-14"
+            ))
+            .unwrap()
+        );
         assert!(!update(&file, "nope", untouched).unwrap());
         assert!(update(&file, &first.id, untouched).unwrap());
         let read_back = read(&file).unwrap();
         assert_eq!(read_back[0].revoked.as_ref(), Some(&revoked));
         assert_eq!(read_back[0].recheck.as_ref().unwrap().target_tree, "ffff");
         assert_eq!(read_back[1].date, "2026-10-14");
+        assert_eq!(
+            read_back[1].upstream,
+            Some(Upstream {
+                pr: "OCA/contract#9".to_owned(),
+                date: "2026-10-14".to_owned()
+            })
+        );
+        // Shown as stored, revocation and upstream proposal included.
+        assert!(read_back[0].table().contains_key("revoked"));
+        assert!(read_back[1].table().contains_key("upstream"));
 
         let mutes = mutes_file(root, "abc");
         let mut mute = entry(Kind::NotWanted);

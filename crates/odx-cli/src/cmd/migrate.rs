@@ -61,6 +61,9 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             });
         }
         (_, true, _) => tree.resume(&tools),
+        (Some(MigrateCommand::Plan { to }), _, _) => {
+            return super::upgrade::migrate_plan(to.as_deref(), global, ctx);
+        }
         (Some(MigrateCommand::Pr(pr)), _, _) => {
             let opened = open_pr(ctx, &tools, pr)?;
             return Ok(Report {
