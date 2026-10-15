@@ -150,7 +150,19 @@ fn outside_a_project_and_clean_addons() {
 #[test]
 fn only_changed_addons() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
+    // Behind a symlink, as macOS's temporary folders are: git reports the
+    // resolved path.
+    let real = tmp.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    #[cfg(unix)]
+    let linked = {
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        link
+    };
+    #[cfg(not(unix))]
+    let linked = real.clone();
+    let root = linked.as_path();
     // Not a repository yet, and nothing installed.
     project(root);
     std::fs::remove_dir_all(root.join(".venv")).unwrap();
@@ -199,6 +211,13 @@ fn only_changed_addons() {
     );
     assert!(out.contains("modules/oca/c/"), "{out}");
     assert!(!out.contains("modules/custom"), "{out}");
+    // From a folder inside the project, against the same base.
+    let (_, out, _) = odx(
+        &root.join("modules/custom"),
+        &["lint", "--only-changed", "--base", &head],
+    );
+    assert!(out.contains("b/__manifest__.py"), "{out}");
+    assert!(!out.contains("a/__manifest__.py"), "{out}");
 }
 
 #[test]
