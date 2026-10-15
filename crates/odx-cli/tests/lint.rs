@@ -57,6 +57,9 @@ fn project(root: &Path) {
     write(&root.join("modules/custom/a/__manifest__.py"), MANIFEST);
     write(&root.join("modules/custom/b/__manifest__.py"), MANIFEST);
     write(&root.join("modules/oca/c/__manifest__.py"), MANIFEST);
+    for addon in ["custom/a", "custom/b", "oca/c"] {
+        write(&root.join("modules").join(addon).join("__init__.py"), "");
+    }
     write(
         &root.join(".venv/lib/python3.12/site-packages/odoo/addons/base/__manifest__.py"),
         "{}\n",
@@ -80,8 +83,7 @@ fn findings_formats_and_fixes() {
     let value: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert!(value.as_array().is_some_and(|all| !all.is_empty()), "{out}");
     let (_, out, _) = odx(root, &["lint", "modules/oca", "--output-format", "github"]);
-    assert!(out.starts_with("::"), "{out}");
-    assert!(out.contains("modules/oca/c/__manifest__.py"), "{out}");
+    insta::assert_snapshot!("lint-github", out);
     // Selecting a rule that does not exist finds nothing, and says why.
     let (exit, out, err) = odx(root, &["lint", "--select", "NOPE9999"]);
     assert_eq!((exit, out.as_str()), (Exit::Success, "no findings\n"));
