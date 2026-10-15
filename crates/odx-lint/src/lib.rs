@@ -18,7 +18,7 @@ pub use odoo_lint::output::OutputFormat;
 #[macro_export]
 macro_rules! odoo_lint_version {
     () => {
-        "0.1.0-alpha.13"
+        "0.1.0-alpha.14"
     };
 }
 
@@ -277,7 +277,7 @@ mod tests {
         );
         assert_eq!(addon_of(root, &root.join("README.md")), None);
         assert_eq!(addon_of(&addon, &addon.join("__init__.py")), None);
-        assert_eq!(odoo_lint_version!(), "0.1.0-alpha.13");
+        assert_eq!(odoo_lint_version!(), "0.1.0-alpha.14");
         // The version above is the one depended on.
         let manifest =
             std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
