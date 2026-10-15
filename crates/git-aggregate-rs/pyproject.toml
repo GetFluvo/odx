@@ -19,8 +19,11 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/getfluvo/odx"
+Homepage = "https://odx.readthedocs.io/compatibility.html"
+Documentation = "https://odx.readthedocs.io/compatibility.html"
+Source = "https://github.com/getfluvo/odx/tree/main/crates/git-aggregate-rs"
 Issues = "https://github.com/getfluvo/odx/issues"
+Changelog = "https://github.com/getfluvo/odx/releases"
 
 [tool.maturin]
 bindings = "bin"

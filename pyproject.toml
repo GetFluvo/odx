@@ -22,9 +22,11 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/getfluvo/odx"
+Homepage = "https://odx.readthedocs.io/"
 Documentation = "https://odx.readthedocs.io/"
+Source = "https://github.com/getfluvo/odx"
 Issues = "https://github.com/getfluvo/odx/issues"
+Changelog = "https://github.com/getfluvo/odx/releases"
 
 [tool.maturin]
 bindings = "bin"

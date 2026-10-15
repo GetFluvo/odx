@@ -7,6 +7,11 @@ same flags (`-c`, `-p`, `-d`, `-e`, `--env-file`, `-f`, `-j`, `--log-level`,
 and `--json`.
 
 ```console
+$ uv tool install git-aggregate-rs     # or: pipx install git-aggregate-rs
+$ cargo install git-aggregate-rs
+```
+
+```console
 $ git-aggregate-rs -c repos.yaml
 $ git-aggregate-rs -c repos.yaml -d '*/sale-*' -j 8
 $ git-aggregate-rs -c repos.yaml -e --env-file .env -p

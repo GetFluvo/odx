@@ -1,7 +1,6 @@
 # Installation
 
-odx is pre-alpha. Once released, it installs as a single binary from either
-registry:
+odx installs as a single binary from either registry:
 
 ```console
 $ uv tool install odx-cli       # PyPI, binary wheel
