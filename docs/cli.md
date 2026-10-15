@@ -470,6 +470,34 @@ of for the series to `[tool.odx.groups] default`; run `uv lock` afterwards.
 provided = ["account_accountant"]   # available on the platform, not in the project
 ```
 
+## Linting
+
+```console
+$ odx lint                            # the project's own addons
+$ odx lint --only-changed             # the addons changed against the upstream
+$ odx lint --fix                      # apply odoo-lint's safe fixes
+$ odx lint --diff                     # show them instead
+$ odx lint --output-format github     # annotations on pull requests
+```
+
+`odx lint` runs [odoo-lint](https://github.com/bosd/odoo-lint) inside odx, the
+version `odx --version` names, so no `odl` needs to be installed. In a project
+it lints the own addons (`project_addons`) for `odoo_version`, with the own,
+aggregated, vendored and installed (`.venv`) addons on odoo-lint's addons path
+for its checks across modules; outside a project, the current directory with
+odoo-lint's own configuration. Paths given on the command line replace the
+default. Rule selection and settings are odoo-lint's (`[tool.odoo-lint]` in
+`pyproject.toml`, or `odoo-lint.toml`); `--select` and `--ignore` adjust them
+for one run.
+
+`--only-changed` keeps the addons with a change against `--base` (default: the
+branch's upstream, else `origin/HEAD`), committed, staged, unstaged or
+untracked. `--fix` applies the safe fixes (`--unsafe-fixes` the rest too) and
+reports what is left; `--diff` prints them as a unified diff and writes
+nothing. `--output-format` is `text`, `json`, `github`, `gitlab` or `sarif`,
+as `odl check` writes them. odx exits 1 when findings are left (or `--diff`
+would change something), 0 otherwise or with `--exit-zero`.
+
 ## Preparing a series upgrade
 
 ```console

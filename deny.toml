@@ -22,6 +22,9 @@ allow = [
   "BSD-3-Clause",
   "ISC",
   "Unicode-3.0",
+  # Unicode data tables (finl_unicode via comrak, unicode_names2 via
+  # ruff_python_parser, both from odoo-lint); permissive, for data.
+  "Unicode-DFS-2016",
   "Zlib",
   "MPL-2.0",
   # Mozilla's root certificate data (webpki-root-certs, via the TLS

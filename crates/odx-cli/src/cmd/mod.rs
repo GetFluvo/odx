@@ -28,6 +28,7 @@ pub(crate) mod dev;
 pub(crate) mod doctor;
 pub(crate) mod edit;
 pub(crate) mod hooks;
+pub(crate) mod lint;
 pub(crate) mod migrate;
 pub(crate) mod pin;
 pub(crate) mod port;

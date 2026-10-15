@@ -8,14 +8,23 @@ Usage: odx lint [OPTIONS] [PATHS]...
 
 Arguments:
   [PATHS]...
-          Paths to lint; defaults to the project addons
+          Files and directories to lint [default: the project's own addons, else the current directory]
 
 Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --only-changed
+          Lint only the addons with changes against `--base`, committed or not
+
+      --base <REF>
+          What `--only-changed` compares with [default: the branch's upstream, else `origin/HEAD`]
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --fix
+          Apply odoo-lint's safe fixes
 
   -j, --jobs <N>
           Override the number of parallel jobs
@@ -23,17 +32,44 @@ Options:
       --offline
           Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
+      --unsafe-fixes
+          Apply unsafe fixes too
+
+      --diff
+          Show the fixes as a diff instead of applying them
+
       --fresh
           Ignore cached data; refresh everything before answering
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
 
+      --output-format <FORMAT>
+          Output format of the findings
+
+          Possible values:
+          - text:   pylint-style `path:line:col: CODE: message (name)`
+          - json:   JSON array, 1-based line and column
+          - github: GitHub Actions workflow commands, shown as annotations on pull requests
+          - sarif:  SARIF 2.1.0, for GitHub code scanning, reviewdog (Forgejo, Gitea) and IDEs
+          - gitlab: GitLab Code Quality report, shown in merge requests
+          
+          [default: text]
+
       --refresh-index
           Rebuild the addon index for the series involved
 
+      --select <RULES>
+          Rules to check instead of the configured ones (codes, names or code prefixes)
+
+      --ignore <RULES>
+          Rules to leave out on top of the configured ones
+
       --json
           Machine-readable output on stdout
+
+      --exit-zero
+          Exit 0 even when findings are left
 
   -v, --verbose...
           Increase log verbosity (repeatable)
@@ -42,7 +78,7 @@ Options:
           Errors only
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
   -V, --version
           Print version

@@ -37,6 +37,7 @@ odx-dashboard.workspace = true
 ratatui = { workspace = true, optional = true }
 odx-index.workspace = true
 odx-port.workspace = true
+odx-lint.workspace = true
 odx-verdicts.workspace = true
 odx-vendor.workspace = true
 serde.workspace = true
