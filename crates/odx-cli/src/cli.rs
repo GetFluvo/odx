@@ -751,8 +751,8 @@ pub struct MigrateUpdateArgs {
 /// Arguments of `odx migrate unpin`.
 #[derive(Debug, Args)]
 pub struct MigrateUnpinArgs {
-    /// The target series the dependencies must be released for [default: the one the
-    /// branch name `<series>-mig-<addon>` starts with].
+    /// The target series the dependencies must be released for [default: the series the
+    /// migration branch's name starts with].
     #[arg(long, value_name = "SERIES")]
     pub to: Option<String>,
     /// The pull request of the branch, for example `OCA/contract#1234` [default: the one

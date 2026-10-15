@@ -11,7 +11,7 @@ Options:
           Run as if started in DIR
 
       --to <SERIES>
-          The target series the dependencies must be released for [default: the one the branch name `<series>-mig-<addon>` starts with]
+          The target series the dependencies must be released for [default: the series the migration branch's name starts with]
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
