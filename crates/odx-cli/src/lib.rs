@@ -155,6 +155,7 @@ fn execute(
         Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),
         Command::Port(args) => cmd::port::run_port(args, &cli.global, ctx).emit(out, err),
         Command::Migrate(args) => cmd::migrate::run_migrate(args, &cli.global, ctx).emit(out, err),
+        Command::Lint(args) => cmd::lint::run_lint(args, &cli.global, ctx).emit(out, err),
         Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),
         Command::Drop(args) => cmd::edit::run_drop(args, ctx).emit(out, err),
         command => {

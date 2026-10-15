@@ -13,7 +13,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[derive(Debug, Parser)]
 #[command(
     name = "odx",
-    version,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (odoo-lint ", odx_lint::odoo_lint_version!(), ")"),
     about = "Rust-native workspace manager for Odoo projects",
     long_about = "Rust-native workspace manager for Odoo projects.\n\n\
         Aggregates pull requests, locks and vaults every commit, ports fixes \
@@ -1089,9 +1089,39 @@ pub struct CheckDepsArgs {
 
 /// Arguments of `odx lint`.
 #[derive(Debug, Args)]
+#[expect(clippy::struct_excessive_bools, reason = "independent CLI flags")]
 pub struct LintArgs {
-    /// Paths to lint; defaults to the project addons.
+    /// Files and directories to lint [default: the project's own addons, else the current
+    /// directory].
     pub paths: Vec<PathBuf>,
+    /// Lint only the addons with changes against `--base`, committed or not.
+    #[arg(long)]
+    pub only_changed: bool,
+    /// What `--only-changed` compares with [default: the branch's upstream, else
+    /// `origin/HEAD`].
+    #[arg(long, value_name = "REF", requires = "only_changed")]
+    pub base: Option<String>,
+    /// Apply odoo-lint's safe fixes.
+    #[arg(long)]
+    pub fix: bool,
+    /// Apply unsafe fixes too.
+    #[arg(long, requires = "fix")]
+    pub unsafe_fixes: bool,
+    /// Show the fixes as a diff instead of applying them.
+    #[arg(long, conflicts_with = "fix")]
+    pub diff: bool,
+    /// Output format of the findings.
+    #[arg(long, value_enum, default_value = "text", value_name = "FORMAT")]
+    pub output_format: odx_lint::OutputFormat,
+    /// Rules to check instead of the configured ones (codes, names or code prefixes).
+    #[arg(long, value_delimiter = ',', value_name = "RULES")]
+    pub select: Option<Vec<String>>,
+    /// Rules to leave out on top of the configured ones.
+    #[arg(long, value_delimiter = ',', value_name = "RULES")]
+    pub ignore: Vec<String>,
+    /// Exit 0 even when findings are left.
+    #[arg(long)]
+    pub exit_zero: bool,
 }
 
 /// `odx auth` subcommands.

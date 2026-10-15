@@ -175,6 +175,7 @@ odx port addon sale_x --from 18.0 --to 19.0 | odx port blacklist sale_x OCA/x#12
 odx port sweep --to 19.0 --from 16.0,17.0,18.0 [--write-blacklist --open-pr]
 odx migrate plan --to 19.0 | odx migrate addon sale_x --to 19.0 [--open-pr] | odx migrate own
 odx migrate update [OCA/server-tools#3631] [--push] | odx migrate pin | odx migrate unpin [--push] [--merge]
+odx lint [--only-changed] [--fix] [--output-format github]
 odx sync [--all] | odx daemon install --interval 30m | odx cache gc
 odx doctor | odx auth login <host> | odx completions <shell>
 
@@ -182,7 +183,6 @@ odx doctor | odx auth login <host> | odx completions <shell>
 odx promote <module>... | --feature pos-loyalty | --search "invoicing" --to prod [--open-pr] [--yes --json]
 odx env diff test prod
 odx bot run --apply
-odx lint [--only-changed] [--format github]
 
 odx git-aggregate -c repos.yaml -j 4     # gitaggregate drop-in
 git-aggregate-rs -c repos.yaml -j 4      # same, standalone package

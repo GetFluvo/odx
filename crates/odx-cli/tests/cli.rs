@@ -23,7 +23,6 @@ const STUBS: &[(&[&str], u8)] = &[
     (&["promote", "contract"], 10),
     (&["env", "diff", "19-test", "19-prod"], 10),
     (&["bot", "run"], 11),
-    (&["lint"], 9),
 ];
 
 #[test]
@@ -103,6 +102,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "dashboard"][..], "dashboard", 7),
         (&["odx", "migrate", "--abort"][..], "migrate", 8),
         (&["odx", "port", "--abort"][..], "port", 8),
+        (&["odx", "lint"][..], "lint", 9),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));
@@ -146,7 +146,7 @@ fn write_failure_maps_to_failure() {
         }
     }
     assert_eq!(
-        odx_cli::run(["odx", "lint"], &mut Broken, &mut Broken),
+        odx_cli::run(["odx", "bot", "run"], &mut Broken, &mut Broken),
         Exit::Failure
     );
 }
@@ -155,7 +155,14 @@ fn write_failure_maps_to_failure() {
 fn version_is_printed_to_stdout() {
     let (exit, out, _) = run(&["odx", "--version"]);
     assert_eq!(exit, Exit::Success);
-    assert_eq!(out, format!("odx {}\n", env!("CARGO_PKG_VERSION")));
+    assert_eq!(
+        out,
+        format!(
+            "odx {} (odoo-lint {})\n",
+            env!("CARGO_PKG_VERSION"),
+            odx_lint::odoo_lint_version!()
+        )
+    );
 }
 
 /// Snapshot `--help` of the root and every (nested) subcommand.
@@ -188,8 +195,8 @@ fn binary_exit_codes() {
         .success();
     Command::cargo_bin("odx")
         .unwrap()
-        .arg("lint")
+        .args(["bot", "run"])
         .assert()
         .code(2)
-        .stderr("odx lint: not implemented yet (roadmap phase 9)\n");
+        .stderr("odx bot: not implemented yet (roadmap phase 11)\n");
 }
