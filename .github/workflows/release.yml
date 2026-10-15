@@ -176,5 +176,25 @@ jobs:
       - name: Publish crates
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        # Published library crates first; cargo orders the packages itself.
-        run: cargo publish --locked -p odx-core -p odx-config -p odx-git -p odx-forge -p odx-aggregate -p odx-analyze -p odx-platform -p odx-vendor -p odx-dev -p odx-sync -p odx-index -p odx-port -p odx-lint -p odx-verdicts -p odx-dashboard -p git-aggregate-rs -p odx-cli
+        # Library crates first; cargo orders the packages itself. Versions
+        # crates.io already has are left out: a crate's first release is
+        # published by hand (trusted publishing needs the crate to exist),
+        # and a re-run must not fail on what an earlier attempt published.
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "odx-cli") | .version')"
+          args=()
+          for crate in odx-core odx-config odx-git odx-forge odx-aggregate odx-analyze \
+            odx-platform odx-vendor odx-dev odx-sync odx-index odx-port odx-lint \
+            odx-verdicts odx-dashboard git-aggregate-rs odx-cli; do
+            status="$(curl -s -o /dev/null -w '%{http_code}' -A 'odx release (github.com/GetFluvo/odx)' \
+              "https://crates.io/api/v1/crates/$crate/$version")"
+            if [ "$status" = 200 ]; then
+              echo "$crate $version is on crates.io already"
+            else
+              args+=(-p "$crate")
+            fi
+          done
+          if [ "${#args[@]}" -gt 0 ]; then
+            cargo publish --locked "${args[@]}"
+          fi
