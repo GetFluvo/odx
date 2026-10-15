@@ -9,6 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod project;
+
 pub use odoo_lint::diagnostics::Violation;
 pub use odoo_lint::output::OutputFormat;
 
