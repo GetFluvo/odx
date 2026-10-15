@@ -769,7 +769,7 @@ pub struct Dev {
 }
 
 /// `[tool.odx.lint]`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lint {
     /// Paths linted by default.

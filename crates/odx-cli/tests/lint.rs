@@ -169,6 +169,19 @@ fn only_changed_addons() {
     git(root, &["update-ref", "refs/remotes/origin/HEAD", &head]);
     let (exit, out, _) = odx(root, &["lint", "--only-changed"]);
     assert_eq!((exit, out.as_str()), (Exit::Success, "no addon changed\n"));
+    // The same from the configuration, which also names what to lint.
+    let pyproject = std::fs::read_to_string(root.join("pyproject.toml")).unwrap();
+    write(
+        &root.join("pyproject.toml"),
+        &format!("{pyproject}\n[tool.odx.lint]\nonly_changed = true\npaths = [\"modules/oca\"]\n"),
+    );
+    let (exit, out, _) = odx(root, &["lint"]);
+    assert_eq!((exit, out.as_str()), (Exit::Success, "no addon changed\n"));
+    write(&root.join("modules/oca/c/z.py"), "z = 1\n");
+    let (_, out, _) = odx(root, &["lint"]);
+    assert!(out.contains("modules/oca/c/"), "{out}");
+    std::fs::remove_file(root.join("modules/oca/c/z.py")).unwrap();
+    write(&root.join("pyproject.toml"), &pyproject);
     // A change to b, and a new file in a vendored addon odx does not lint.
     write(&root.join("modules/custom/b/models/x.py"), "x = 1\n");
     write(&root.join("modules/oca/c/y.py"), "y = 1\n");
@@ -198,4 +211,90 @@ fn the_embedded_odoo_lint_version() {
         )),
         "{out}"
     );
+}
+
+#[test]
+fn project_rules() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    // b also comes as a package.
+    let pyproject = std::fs::read_to_string(root.join("pyproject.toml")).unwrap();
+    write(
+        &root.join("pyproject.toml"),
+        &(pyproject.replacen(
+            "name = \"p\"\n",
+            "name = \"p\"\ndependencies = [\"odoo-addon-b\"]\n",
+            1,
+        ) + "\n[tool.odx.check_deps]\nprovided = [\"web_enterprise\"]\n"),
+    );
+    git(root, &["init", "--quiet"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "--quiet", "-m", "init"]);
+    git(root, &["tag", "v1"]);
+    // Since v1: a changed without a bump, of another series, depending on
+    // something nobody provides, with a migration folder it never reaches;
+    // b bumped; d new.
+    write(
+        &root.join("modules/custom/a/__manifest__.py"),
+        &MANIFEST
+            .replace("18.0.1.0.0", "17.0.1.0.0")
+            .replace("'base'", "'base', 'gone'"),
+    );
+    git(root, &["commit", "--quiet", "-am", "a to 17.0"]);
+    write(
+        &root.join("modules/custom/a/__manifest__.py"),
+        &MANIFEST.replace("'base'", "'base', 'gone', 'web_enterprise'"),
+    );
+    write(
+        &root.join("modules/custom/a/migrations/18.0.2.0.0/pre-migrate.py"),
+        "",
+    );
+    write(
+        &root.join("modules/custom/b/__manifest__.py"),
+        &MANIFEST.replace("18.0.1.0.0", "18.0.1.0.1"),
+    );
+    write(&root.join("modules/custom/d/__manifest__.py"), MANIFEST);
+    let (exit, out, err) = odx(root, &["lint", "--select", "ODX"]);
+    assert_eq!(exit, Exit::Failure, "{err}");
+    assert_eq!(err, "");
+    let codes: Vec<&str> = out
+        .lines()
+        .filter_map(|line| line.split(": ").nth(1))
+        .collect();
+    assert_eq!(codes, ["ODX005", "ODX002", "ODX003", "ODX004"], "{out}");
+    assert!(out.contains("depends on gone,"), "{out}");
+    assert!(
+        out.contains("a changed since v1 but its version is still 18.0.1.0.0"),
+        "{out}"
+    );
+    assert!(
+        out.contains("b comes from the project and package odoo-addon-b"),
+        "{out}"
+    );
+    // Of another series; and ignoring odx's rules leaves odoo-lint's.
+    write(
+        &root.join("modules/custom/d/__manifest__.py"),
+        &MANIFEST.replace("18.0.1.0.0", "17.0.1.0.0"),
+    );
+    let (_, out, _) = odx(
+        root,
+        &[
+            "lint",
+            "modules/custom/d",
+            "--select",
+            "manifest-version-series",
+        ],
+    );
+    assert!(
+        out.contains("version 17.0.1.0.0 is not of the project's series 18.0"),
+        "{out}"
+    );
+    let (_, out, err) = odx(root, &["lint", "--ignore", "ODX"]);
+    assert!(!out.contains("ODX"), "{out}");
+    assert_eq!(err, "");
+    // Without a tag nothing counts as released.
+    git(root, &["tag", "-d", "v1"]);
+    let (_, out, _) = odx(root, &["lint", "--select", "ODX005"]);
+    assert_eq!(out, "no findings\n");
 }

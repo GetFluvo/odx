@@ -486,7 +486,8 @@ it lints the own addons (`project_addons`) for `odoo_version`, with the own,
 aggregated, vendored and installed (`.venv`) addons on odoo-lint's addons path
 for its checks across modules; outside a project, the current directory with
 odoo-lint's own configuration. Paths given on the command line replace the
-default. Rule selection and settings are odoo-lint's (`[tool.odoo-lint]` in
+default; `[tool.odx.lint] paths` sets it, and `only_changed = true` makes
+`--only-changed` the default. Rule selection and settings are odoo-lint's (`[tool.odoo-lint]` in
 `pyproject.toml`, or `odoo-lint.toml`); `--select` and `--ignore` adjust them
 for one run.
 
@@ -497,6 +498,17 @@ reports what is left; `--diff` prints them as a unified diff and writes
 nothing. `--output-format` is `text`, `json`, `github`, `gitlab` or `sarif`,
 as `odl check` writes them. odx exits 1 when findings are left (or `--diff`
 would change something), 0 otherwise or with `--exit-zero`.
+
+In a project, odx adds its own rules on the own addons, reported like
+odoo-lint's and selected the same way (`--select ODX`, `--ignore ODX005`):
+
+| Code | Name | Finds |
+|---|---|---|
+| `ODX001` | `manifest-version-series` | a manifest `version` not of the project's `odoo_version` |
+| `ODX002` | `depends-unavailable` | a dependency that is neither Odoo's nor provided by the project (own, aggregated, packages, `[tool.odx.check_deps] provided`) |
+| `ODX003` | `migration-folder-version` | a folder in `migrations/` that is no version, of another series, or newer than the manifest version: its scripts never run |
+| `ODX004` | `addon-from-two-sources` | an addon the project gets from two places |
+| `ODX005` | `version-not-bumped` | an addon changed since the last tag (`git describe --tags`) whose version is still the released one: the platform would not update it |
 
 ## Preparing a series upgrade
 

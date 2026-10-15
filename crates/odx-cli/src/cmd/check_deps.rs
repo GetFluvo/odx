@@ -156,8 +156,8 @@ fn scan(dir: PathBuf) -> Scanned {
 
 /// What the project has: who provides which addon, the addons to scan,
 /// the declared addon packages and Python requirements.
-struct Inventory {
-    sources: BTreeMap<String, Vec<String>>,
+pub(crate) struct Inventory {
+    pub(crate) sources: BTreeMap<String, Vec<String>>,
     own: Vec<Scanned>,
     aggregated: Vec<Scanned>,
     /// Addon → distribution, for declared addon packages.
@@ -172,7 +172,7 @@ impl Inventory {
     }
 }
 
-fn inventory(prepared: &Prepared) -> Inventory {
+pub(crate) fn inventory(prepared: &Prepared) -> Inventory {
     let config = &prepared.project.config;
     let root = &prepared.project.root;
     let mut sources: BTreeMap<String, Vec<String>> = BTreeMap::new();
