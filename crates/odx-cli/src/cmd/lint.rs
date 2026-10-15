@@ -129,7 +129,9 @@ fn scope(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Scope, Report> {
 /// The files changed against `base`, committed or not, untracked ones
 /// included, as absolute paths.
 fn changed(ctx: &Context<'_>, base: Option<&str>) -> Result<Vec<PathBuf>, Report> {
-    let top = output_of(&git(ctx).args(["rev-parse", "--show-toplevel"])).map_err(|e| {
+    // The top as a path from here, so it is spelled like the project's
+    // paths (git resolves symlinks and short names).
+    let up = output_of(&git(ctx).args(["rev-parse", "--show-cdup"])).map_err(|e| {
         Report::error(
             Exit::Usage,
             format!("--only-changed needs a git repository: {e}"),
@@ -157,7 +159,10 @@ fn changed(ctx: &Context<'_>, base: Option<&str>) -> Result<Vec<PathBuf>, Report
     let untracked =
         output_of(&git(ctx).args(["ls-files", "--others", "--exclude-standard", "--full-name"]))
             .unwrap_or_default();
-    let top = PathBuf::from(top);
+    let mut top = ctx.dir.clone();
+    for _ in up.split('/').filter(|part| *part == "..") {
+        top.pop();
+    }
     Ok(committed
         .lines()
         .chain(local.lines())
