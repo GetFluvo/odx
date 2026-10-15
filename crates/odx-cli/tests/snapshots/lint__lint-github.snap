@@ -1,0 +1,8 @@
+---
+source: crates/odx-cli/tests/lint.rs
+expression: out
+---
+::warning file=modules/oca/c/__manifest__.py,line=1,col=1,title=C8101 (manifest-required-author)::One of the following authors must be present in manifest: 'Odoo Community Association (OCA)'
+::warning file=modules/oca/c/__manifest__.py,line=1,col=1,title=C8102 (manifest-required-key)::Missing required key "license" in manifest file
+::warning file=modules/oca/c/__manifest__.py,line=1,col=1,title=C8112 (missing-readme)::Missing ./README.rst file. Template here: https://github.com/OCA/maintainer-tools/blob/master/template/module/README.rst
+::warning file=modules/oca/c/__manifest__.py,line=5,col=5,title=C8116 (manifest-superfluous-key)::Manifest superfluous key "installable". It is the same as the default value: True. Better remove it
