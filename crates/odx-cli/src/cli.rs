@@ -965,13 +965,26 @@ pub struct PromoteArgs {
 pub enum EnvCommand {
     /// The environments with their branches, series and promotion edges.
     List,
-    /// Compare the pins of two environments.
-    Diff {
-        /// First environment.
-        a: String,
-        /// Second environment.
-        b: String,
-    },
+    /// Compare what two environments run, addon by addon.
+    Diff(EnvDiffArgs),
+}
+
+/// Arguments of `odx env diff`.
+#[derive(Debug, Args)]
+pub struct EnvDiffArgs {
+    /// First environment, or a branch of one.
+    pub a: String,
+    /// Second environment, or a branch of one.
+    pub b: String,
+    /// The remote whose branches are compared (local branches when it has none).
+    #[arg(long, value_name = "NAME", default_value = "origin")]
+    pub remote: String,
+    /// Compare two vendor manifests (`.odx/vendor.lock`) of the environments instead.
+    #[arg(long, num_args = 2, value_names = ["A", "B"], conflicts_with = "installed")]
+    pub vendored: Option<Vec<PathBuf>>,
+    /// Compare the wheels installed in two virtual environments (or site-packages) instead.
+    #[arg(long, num_args = 2, value_names = ["A", "B"])]
+    pub installed: Option<Vec<PathBuf>>,
 }
 
 /// `odx bot` subcommands.

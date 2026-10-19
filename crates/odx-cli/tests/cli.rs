@@ -19,11 +19,7 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 }
 
 /// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
-const STUBS: &[(&[&str], u8)] = &[
-    (&["promote", "contract"], 10),
-    (&["env", "diff", "test", "prod"], 10),
-    (&["bot", "run"], 11),
-];
+const STUBS: &[(&[&str], u8)] = &[(&["promote", "contract"], 10), (&["bot", "run"], 11)];
 
 #[test]
 fn stubbed_commands_report_their_phase_with_usage_exit() {
@@ -103,6 +99,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "migrate", "--abort"][..], "migrate", 8),
         (&["odx", "port", "--abort"][..], "port", 8),
         (&["odx", "lint"][..], "lint", 9),
+        (&["odx", "env", "list"][..], "env", 10),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));

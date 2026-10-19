@@ -1,0 +1,478 @@
+//! `odx env diff`: what two environments run, unit by unit, read from
+//! their branches through git without checking anything out.
+
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use odx_config::environments::{Environment, Model};
+use odx_config::lock::Lockfile;
+use odx_config::uvlock::UvLock;
+use odx_core::{Exit, Invocation};
+use odx_env::{Change, Entry, Kind, Unit, diff, locked, packages};
+use odx_platform::installed::{record_hash, scan, site_packages};
+use odx_vendor::record::VendorRecord;
+
+use super::aggregate::prepare;
+use super::env::model;
+use super::{Report, output_of};
+use crate::Context;
+use crate::cli::{EnvDiffArgs, GlobalArgs};
+
+/// One side of the comparison.
+#[derive(Debug)]
+struct Side {
+    env: Environment,
+    /// The git ref or file it was read from.
+    from: String,
+    units: Vec<Unit>,
+}
+
+/// `odx env diff`.
+pub(crate) fn run_diff(args: &EnvDiffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
+    compare(args, global, ctx).unwrap_or_else(|report| report)
+}
+
+fn compare(args: &EnvDiffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
+    let prepared = prepare(global, ctx)?;
+    let root = &prepared.project.root;
+    let model = model(&prepared.project.config)?;
+    let envs = [environment(&model, &args.a)?, environment(&model, &args.b)?];
+    // clap passes exactly two paths to --vendored and --installed.
+    let (sides, branch_specific) = match (args.vendored.as_deref(), args.installed.as_deref()) {
+        (Some([a, b]), _) => (
+            sides_of(envs, [a, b], &|path| vendored(ctx, path))?,
+            Vec::new(),
+        ),
+        (_, Some([a, b])) => (
+            sides_of(envs, [a, b], &|path| installed(ctx, path))?,
+            Vec::new(),
+        ),
+        _ => {
+            let [a, b] = envs;
+            let a = read_side(root, a, &args.remote)?;
+            let b = read_side(root, b, &args.remote)?;
+            let specific = differing(root, &model.branch_specific, &a.from, &b.from);
+            ([a, b], specific)
+        }
+    };
+    let entries = diff(&sides[0].units, &sides[1].units);
+    let out = if global.json {
+        json(&sides, &entries, &branch_specific)
+    } else {
+        text(&sides, &entries, &branch_specific)
+    };
+    Ok(Report {
+        out,
+        ..Report::default()
+    })
+}
+
+/// The environment `arg` names, or the one whose branch it is (with that
+/// branch).
+fn environment(model: &Model, arg: &str) -> Result<Environment, Report> {
+    if let Some(env) = model.get(arg) {
+        if !env.is_literal() {
+            return Err(Report::error(
+                Exit::Usage,
+                format!(
+                    "the branch of {arg} is a pattern ({}): name one of its branches instead",
+                    env.branch
+                ),
+            ));
+        }
+        return Ok(env.clone());
+    }
+    let env = model.of_branch(arg, None).ok_or_else(|| {
+        Report::error(
+            Exit::Usage,
+            format!("{arg} is no environment, nor a branch of one (`odx env list` shows them)"),
+        )
+    })?;
+    Ok(Environment {
+        branch: arg.to_owned(),
+        ..env.clone()
+    })
+}
+
+/// Sides read from a file each, by `read`.
+fn sides_of(
+    envs: [Environment; 2],
+    paths: [&PathBuf; 2],
+    read: &dyn Fn(&Path) -> Result<Vec<Unit>, Report>,
+) -> Result<[Side; 2], Report> {
+    let [a, b] = envs;
+    let side = |env: Environment, path: &Path| -> Result<Side, Report> {
+        Ok(Side {
+            units: read(path)?,
+            from: path.display().to_string(),
+            env,
+        })
+    };
+    Ok([side(a, paths[0])?, side(b, paths[1])?])
+}
+
+fn vendored(ctx: &Context<'_>, path: &Path) -> Result<Vec<Unit>, Report> {
+    let path = ctx.dir.join(path);
+    let failed = |e: String| Report::error(Exit::Failure, format!("{}: {e}", path.display()));
+    let bytes = ctx.fs.read(&path).map_err(|e| failed(e.to_string()))?;
+    let record = VendorRecord::parse(&String::from_utf8_lossy(&bytes)).map_err(failed)?;
+    Ok(record
+        .addons
+        .into_iter()
+        .map(|addon| Unit {
+            kind: Kind::Addon,
+            name: addon.name,
+            version: Some(addon.written_version),
+            source: addon.package,
+            pin: addon.tree,
+        })
+        .collect())
+}
+
+fn installed(ctx: &Context<'_>, path: &Path) -> Result<Vec<Unit>, Report> {
+    let dir = ctx.dir.join(path);
+    let site = site_packages(&dir).ok_or_else(|| {
+        Report::error(
+            Exit::Failure,
+            format!(
+                "{}: no site-packages with installed distributions",
+                dir.display()
+            ),
+        )
+    })?;
+    Ok(scan(&site)
+        .into_iter()
+        .map(|distribution| {
+            let files: String = distribution
+                .record
+                .iter()
+                .filter_map(|entry| Some(format!("{} {}\n", entry.path, entry.hash.as_ref()?)))
+                .collect();
+            Unit {
+                kind: Kind::Package,
+                name: distribution.name,
+                version: Some(distribution.version),
+                source: if distribution.commit.is_some() {
+                    "git".to_owned()
+                } else {
+                    "installed".to_owned()
+                },
+                pin: distribution
+                    .commit
+                    .unwrap_or_else(|| record_hash(files.as_bytes())),
+            }
+        })
+        .collect())
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+    output_of(&Invocation::new("git").arg("-C").arg(root).args(args))
+}
+
+/// The git ref of `env`'s branch: fetched from its own repository, else
+/// `<remote>/<branch>`, else the local branch.
+fn reference(root: &Path, env: &Environment, remote: &str) -> Result<String, Report> {
+    if let Some(repo) = &env.repo {
+        let local = format!("refs/odx/env/{}", env.name);
+        let spec = format!("+refs/heads/{}:{local}", env.branch);
+        git(root, &["fetch", "--quiet", "--no-tags", repo, &spec]).map_err(|e| {
+            Report::error(
+                Exit::Failure,
+                format!("cannot fetch {} of {repo}: {e}", env.branch),
+            )
+        })?;
+        return Ok(local);
+    }
+    [
+        format!("refs/remotes/{remote}/{}", env.branch),
+        format!("refs/heads/{}", env.branch),
+    ]
+    .into_iter()
+    .find(|candidate| {
+        git(
+            root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{candidate}^{{commit}}"),
+            ],
+        )
+        .is_ok()
+    })
+    .ok_or_else(|| {
+        Report::error(
+            Exit::Failure,
+            format!(
+                "{}: neither {remote}/{branch} nor {branch} is here; fetch it first",
+                env.name,
+                branch = env.branch
+            ),
+        )
+    })
+}
+
+/// `path` (relative to the project) at `reference`, none when it is not
+/// there.
+fn show(root: &Path, reference: &str, path: &str) -> Option<String> {
+    git(root, &["show", &format!("{reference}:./{path}")]).ok()
+}
+
+fn read_side(root: &Path, env: Environment, remote: &str) -> Result<Side, Report> {
+    let from = reference(root, &env, remote)?;
+    let invalid = |what: &str, e: String| {
+        Report::error(Exit::Failure, format!("{what} of {}: {e}", env.name))
+    };
+    let text = show(root, &from, "pyproject.toml")
+        .ok_or_else(|| invalid("pyproject.toml", format!("missing on {from}")))?;
+    let config = odx_config::parse_pyproject(&text, Path::new("pyproject.toml"))
+        .map_err(|e| invalid("pyproject.toml", e.to_string()))?
+        .ok_or_else(|| invalid("pyproject.toml", "no [tool.odx]".to_owned()))?
+        .config;
+    let mut units = addons(root, &from, &config.project_addon_dirs());
+    if let Some(text) = show(root, &from, "uv.lock") {
+        units.extend(packages(
+            &UvLock::parse(&text).map_err(|e| invalid("uv.lock", e))?,
+        ));
+    }
+    let lockfile = config.lockfile().to_string_lossy().replace('\\', "/");
+    if let Some(text) = show(root, &from, &lockfile) {
+        let lock = Lockfile::parse(&text).map_err(|e| invalid(&lockfile, e.to_string()))?;
+        units.extend(locked(&lock));
+    }
+    Ok(Side { env, from, units })
+}
+
+/// The project's own addons at `reference`: each folder directly in one of
+/// `dirs` with a manifest, pinned by its tree.
+fn addons(root: &Path, reference: &str, dirs: &[PathBuf]) -> Vec<Unit> {
+    let mut units = Vec::new();
+    for dir in dirs {
+        let dir = dir.to_string_lossy().replace('\\', "/");
+        let dir = dir.trim_end_matches('/');
+        let prefix = if dir == "." || dir.is_empty() {
+            String::new()
+        } else {
+            format!("{dir}/")
+        };
+        let listed = git(
+            root,
+            &[
+                "ls-tree",
+                "-d",
+                "--format=%(objectname) %(path)",
+                reference,
+                &format!("./{prefix}"),
+            ],
+        )
+        .unwrap_or_default();
+        units.extend(
+            listed
+                .lines()
+                .filter_map(|line| line.split_once(' '))
+                .filter_map(|(tree, path)| {
+                    let manifest = ["__manifest__.py", "__openerp__.py"]
+                        .iter()
+                        .find_map(|name| show(root, reference, &format!("{path}/{name}")))?;
+                    Some(Unit {
+                        kind: Kind::Addon,
+                        name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+                        version: odx_analyze::sniff::manifest_version(&manifest),
+                        source: "project".to_owned(),
+                        pin: tree.to_owned(),
+                    })
+                }),
+        );
+    }
+    units
+}
+
+/// The files matching `patterns` that differ between `a` and `b`.
+fn differing(root: &Path, patterns: &[String], a: &str, b: &str) -> Vec<String> {
+    if patterns.is_empty() {
+        return Vec::new();
+    }
+    let mut args = vec!["diff", "--name-only", a, b, "--"];
+    let specs: Vec<String> = patterns
+        .iter()
+        .map(|pattern| format!(":(glob){pattern}"))
+        .collect();
+    args.extend(specs.iter().map(String::as_str));
+    // Both refs were resolved already.
+    git(root, &args)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `pin` shortened for reading: commits and trees to 7 characters, hashes
+/// to their algorithm and 7 characters.
+fn short(pin: &str) -> String {
+    let (prefix, digest) = pin
+        .split_once([':', '='])
+        .filter(|(algorithm, _)| algorithm.starts_with("sha"))
+        .map_or(("", pin), |(algorithm, digest)| (algorithm, digest));
+    if digest.len() > 12
+        && digest
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        let cut: String = digest.chars().take(7).collect();
+        if prefix.is_empty() {
+            cut
+        } else {
+            format!("{prefix}:{cut}")
+        }
+    } else {
+        pin.to_owned()
+    }
+}
+
+fn describe(unit: &Unit, with_source: bool) -> String {
+    let mut parts = Vec::new();
+    if with_source {
+        parts.push(unit.source.clone());
+    }
+    parts.extend(unit.version.clone());
+    let pin = short(&unit.pin);
+    match unit.kind {
+        Kind::Addon | Kind::Repository => parts.push(format!("tree {pin}")),
+        Kind::Odoo => parts.push(format!("rev {pin}")),
+        Kind::Package if unit.version.as_deref() != Some(unit.pin.as_str()) => parts.push(pin),
+        Kind::Package => {}
+    }
+    parts.join(" ")
+}
+
+fn label(entry: &Entry) -> String {
+    match entry.kind {
+        Kind::Repository => format!("repository {}", entry.name),
+        _ => entry.name.clone(),
+    }
+}
+
+fn text(sides: &[Side; 2], entries: &[Entry], branch_specific: &[String]) -> String {
+    let [a, b] = sides;
+    let mut out = format!(
+        "{} ({}) and {} ({})\n",
+        a.env.name, a.from, b.env.name, b.from
+    );
+    if a.env.series != b.env.series {
+        let _ = writeln!(
+            out,
+            "series differ: {} runs {}, {} runs {}",
+            a.env.name, a.env.series, b.env.name, b.env.series
+        );
+    }
+    let sections = [
+        (Change::Ahead, format!("newer in {}", a.env.name)),
+        (Change::Behind, format!("older in {}", a.env.name)),
+        (Change::Changed, "changed".to_owned()),
+        (Change::SourceChanged, "from another source".to_owned()),
+        (Change::OnlyInA, format!("only in {}", a.env.name)),
+        (Change::OnlyInB, format!("only in {}", b.env.name)),
+    ];
+    let width = entries
+        .iter()
+        .filter(|entry| entry.change != Change::Identical)
+        .map(|entry| label(entry).chars().count())
+        .max()
+        .unwrap_or(0);
+    for (change, title) in sections {
+        let listed: Vec<&Entry> = entries.iter().filter(|e| e.change == change).collect();
+        if listed.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "{title}:");
+        for entry in listed {
+            let with_source = change == Change::SourceChanged;
+            let side = |unit: &Option<Unit>| {
+                unit.as_ref()
+                    .map_or_else(|| "-".to_owned(), |unit| describe(unit, with_source))
+            };
+            let _ = writeln!(
+                out,
+                "  {:width$}  {} | {}",
+                label(entry),
+                side(&entry.a),
+                side(&entry.b)
+            );
+        }
+    }
+    if !branch_specific.is_empty() {
+        let _ = writeln!(out, "branch-specific files that differ (never promoted):");
+        for file in branch_specific {
+            let _ = writeln!(out, "  {file}");
+        }
+    }
+    let identical = entries
+        .iter()
+        .filter(|entry| entry.change == Change::Identical)
+        .count();
+    let _ = if identical == entries.len() {
+        writeln!(out, "identical ({identical} pinned)")
+    } else {
+        writeln!(
+            out,
+            "{} differ, {identical} identical",
+            entries.len() - identical
+        )
+    };
+    out
+}
+
+fn json(sides: &[Side; 2], entries: &[Entry], branch_specific: &[String]) -> String {
+    let side = |side: &Side| {
+        serde_json::json!({
+            "env": side.env.name,
+            "branch": side.env.branch,
+            "series": side.env.series,
+            "from": side.from,
+        })
+    };
+    let unit = |unit: &Option<Unit>| {
+        unit.as_ref().map(|unit| {
+            serde_json::json!({
+                "version": unit.version,
+                "source": unit.source,
+                "pin": unit.pin,
+            })
+        })
+    };
+    let entries: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "kind": entry.kind.name(),
+                "name": entry.name,
+                "change": entry.change.name(),
+                "a": unit(&entry.a),
+                "b": unit(&entry.b),
+            })
+        })
+        .collect();
+    let value = serde_json::json!({
+        "schema": 1,
+        "a": side(&sides[0]),
+        "b": side(&sides[1]),
+        "series_differ": sides[0].env.series != sides[1].env.series,
+        "entries": entries,
+        "branch_specific": branch_specific,
+    });
+    format!("{value:#}\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_pins() {
+        assert_eq!(short("0123456789abcdef0123"), "0123456");
+        assert_eq!(short("sha256:0123456789abcdef"), "sha256:0123456");
+        assert_eq!(short("sha256=AbCd-_0123456789"), "sha256:AbCd-_0");
+        assert_eq!(short("abc"), "abc");
+        assert_eq!(short("../local/path/somewhere"), "../local/path/somewhere");
+    }
+}
