@@ -73,8 +73,8 @@ You need:
   ```console
   $ cargo install just cargo-llvm-cov cargo-deny cargo-machete cargo-msrv typos-cli cocogitto
   $ rustup component add rustfmt clippy llvm-tools-preview
-  $ uv tool install pre-commit
-  $ pre-commit install --hook-type pre-commit --hook-type commit-msg
+  $ uv tool install prek    # or pre-commit; both read .pre-commit-config.yaml
+  $ prek install --hook-type pre-commit --hook-type commit-msg
   ```
 
 - Optional, for the full integration tests: [mergiraf] and `odl`

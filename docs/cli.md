@@ -953,6 +953,27 @@ Use it as a pre-commit hook, as the first step of a build job, and as the
 last step before a deployment. `odx lock --migrate` rewrites `odx.lock` in
 the current format after an odx upgrade changed it.
 
+### Pre-commit hooks
+
+The odx repository ships hooks (from v0.0.5) for [pre-commit] and [prek], which read the
+same configuration:
+
+```yaml
+repos:
+  - repo: https://github.com/getfluvo/odx
+    rev: v0.0.5
+    hooks:
+      - id: odx-verify       # on lockfile and pyproject.toml changes
+      - id: odx-check-deps   # on manifest and pyproject.toml changes
+      - id: odx-lint         # the staged files; args: [--fix] applies the safe fixes
+```
+
+They run the `odx` on `PATH` (`uv tool install odx-cli`), so no Rust
+toolchain is needed. Place `odx-verify` after hooks that rewrite `uv.lock`.
+
+[pre-commit]: https://pre-commit.com
+[prek]: https://github.com/j178/prek
+
 Credentials written into URLs (`https://user:token@host/…`) are replaced by
 `***` in everything odx prints.
 

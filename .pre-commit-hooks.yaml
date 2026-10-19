@@ -1,0 +1,23 @@
+# Hooks for projects managed by odx, for pre-commit and prek. They run the
+# `odx` on PATH (`uv tool install odx-cli`), so no Rust toolchain is needed.
+- id: odx-verify
+  name: odx verify
+  description: The checkout is what the lockfiles describe.
+  entry: odx verify
+  language: system
+  files: ^(pyproject\.toml|odx\.lock|uv\.lock)$
+  pass_filenames: false
+- id: odx-check-deps
+  name: odx check-deps
+  description: Every manifest dependency is Odoo's or declared in pyproject.toml.
+  entry: odx check-deps
+  language: system
+  files: (^|/)(__manifest__\.py|__openerp__\.py|pyproject\.toml)$
+  pass_filenames: false
+- id: odx-lint
+  name: odx lint
+  description: odoo-lint and odx's project rules on the changed files.
+  entry: odx lint
+  language: system
+  types_or: [python, xml, csv, javascript]
+  require_serial: true
