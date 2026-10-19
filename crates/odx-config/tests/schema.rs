@@ -169,17 +169,26 @@ fn environment_enums() {
         ("explicit", Preset::Explicit),
     ] {
         assert_eq!(
-            with("environments", "preset", &format!("\"{value}\""))
-                .environments
-                .unwrap()
-                .preset,
+            // Every preset with one environment of its own (explicit needs one).
+            with(
+                "environments",
+                "preset",
+                &format!("\"{value}\"\n[tool.odx.environments.env.a]\nbranch = \"a\"")
+            )
+            .environments
+            .unwrap()
+            .preset,
             Some(expected)
         );
     }
-    let roles = with("environments.env.a", "role", "\"dev\"");
+    let roles = with("environments.env.a", "role", "\"dev\"\nbranch = \"a\"");
     assert_eq!(roles.environments.unwrap().env["a"].role, Some(Role::Dev));
     for (value, expected) in [("test", Role::Test), ("uat", Role::Uat)] {
-        let config = with("environments.env.a", "role", &format!("\"{value}\""));
+        let config = with(
+            "environments.env.a",
+            "role",
+            &format!("\"{value}\"\nbranch = \"a\""),
+        );
         assert_eq!(config.environments.unwrap().env["a"].role, Some(expected));
     }
 }

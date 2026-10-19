@@ -21,7 +21,7 @@ fn run(args: &[&str]) -> (Exit, String, String) {
 /// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
 const STUBS: &[(&[&str], u8)] = &[
     (&["promote", "contract"], 10),
-    (&["env", "diff", "19-test", "19-prod"], 10),
+    (&["env", "diff", "test", "prod"], 10),
     (&["bot", "run"], 11),
 ];
 

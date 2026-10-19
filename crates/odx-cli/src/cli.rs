@@ -136,7 +136,7 @@ pub enum Command {
     Migrate(MigrateArgs),
     /// Copy exact pins (and optionally code) of modules or a feature between environments.
     Promote(PromoteArgs),
-    /// Compare environments.
+    /// List and compare environments.
     #[command(subcommand)]
     Env(EnvCommand),
 
@@ -963,6 +963,8 @@ pub struct PromoteArgs {
 /// `odx env` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum EnvCommand {
+    /// The environments with their branches, series and promotion edges.
+    List,
     /// Compare the pins of two environments.
     Diff {
         /// First environment.

@@ -10,6 +10,7 @@ pub mod compat;
 pub mod deps;
 mod duration;
 pub mod edit;
+pub mod environments;
 mod error;
 mod load;
 pub mod lock;
