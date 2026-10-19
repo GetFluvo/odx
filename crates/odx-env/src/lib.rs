@@ -15,6 +15,9 @@ use std::str::FromStr as _;
 use odx_config::lock::Lockfile;
 use odx_config::uvlock::{UvLock, UvPackage};
 
+pub mod promote;
+pub mod search;
+
 /// What a unit is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
@@ -121,14 +124,16 @@ pub fn diff(a: &[Unit], b: &[Unit]) -> Vec<Entry> {
         .map(|((kind, name), (a, b))| Entry {
             kind,
             name: name.to_owned(),
-            change: change(a, b),
+            change: compare(a, b),
             a: a.cloned(),
             b: b.cloned(),
         })
         .collect()
 }
 
-fn change(a: Option<&Unit>, b: Option<&Unit>) -> Change {
+/// How `b` differs from `a`.
+#[must_use]
+pub fn compare(a: Option<&Unit>, b: Option<&Unit>) -> Change {
     let (a, b) = match (a, b) {
         (Some(a), Some(b)) => (a, b),
         (Some(_), None) => return Change::OnlyInA,

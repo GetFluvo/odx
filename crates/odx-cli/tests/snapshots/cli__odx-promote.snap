@@ -4,7 +4,7 @@ expression: cmd.render_long_help().to_string()
 ---
 Copy exact pins (and optionally code) of modules or a feature between environments
 
-Usage: odx promote [OPTIONS] [MODULES]...
+Usage: odx promote [OPTIONS] --to <ENV> [MODULES]...
 
 Arguments:
   [MODULES]...
@@ -21,43 +21,48 @@ Options:
           The pyproject.toml or repos.yaml to use
 
       --search <TEXT>
-          Find modules by functional description and show candidates
-
-      --from <ENV>
-          Source environment
+          Find modules and feature sets by functional description; lists candidates
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
+      --select <NAMES>
+          The candidates of --search to promote
+
+      --from <ENV>
+          Source environment [default: the one environment allowed to promote into --to]
+
       --offline
           Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
-      --to <ENV>
-          Target environment
 
       --fresh
           Ignore cached data; refresh everything before answering
 
-      --with-code
-          Also promote code by patch-id
+      --to <ENV>
+          Target environment
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
 
-      --no-with-odoo
-          Do not promote the Odoo core revision
+      --remote <NAME>
+          The remote whose branches are read (local branches when it has none)
+          
+          [default: origin]
 
-      --dry-run
-          Show the plan without changing anything
+      --allow-downgrade
+          Copy an older package over a newer one
 
       --refresh-index
           Rebuild the addon index for the series involved
 
+      --allow-source-change
+          Replace an addon that comes from another source on the target
+
       --json
           Machine-readable output on stdout
 
-      --yes
-          Apply without confirmation
+      --no-with-odoo
+          Leave the Odoo core revision of the target as it is
 
   -v, --verbose...
           Increase log verbosity (repeatable)
