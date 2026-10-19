@@ -66,6 +66,14 @@ fn compare(args: &EnvDiffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     })
 }
 
+/// `odx env diff` of two checkouts, as text.
+pub(crate) fn between(root: &Path, patterns: &[String], a: Checkout, b: Checkout) -> String {
+    let specific = differing(root, patterns, &a.from, &b.from);
+    let sides = [side(a), side(b)];
+    let entries = diff(&sides[0].units, &sides[1].units);
+    text(&sides, &entries, &specific)
+}
+
 /// The units of a checkout.
 fn side(checkout: Checkout) -> Side {
     let mut units: Vec<Unit> = checkout

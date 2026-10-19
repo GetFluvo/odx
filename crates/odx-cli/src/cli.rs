@@ -932,8 +932,18 @@ pub enum PortCommand {
 )]
 pub struct PromoteArgs {
     /// Modules to promote, with their dependency closure.
-    #[arg(required_unless_present_any = ["feature", "search"])]
+    #[arg(required_unless_present_any = ["feature", "search", "from_pr", "rollback"])]
     pub modules: Vec<String>,
+    /// Promote the project addons a pull request merged into the source changed.
+    #[arg(long, value_name = "N", conflicts_with_all = ["modules", "feature", "search"])]
+    pub from_pr: Option<u64>,
+    /// Revert the promotion pull request N merged into --to.
+    #[arg(
+        long,
+        value_name = "N",
+        conflicts_with_all = ["modules", "feature", "search", "from_pr", "from", "with_code", "include_branch_specific"]
+    )]
+    pub rollback: Option<u64>,
     /// Promote a feature set from [tool.odx.features].
     #[arg(long, value_name = "NAME", conflicts_with = "search")]
     pub feature: Option<String>,

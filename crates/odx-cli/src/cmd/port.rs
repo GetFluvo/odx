@@ -249,6 +249,7 @@ fn open_pr(
             upstream: &upstream,
             push_remote,
             draft: true,
+            replace: false,
             title: field("title"),
             body,
         },

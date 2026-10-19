@@ -93,6 +93,8 @@ pub(crate) struct Proposed<'a> {
     pub(crate) push_remote: Option<&'a str>,
     /// Open it as a draft.
     pub(crate) draft: bool,
+    /// The branch is odx's own: replace what the remote has of it.
+    pub(crate) replace: bool,
     pub(crate) title: String,
     pub(crate) body: String,
 }
@@ -129,7 +131,11 @@ fn push_and_open(
         let url = output_of(&git(ctx).args(["config", "--get", &key])).unwrap_or_default();
         (push_url(&url, &fork), fork)
     };
-    let refspec = format!("HEAD:refs/heads/{}", proposed.branch);
+    let refspec = format!(
+        "{}HEAD:refs/heads/{}",
+        if proposed.replace { "+" } else { "" },
+        proposed.branch
+    );
     super::run_checked(
         &git(ctx).args(["push", "--quiet", &target, &refspec]),
         "git push",

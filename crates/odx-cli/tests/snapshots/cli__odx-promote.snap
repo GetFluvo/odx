@@ -14,17 +14,29 @@ Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
-      --feature <NAME>
-          Promote a feature set from [tool.odx.features]
+      --from-pr <N>
+          Promote the project addons a pull request merged into the source changed
 
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
-      --search <TEXT>
-          Find modules and feature sets by functional description; lists candidates
+      --rollback <N>
+          Revert the promotion pull request N merged into --to
+
+      --feature <NAME>
+          Promote a feature set from [tool.odx.features]
 
   -j, --jobs <N>
           Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --search <TEXT>
+          Find modules and feature sets by functional description; lists candidates
+
+      --fresh
+          Ignore cached data; refresh everything before answering
 
       --select <NAMES>
           The candidates of --search to promote
@@ -32,17 +44,17 @@ Options:
       --from <ENV>
           Source environment [default: the one environment allowed to promote into --to]
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
 
-      --fresh
-          Ignore cached data; refresh everything before answering
+      --refresh-index
+          Rebuild the addon index for the series involved
 
       --to <ENV>
           Target environment
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
+      --json
+          Machine-readable output on stdout
 
       --remote <NAME>
           The remote whose branches are read (local branches when it has none)
@@ -52,23 +64,17 @@ Options:
       --allow-downgrade
           Copy an older package over a newer one
 
-      --refresh-index
-          Rebuild the addon index for the series involved
+  -v, --verbose...
+          Increase log verbosity (repeatable)
 
       --allow-source-change
           Replace an addon that comes from another source on the target
 
-      --json
-          Machine-readable output on stdout
+  -q, --quiet
+          Errors only
 
       --no-with-odoo
           Leave the Odoo core revision of the target as it is
-
-  -v, --verbose...
-          Increase log verbosity (repeatable)
-
-  -q, --quiet
-          Errors only
 
       --with-code
           Cherry-pick the source's commits on the closure's project addons that the target lacks

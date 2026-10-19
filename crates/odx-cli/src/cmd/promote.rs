@@ -15,6 +15,8 @@ use super::aggregate::prepare;
 use super::checkout::{Checkout, environment, read};
 use super::env::model;
 use super::promote_apply::{Applied, addon_paths, apply, missing_commits};
+use super::promote_forge::{merged, touched};
+use super::promote_rollback::rollback;
 use super::propose::{opened_json, opened_text};
 use crate::Context;
 use crate::cli::{GlobalArgs, PromoteArgs};
@@ -34,6 +36,9 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     let config = &prepared.project.config;
     let model = model(config)?;
     let to = environment(&model, &args.to)?;
+    if args.rollback.is_some() {
+        return rollback(ctx, root, &model, args, to, global);
+    }
     let from_name = match &args.from {
         Some(name) => name.clone(),
         None => model
@@ -51,6 +56,13 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         }
         (Some(_), _) => args.select.clone(),
         (None, Some(feature)) => feature_modules(&from, feature)?,
+        (None, None) if args.from_pr.is_some() => from_pr(
+            ctx,
+            root,
+            &from,
+            &args.remote,
+            args.from_pr.unwrap_or_default(),
+        )?,
         (None, None) => args.modules.clone(),
     };
     let defaults = config.promote.as_ref();
@@ -147,6 +159,36 @@ fn addons(checkout: &Checkout) -> Vec<Addon> {
             }
         })
         .collect()
+}
+
+/// The project addons pull request `number`, merged into the source,
+/// changed.
+fn from_pr(
+    ctx: &Context<'_>,
+    root: &std::path::Path,
+    from: &Checkout,
+    remote: &str,
+    number: u64,
+) -> Result<Vec<String>, Report> {
+    let found = merged(ctx, root, &from.env, remote, number)?;
+    let files = touched(root, &found.commits);
+    let addons: Vec<String> = from
+        .addons
+        .iter()
+        .filter(|addon| {
+            files
+                .iter()
+                .any(|file| file.starts_with(&format!("{}/", addon.path)))
+        })
+        .map(|addon| addon.name.clone())
+        .collect();
+    if addons.is_empty() {
+        return Err(usage(format!(
+            "#{number} changed no project addon of {}",
+            from.env.name
+        )));
+    }
+    Ok(addons)
 }
 
 fn feature_modules(from: &Checkout, feature: &str) -> Result<Vec<String>, Report> {
