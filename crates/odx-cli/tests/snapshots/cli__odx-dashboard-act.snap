@@ -4,7 +4,7 @@ expression: cmd.render_long_help().to_string()
 ---
 Take one entry's action
 
-Usage: odx dashboard act [OPTIONS] <--include|--port|--mute|--drop|--follow> <ID>
+Usage: odx dashboard act [OPTIONS] <--include|--port|--mute|--drop|--follow|--promote> <ID>
 
 Arguments:
   <ID>
@@ -27,7 +27,7 @@ Options:
           Override the number of parallel jobs
 
       --open-pr
-          With --port: then push the branch and open a draft pull request
+          With --port: then push the branch and open a draft pull request; with --promote: write the promotion and open its pull request
 
       --mute
           Record a mute (or, with an organisation kind, a verdict)
@@ -47,14 +47,17 @@ Options:
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
 
-      --reason <REASON>
-          Why (mandatory with --mute)
+      --promote
+          Promote the addon into the next environment (the plan; --open-pr writes it)
 
       --refresh-index
           Rebuild the addon index for the series involved
 
       --json
           Machine-readable output on stdout
+
+      --reason <REASON>
+          Why (mandatory with --mute)
 
       --kind <KIND>
           Kind of the mute or verdict

@@ -301,9 +301,9 @@ fn sections_and_renderers() {
         value[0]["sections"][0]["entries"][0]["id"],
         "fwd:OCA/pos#2->17.0"
     );
-    let (code, _, err) = setup.odx(&["dashboard", "--section", "drift"]);
+    let (code, _, err) = setup.odx(&["dashboard", "--section", "nope"]);
     assert_eq!(code, 2);
-    assert!(err.contains("no section \"drift\""), "{err}");
+    assert!(err.contains("no section \"nope\""), "{err}");
     let (code, _, err) = setup.odx(&["dashboard", "--format", "tui"]);
     assert_eq!(code, 2);
     if cfg!(feature = "tui") {

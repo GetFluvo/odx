@@ -101,7 +101,8 @@ impl App {
             tab: 0,
             row: 0,
             prompt: None,
-            status: "i include  p port  m mute  d drop  f follow  r refresh  q quit".to_owned(),
+            status: "i include  p port  m mute  d drop  f follow  P promote  r refresh  q quit"
+                .to_owned(),
         };
         app.load(dashboards);
         app
@@ -156,11 +157,13 @@ impl App {
                 self.status = format!("port {id} upstream? (y to confirm, anything else cancels)");
                 None
             }
-            Action::Include | Action::Drop | Action::Follow => Some(Command::Act {
-                id,
-                action,
-                reason: None,
-            }),
+            Action::Include | Action::Drop | Action::Follow | Action::Promote => {
+                Some(Command::Act {
+                    id,
+                    action,
+                    reason: None,
+                })
+            }
         }
     }
 
@@ -224,6 +227,7 @@ impl App {
                 'm' => self.act(Action::Mute),
                 'd' => self.act(Action::Drop),
                 'f' => self.act(Action::Follow),
+                'P' => self.act(Action::Promote),
                 _ => None,
             },
             (None, Key::Enter | Key::Backspace) => None,
@@ -344,6 +348,11 @@ mod tests {
                     fetched_at: 0,
                     entries: vec![entry("fwd:a#3->17.0", &[Action::Port, Action::Mute])],
                 },
+                Section {
+                    kind: SectionKind::Drift,
+                    fetched_at: 0,
+                    entries: vec![entry("drift:test->prod:addon/a", &[Action::Promote])],
+                },
             ],
         }]
     }
@@ -384,6 +393,8 @@ mod tests {
         assert_eq!(app.status, "pr:a#2 offers no include action");
         assert_eq!(app.key(Key::Char('f')), None);
         assert_eq!(app.status, "pr:a#2 offers no follow action");
+        assert_eq!(app.key(Key::Char('P')), None);
+        assert_eq!(app.status, "pr:a#2 offers no promote action");
         assert_eq!(app.key(Key::Up), None);
         assert_eq!(app.selected().unwrap().id, "pr:a#1");
         assert_eq!(app.key(Key::Char('z')), None);
@@ -394,9 +405,19 @@ mod tests {
         assert_eq!(app.key(Key::Right), None);
         assert_eq!(app.selected().unwrap().id, "fwd:a#3->17.0");
         assert_eq!(app.key(Key::Right), None);
+        assert_eq!(app.selected().unwrap().id, "drift:test->prod:addon/a");
+        assert_eq!(
+            app.key(Key::Char('P')),
+            Some(Command::Act {
+                id: "drift:test->prod:addon/a".to_owned(),
+                action: Action::Promote,
+                reason: None
+            })
+        );
+        assert_eq!(app.key(Key::Right), None);
         assert_eq!(app.selected().unwrap().id, "pr:a#1");
         assert_eq!(app.key(Key::Left), None);
-        assert_eq!(app.selected().unwrap().id, "fwd:a#3->17.0");
+        assert_eq!(app.selected().unwrap().id, "drift:test->prod:addon/a");
         assert_eq!(app.key(Key::Char('q')), Some(Command::Quit));
         assert_eq!(app.key(Key::Esc), Some(Command::Quit));
     }

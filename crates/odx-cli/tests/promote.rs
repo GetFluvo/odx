@@ -1428,3 +1428,159 @@ fn rollbacks_need_a_forge() {
     assert_eq!(exit, Exit::Failure);
     assert_eq!(err, format!("error: {repo} is not on a forge\n"));
 }
+
+#[test]
+#[cfg(unix)]
+#[expect(clippy::too_many_lines, reason = "one scenario, step by step")]
+fn the_dashboard_shows_drift() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    let (exit, out, err) = odx(root, &["--offline", "dashboard", "--section", "drift"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let x = "drift:test->prod:package/odoo-addon-x  newer on test";
+    assert!(out.contains(x), "{out}");
+    assert!(out.contains("drift:test->prod:odoo/odoo"), "{out}");
+    assert!(
+        out.contains("drift:prod->test:package/odoo-addon-y  newer on prod"),
+        "{out}"
+    );
+    assert!(!out.contains("drift:prod->test:odoo/odoo"), "{out}");
+    // The plan of a promotion, or the promotion written.
+    let (exit, out, _) = odx(
+        root,
+        &[
+            "--offline",
+            "dashboard",
+            "act",
+            "drift:test->prod:addon/sale_x",
+            "--promote",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{out}");
+    assert!(out.contains("selection: sale_x\n"), "{out}");
+    let (exit, _, err) = odx(
+        root,
+        &[
+            "--offline",
+            "dashboard",
+            "act",
+            "drift:test->prod:addon/sale_x",
+            "--promote",
+            "--open-pr",
+        ],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(err, "error: origin is not on a forge\n");
+    assert!(
+        show(
+            root,
+            "odx/promote/prod-sale_x",
+            "modules/sale_x/__manifest__.py"
+        )
+        .contains("Sales extras")
+    );
+    let (exit, _, err) = odx(
+        root,
+        &[
+            "--offline",
+            "dashboard",
+            "act",
+            "drift:test->prod:odoo/odoo",
+            "--promote",
+        ],
+    );
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("cannot be promoted here"), "{err}");
+    let (exit, _, err) = odx(
+        root,
+        &[
+            "--offline",
+            "dashboard",
+            "act",
+            "drift:test->prod:addon/sale_x",
+            "--drop",
+            "--open-pr",
+        ],
+    );
+    assert_eq!(exit, Exit::Usage);
+    assert_eq!(err, "error: --open-pr goes with --port or --promote\n");
+    // One pair: everything that differs, from its side; a pair that
+    // cannot be read is a warning.
+    let pinned = std::fs::read_to_string(root.join("odx.lock")).unwrap();
+    write(
+        &root.join("odx.lock"),
+        &format!(
+            "{pinned}\n[[repositories]]\nname = \"pos\"\nurl = \"https://github.com/OCA/pos.git\"\nbase = \"19.0\"\nbase_sha = \"{}\"\nresult_tree = \"{}\"\n",
+            "1".repeat(40),
+            "2".repeat(40)
+        ),
+    );
+    let lock = std::fs::read_to_string(root.join("uv.lock")).unwrap();
+    write(
+        &root.join("uv.lock"),
+        &lock.replace(
+            "name = \"odoo-addon-y\"\nversion = \"19.0.1.0.0\"\nsource = { registry = \"https://pypi.org/simple\" }",
+            "name = \"odoo-addon-y\"\nversion = \"19.0.1.0.0\"\nsource = { git = \"https://github.com/OCA/y?rev=1#c0ffee\" }",
+        ),
+    );
+    std::fs::remove_dir_all(root.join("modules/helper")).unwrap();
+    pyproject(
+        root,
+        "[tool.odx.dashboard]\nenvironment_pairs = [[\"test\", \"prod\"], [\"uat\", \"prod\"]]\n",
+    );
+    commit_all(root, "drift");
+    let (exit, out, err) = odx(
+        root,
+        &["--offline", "--json", "dashboard", "--section", "drift"],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    // The kept snapshot answers until --fresh or an action.
+    assert!(!out.contains("from another source"), "{out}");
+    let (exit, out, err) = odx(
+        root,
+        &["--json", "--fresh", "dashboard", "--section", "drift"],
+    );
+    assert_eq!(exit, Exit::Success, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let states: Vec<String> = value[0]["sections"][0]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            format!(
+                "{} {}",
+                entry["subject"].as_str().unwrap(),
+                entry["state"].as_str().unwrap()
+            )
+        })
+        .collect();
+    for wanted in [
+        "helper only on prod",
+        "odoo-addon-y from another source",
+        "old older on test",
+        "repository pos only on test",
+        "tweak changed",
+    ] {
+        assert!(
+            states.iter().any(|state| state == wanted),
+            "{wanted}: {states:?}"
+        );
+    }
+    assert!(
+        err.contains("warning: drift uat->prod: uat: neither origin/19-uat nor 19-uat"),
+        "{err}"
+    );
+    pyproject(
+        root,
+        "[tool.odx.dashboard]\nenvironment_pairs = [[\"test\", \"qa\"]]\n",
+    );
+    let (exit, _, err) = odx(root, &["dashboard", "--section", "drift"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(
+        err.contains(
+            "tool.odx.dashboard.environment_pairs[0]: names an environment that is not configured"
+        ),
+        "{err}"
+    );
+}

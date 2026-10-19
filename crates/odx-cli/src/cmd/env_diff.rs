@@ -76,6 +76,16 @@ pub(crate) fn between(root: &Path, patterns: &[String], a: Checkout, b: Checkout
 
 /// The units of a checkout.
 fn side(checkout: Checkout) -> Side {
+    Side {
+        units: units(&checkout),
+        env: checkout.env,
+        from: checkout.from,
+    }
+}
+
+/// What a checkout runs: its own addons, its packages, its repositories
+/// and Odoo core.
+pub(crate) fn units(checkout: &Checkout) -> Vec<Unit> {
     let mut units: Vec<Unit> = checkout
         .addons
         .iter()
@@ -89,11 +99,7 @@ fn side(checkout: Checkout) -> Side {
         .collect();
     units.extend(checkout.uv.iter().flat_map(|(_, uv)| packages(uv)));
     units.extend(checkout.lock.iter().flat_map(|(_, lock)| locked(lock)));
-    Side {
-        env: checkout.env,
-        from: checkout.from,
-        units,
-    }
+    units
 }
 
 /// Sides read from a file each, by `read`.

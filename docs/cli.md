@@ -331,9 +331,17 @@ $ odx dashboard act fwd:OCA/pos#2->17.0 --mute --reason "not for us"
 $ odx dashboard act pr:OCA/pos#1 --drop --reason "merged upstream"
 $ odx dashboard act new:OCA/pos#5 --include
 $ odx dashboard act pkg:odoo-addon-web-z@17.0.1.0.1 --follow
+$ odx dashboard act "drift:test->prod:addon/sale_x" --promote --open-pr
 ```
 
-One view of what needs a decision, per environment series:
+One view of what needs a decision, per environment series. The drift
+section compares the pairs of `[tool.odx.dashboard] environment_pairs`,
+else every promotion edge between environments that are not disposable;
+with both directions of a pair shown, each difference is listed once, from
+the side that has more of it, and only what a promotion along the pair
+would copy offers `promote`.
+
+
 
 | Section | Entries | Actions |
 | --- | --- | --- |
@@ -343,16 +351,20 @@ One view of what needs a decision, per environment series:
 | `forward-port` | changes from lower series (`odx suggest`) | `port`, `mute` |
 | `backport` | changes from higher series | `port`, `mute` |
 | `auto-update` | index releases the auto-update policy would take, or leaves for review | `follow` |
+| `drift` | what differs between environments (`odx env diff`), per pair | `promote` |
 | `suppressed` | what blacklists, verdicts and mutes hide, with the reason | |
 
-Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`) that
+Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`, `drift:`) that
 `odx dashboard act` takes: `--drop` and `--include` run `odx drop` and `odx
 add`, `--follow` runs `odx lock --auto-update`, `--mute` records a mute
 (`--kind`, default `not-wanted`, and a mandatory `--reason`). `--port`
 ports the change, a person's decision: its commits are cherry-picked as
 `odx port` does, in a clone of the repository under the cache
 (`<cache>/ports/<owner>-<repo>`, sharing the cache's objects), and
-`--open-pr` then pushes the branch and opens a draft pull request. With
+`--open-pr` then pushes the branch and opens a draft pull request.
+`--promote` plans promoting a drift entry's addon along its pair (`odx
+promote <addon> --from <a> --to <b> --with-code`), and with `--open-pr`
+writes it and opens its pull request. With
 `--format markdown --checkboxes`, every action is a box `- [ ] <!--
 odx:<action> <id> -->` for the bot to read back once ticked. `--json` gives
 the model.
@@ -364,9 +376,9 @@ brings the verdict repository up to date on the way.
 
 `odx dashboard --format tui` opens the same dashboard as an interactive
 view in the terminal, one tab per series and section. Left and right switch
-tabs, up and down select an entry, `i`, `d`, `f`, `m` and `p` include,
-drop, follow, mute (asking for the reason) and port (asking for
-confirmation) the selected entry, `r` rebuilds the dashboard and `q` or Esc
+tabs, up and down select an entry, `i`, `d`, `f`, `m`, `p` and `P` include,
+drop, follow, mute (asking for the reason), port (asking for
+confirmation) and plan the promotion of the selected entry, `r` rebuilds the dashboard and `q` or Esc
 quits. The view is an optional feature: install odx with `cargo install
 odx-cli --features tui` (the PyPI wheel leaves it out).
 
