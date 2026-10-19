@@ -30,19 +30,22 @@ pub enum SectionKind {
     Backport,
     /// Index patch releases the auto-update policy would take.
     AutoUpdate,
+    /// What differs between environments.
+    Drift,
     /// What verdicts, mutes and blacklists hide.
     Suppressed,
 }
 
 impl SectionKind {
     /// Every section, in display order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Pinned,
         Self::Droppable,
         Self::NewUpstream,
         Self::ForwardPort,
         Self::Backport,
         Self::AutoUpdate,
+        Self::Drift,
         Self::Suppressed,
     ];
 
@@ -56,6 +59,7 @@ impl SectionKind {
             Self::ForwardPort => "forward-port",
             Self::Backport => "backport",
             Self::AutoUpdate => "auto-update",
+            Self::Drift => "drift",
             Self::Suppressed => "suppressed",
         }
     }
@@ -70,6 +74,7 @@ impl SectionKind {
             Self::ForwardPort => "Forward-port suggestions",
             Self::Backport => "Backport candidates",
             Self::AutoUpdate => "Index updates",
+            Self::Drift => "Environment drift",
             Self::Suppressed => "Suppressed",
         }
     }
@@ -95,16 +100,19 @@ pub enum Action {
     Drop,
     /// Take the update.
     Follow,
+    /// Promote the addon into the next environment.
+    Promote,
 }
 
 impl Action {
     /// Every action.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Include,
         Self::Port,
         Self::Mute,
         Self::Drop,
         Self::Follow,
+        Self::Promote,
     ];
 
     /// How the action is written.
@@ -116,6 +124,7 @@ impl Action {
             Self::Mute => "mute",
             Self::Drop => "drop",
             Self::Follow => "follow",
+            Self::Promote => "promote",
         }
     }
 
@@ -331,7 +340,8 @@ mod tests {
         for action in Action::ALL {
             assert_eq!(Action::parse(action.name()), Some(action));
         }
-        assert_eq!(SectionKind::parse("drift"), None);
+        assert_eq!(SectionKind::parse("drift"), Some(SectionKind::Drift));
+        assert_eq!(SectionKind::parse("nope"), None);
         assert_eq!(Action::parse("merge"), None);
     }
 

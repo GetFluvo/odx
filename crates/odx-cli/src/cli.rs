@@ -430,7 +430,7 @@ pub struct DashboardArgs {
     /// Environment to show; defaults to all.
     #[arg(long, value_name = "ENV")]
     pub env: Option<String>,
-    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, suppressed).
+    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, drift, suppressed).
     #[arg(long, value_name = "SECTION")]
     pub section: Vec<String>,
     /// With `--format markdown`, a box per action for the bot to read back.
@@ -454,7 +454,7 @@ pub enum DashboardAct {
     clippy::struct_excessive_bools,
     reason = "one flag per action, as the command line reads"
 )]
-#[command(group(clap::ArgGroup::new("action").required(true).args(["include", "port", "mute", "drop", "follow"])))]
+#[command(group(clap::ArgGroup::new("action").required(true).args(["include", "port", "mute", "drop", "follow", "promote"])))]
 pub struct DashboardActArgs {
     /// The entry id, as the dashboard shows it.
     pub id: String,
@@ -465,8 +465,9 @@ pub struct DashboardActArgs {
     /// the cache.
     #[arg(long)]
     pub port: bool,
-    /// With --port: then push the branch and open a draft pull request.
-    #[arg(long, requires = "port")]
+    /// With --port: then push the branch and open a draft pull request; with --promote:
+    /// write the promotion and open its pull request.
+    #[arg(long)]
     pub open_pr: bool,
     /// Record a mute (or, with an organisation kind, a verdict).
     #[arg(long)]
@@ -477,6 +478,9 @@ pub struct DashboardActArgs {
     /// Take the index update.
     #[arg(long)]
     pub follow: bool,
+    /// Promote the addon into the next environment (the plan; --open-pr writes it).
+    #[arg(long)]
+    pub promote: bool,
     /// Why (mandatory with --mute).
     #[arg(long)]
     pub reason: Option<String>,

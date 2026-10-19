@@ -13,15 +13,21 @@ use odx_index::series_key;
 use odx_port::analysis::Class;
 use odx_verdicts::Standing;
 
+use odx_config::environments::Model;
+use odx_env::promote::addon_of_dist;
+use odx_env::{Change, Kind as UnitKind, Unit, diff};
+
 use super::Report;
 use super::aggregate::{Prepared, prepare};
+use super::checkout::{self, environment};
+use super::env_diff::units;
 use super::status::{Row, rows};
 use super::suggest::{Judged, collect, judge, repository_name};
 use super::upgrade::{Kind, addons};
 use crate::Context;
 use crate::cli::{
     AddArgs, DashboardAct, DashboardActArgs, DashboardArgs, DashboardFormat, DropArgs, GlobalArgs,
-    LockArgs, SuggestArgs, VerdictAddArgs,
+    LockArgs, PromoteArgs, SuggestArgs, VerdictAddArgs,
 };
 use odx_config::Problem;
 use odx_core::Exit;
@@ -338,6 +344,127 @@ fn auto_update(ctx: &Context<'_>, prepared: &Prepared, warnings: &mut Vec<Proble
     }
 }
 
+/// The pairs of environments the drift section compares:
+/// `[tool.odx.dashboard] environment_pairs`, else every promotion edge
+/// between environments that are not disposable.
+fn pairs(config: &odx_config::OdxConfig, model: &Model) -> Vec<[String; 2]> {
+    config
+        .dashboard
+        .as_ref()
+        .and_then(|dashboard| dashboard.environment_pairs.clone())
+        .unwrap_or_else(|| {
+            model
+                .promotion
+                .iter()
+                .filter(|pair| {
+                    pair.iter()
+                        .all(|name| model.get(name).is_some_and(|env| !env.disposable))
+                })
+                .cloned()
+                .collect()
+        })
+}
+
+/// A unit's version and pin, for people.
+fn pin_of(unit: Option<&Unit>) -> String {
+    unit.map_or_else(
+        || "-".to_owned(),
+        |unit| {
+            let pin: String = unit.pin.chars().take(12).collect();
+            match &unit.version {
+                Some(version) if *version != unit.pin => format!("{version} {pin}"),
+                _ => pin,
+            }
+        },
+    )
+}
+
+/// What differs between the environments of each pair, through git; a
+/// pair that cannot be read is a warning.
+fn drift(prepared: &Prepared, warnings: &mut Vec<Problem>) -> Option<Section> {
+    let config = &prepared.project.config;
+    let root = &prepared.project.root;
+    // The configuration was validated when it was loaded.
+    let model = Model::resolve(config).ok().flatten()?;
+    let mut entries = Vec::new();
+    let pairs = pairs(config, &model);
+    for (index, [a, b]) in pairs.iter().enumerate() {
+        // With its reverse pair shown too, each difference is listed once:
+        // what the second side has more of goes with the reverse pair, a
+        // change with whichever pair comes first.
+        let reverse = pairs
+            .iter()
+            .position(|pair| *pair == [b.clone(), a.clone()]);
+        let listed = |change: Change| match (change, reverse) {
+            (Change::Behind | Change::OnlyInB, Some(_)) => false,
+            (Change::Changed | Change::SourceChanged, Some(at)) => index < at,
+            _ => change != Change::Identical,
+        };
+        let read = |name: &str| {
+            environment(&model, name).and_then(|env| checkout::read(root, env, "origin"))
+        };
+        let (ours, theirs) = match read(a).and_then(|ours| read(b).map(|theirs| (ours, theirs))) {
+            Ok(both) => both,
+            Err(report) => {
+                warnings.push(Problem {
+                    key: format!("drift {a}->{b}"),
+                    message: report.error.unwrap_or_default(),
+                });
+                continue;
+            }
+        };
+        let allowed = model.allows(a, b);
+        for entry in diff(&units(&ours), &units(&theirs)) {
+            if !listed(entry.change) {
+                continue;
+            }
+            let addon = match entry.kind {
+                UnitKind::Addon => Some(entry.name.clone()),
+                UnitKind::Package => addon_of_dist(&entry.name),
+                UnitKind::Odoo | UnitKind::Repository => None,
+            };
+            let promotable = allowed
+                && addon.is_some()
+                && matches!(
+                    entry.change,
+                    Change::Ahead | Change::OnlyInA | Change::Changed
+                );
+            let state = match entry.change {
+                Change::Ahead => format!("newer on {a}"),
+                Change::Behind => format!("older on {a}"),
+                Change::SourceChanged => "from another source".to_owned(),
+                Change::OnlyInA => format!("only on {a}"),
+                Change::OnlyInB => format!("only on {b}"),
+                Change::Changed | Change::Identical => "changed".to_owned(),
+            };
+            entries.push(Entry {
+                id: format!("drift:{a}->{b}:{}/{}", entry.kind.name(), entry.name),
+                subject: match entry.kind {
+                    UnitKind::Repository => format!("repository {}", entry.name),
+                    _ => entry.name.clone(),
+                },
+                addon,
+                state,
+                actions: if promotable {
+                    vec![Action::Promote]
+                } else {
+                    Vec::new()
+                },
+                notes: vec![format!(
+                    "{a}: {} | {b}: {}",
+                    pin_of(entry.a.as_ref()),
+                    pin_of(entry.b.as_ref())
+                )],
+            });
+        }
+    }
+    Some(Section {
+        kind: SectionKind::Drift,
+        fetched_at: now(),
+        entries,
+    })
+}
+
 /// The dashboards of every target series (`--env` narrows them), with the
 /// specs of their pull request entries.
 fn build(
@@ -379,6 +506,7 @@ fn build(
         sections.extend(suggestions(&judged, &target));
         if own {
             sections.push(auto_update(ctx, prepared, warnings));
+            sections.extend(drift(prepared, warnings));
         }
         sections.sort_by_key(|section| {
             SectionKind::ALL
@@ -505,6 +633,63 @@ fn act_port(
     )
 }
 
+/// `odx dashboard act <id> --promote`: the promotion of the entry's addon
+/// along its pair, planned (or, with `--open-pr`, written and proposed).
+fn act_promote(
+    act: &DashboardActArgs,
+    entry: &Entry,
+    reference: &str,
+    rest: &str,
+    global: &GlobalArgs,
+    ctx: &Context<'_>,
+) -> Report {
+    // `drift:<from>-><to>:<kind>/<name>`, as `drift` writes it.
+    let to = rest
+        .split_once("->")
+        .and_then(|(_, after)| after.split_once(':'))
+        .map(|(to, _)| to.to_owned())
+        .unwrap_or_default();
+    let promote = PromoteArgs {
+        modules: entry.addon.iter().cloned().collect(),
+        from_pr: None,
+        rollback: None,
+        feature: None,
+        search: None,
+        select: Vec::new(),
+        from: Some(reference.to_owned()),
+        to,
+        remote: "origin".to_owned(),
+        allow_downgrade: false,
+        allow_source_change: false,
+        no_with_odoo: false,
+        // A project addon's drift is its code.
+        with_code: true,
+        allow_transitive: false,
+        include_branch_specific: Vec::new(),
+        commit: false,
+        open_pr: act.open_pr,
+        yes: act.open_pr,
+    };
+    super::promote::run_promote(&promote, global, ctx)
+}
+
+/// The action the flags of `odx dashboard act` name.
+const fn chosen(act: &DashboardActArgs) -> Action {
+    if act.include {
+        Action::Include
+    } else if act.port {
+        Action::Port
+    } else if act.mute {
+        Action::Mute
+    } else if act.drop {
+        Action::Drop
+    } else if act.promote {
+        Action::Promote
+    } else {
+        Action::Follow
+    }
+}
+
 /// `odx dashboard act <id>`: one action, as the command behind it.
 fn run_act(
     act: &DashboardActArgs,
@@ -514,17 +699,13 @@ fn run_act(
     ctx: &Context<'_>,
     prepared: &Prepared,
 ) -> Result<Report, Report> {
-    let action = if act.include {
-        Action::Include
-    } else if act.port {
-        Action::Port
-    } else if act.mute {
-        Action::Mute
-    } else if act.drop {
-        Action::Drop
-    } else {
-        Action::Follow
-    };
+    let action = chosen(act);
+    if act.open_pr && !matches!(action, Action::Port | Action::Promote) {
+        return Err(Report::error(
+            Exit::Usage,
+            "--open-pr goes with --port or --promote".to_owned(),
+        ));
+    }
     let (dashboard, entry) = dashboards
         .iter()
         .find_map(|dashboard| dashboard.entry(&act.id).map(|entry| (dashboard, entry)))
@@ -591,6 +772,7 @@ fn run_act(
             };
             Ok(super::edit::run_add(&add, ctx))
         }
+        Action::Promote => Ok(act_promote(act, entry, reference, rest, global, ctx)),
         Action::Follow => {
             let lock = LockArgs {
                 repo: None,
@@ -669,6 +851,7 @@ fn interactive(
                 mute: *action == Action::Mute,
                 drop: *action == Action::Drop,
                 follow: *action == Action::Follow,
+                promote: *action == Action::Promote,
                 reason: reason.clone(),
                 kind: crate::cli::VerdictKind::NotWanted,
             };

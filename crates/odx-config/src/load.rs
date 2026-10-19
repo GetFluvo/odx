@@ -344,6 +344,19 @@ fn validate_environments(config: &OdxConfig, report: &mut Report<'_>) {
             "names an environment that is not configured",
         );
     }
+    let pairs = config
+        .dashboard
+        .as_ref()
+        .and_then(|dashboard| dashboard.environment_pairs.as_deref())
+        .unwrap_or_default();
+    for (i, pair) in pairs.iter().enumerate() {
+        if pair.iter().any(|name| !defined(name)) {
+            report(
+                format!("tool.odx.dashboard.environment_pairs[{i}]"),
+                "names an environment that is not configured",
+            );
+        }
+    }
     for (name, env) in &envs.env {
         if let Some(series) = &env.series
             && !is_series(series)
@@ -366,6 +379,18 @@ mod tests {
         let text = format!("[tool.odx]\nodoo_version = \"17.0\"\n{toml}");
         let err = parse_pyproject(&text, Path::new("pyproject.toml")).unwrap_err();
         err.problems().iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn dashboard_pairs_name_environments() {
+        assert_eq!(
+            problems(
+                "[tool.odx.environments]\n[tool.odx.dashboard]\nenvironment_pairs = [[\"test\", \"qa\"]]\n"
+            ),
+            [
+                "tool.odx.dashboard.environment_pairs[0]: names an environment that is not configured"
+            ]
+        );
     }
 
     #[test]
