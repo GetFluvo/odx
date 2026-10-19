@@ -517,6 +517,7 @@ fn upstream(
             upstream: &upstream,
             push_remote: None,
             draft: true,
+            replace: false,
             title: format!(
                 "[{}][FW] {}: blacklist {}",
                 entry.target_series, entry.addon, entry.change

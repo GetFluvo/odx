@@ -924,8 +924,25 @@ per path, and the output and the commit message say so loudly.
 
 `--open-pr` also pushes the branch to the environment's repository (its
 `repo`, else `--remote`) and opens a pull request into the environment's
-branch, with every addon and its pin on both sides in the description.
-Approvals stay with the forge's branch protection.
+branch, with every addon and its pin on both sides in the description. The
+branch is odx's: writing it again replaces it. Approvals stay with the
+forge's branch protection.
+
+```console
+$ odx promote --from-pr 42 --to prod     # the project addons #42 changed on test
+$ odx promote --rollback 57 --to prod    # revert the promotion #57 merged into prod
+```
+
+`--from-pr` selects the project addons that a pull request merged into the
+source environment's branch changed. `--rollback` finds the commits that
+brought pull request #57 onto the target, however it was merged (its own
+commits after a merge commit; the same change by patch id after a rebase,
+or all of it at once after a squash), and plans reverting them, newest
+first. With `--commit --yes` the revert is written on
+`odx/rollback/<to>-<n>`; with `--open-pr` its pull request gets the `odx
+env diff` of the target against the rollback, so reviewers see the
+previous pins come back. Database changes are not undone: check the
+migration scripts the promotion carried.
 
 ## Locking
 

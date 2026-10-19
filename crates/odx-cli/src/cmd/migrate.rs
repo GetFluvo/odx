@@ -732,6 +732,7 @@ fn open_pr(ctx: &Context<'_>, tools: &Tools, args: &MigratePrArgs) -> Result<Pus
             upstream: &upstream,
             push_remote: args.push_remote.as_deref(),
             draft: !args.ready,
+            replace: false,
             title: format!("[{to}][MIG] {addon}: Migration to {to}"),
             body: body(addon, &from, to, &findings, &pin::depends_on(ctx)),
         },

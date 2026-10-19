@@ -173,6 +173,7 @@ pub(crate) fn run_sweep(
                 upstream: &upstream,
                 push_remote: args.push_remote.as_deref(),
                 draft: true,
+                replace: false,
                 title: format!(
                     "[{to}][FW] blacklist port suggestions from {}",
                     sources.join("/")

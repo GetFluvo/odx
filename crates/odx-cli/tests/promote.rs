@@ -984,3 +984,447 @@ fn opens_the_pull_request() {
         format!("error: {} is not on a forge\n", prod.display())
     );
 }
+
+/// The project with its `origin` on a local forge whose repository is a
+/// bare one, and the binary run against it.
+#[cfg(unix)]
+struct Forge {
+    tmp: tempfile::TempDir,
+    root: std::path::PathBuf,
+    bare: std::path::PathBuf,
+    api: String,
+    routes: Routes,
+}
+
+#[cfg(unix)]
+impl Forge {
+    fn new() -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        project(&root);
+        let bare = tmp.path().join("bare.git");
+        git(
+            tmp.path(),
+            &["init", "-q", "--bare", &bare.display().to_string()],
+        );
+        let routes: Routes = Arc::default();
+        let (api, _) = serve(&routes);
+        let forge = Self {
+            tmp,
+            root,
+            bare,
+            api,
+            routes,
+        };
+        forge.route("GET /api/v3/meta", 200, "{}");
+        forge.route(
+            "GET /api/v3/repos/acme/project",
+            200,
+            r#"{"permissions":{"push":true}}"#,
+        );
+        forge.route(
+            "POST /api/v3/repos/acme/project/pulls",
+            201,
+            &format!(
+                r#"{{"number":30,"html_url":"{}/acme/project/pull/30"}}"#,
+                forge.api
+            ),
+        );
+        git(&forge.root, &["remote", "add", "origin", &forge.remote()]);
+        forge
+    }
+
+    fn remote(&self) -> String {
+        format!("{}/acme/project.git", self.api)
+    }
+
+    fn route(&self, key: &str, status: u16, body: &str) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), (status, body.to_owned()));
+    }
+
+    /// Pull request `number` merged into `base`, with `commits` and its
+    /// head at the last of them.
+    fn merged(&self, number: u64, base: &str, commits: &[String]) {
+        let head = commits.last().unwrap();
+        self.route(
+            &format!("GET /api/v3/repos/acme/project/pulls/{number}"),
+            200,
+            &format!(
+                r#"{{"number":{number},"title":"PR {number}","state":"closed","merged_at":"2026-10-01","base":{{"ref":"{base}"}},"head":{{"sha":"{head}","ref":"feature"}}}}"#
+            ),
+        );
+        let listed: Vec<String> = commits
+            .iter()
+            .map(|sha| format!(r#"{{"sha":"{sha}"}}"#))
+            .collect();
+        self.route(
+            &format!("GET /api/v3/repos/acme/project/pulls/{number}/commits"),
+            200,
+            &format!("[{}]", listed.join(",")),
+        );
+        let repository = self.bare.display().to_string();
+        git(
+            &self.root,
+            &[
+                "push",
+                "-q",
+                "-f",
+                &repository,
+                &format!("{head}:refs/pull/{number}/head"),
+            ],
+        );
+    }
+
+    fn odx(&self, args: &[&str]) -> (bool, String, String) {
+        let out = Command::new(env!("CARGO_BIN_EXE_odx"))
+            .current_dir(&self.root)
+            .args(args)
+            .env("ODX_UV", "true")
+            .env("ODX_CACHE_DIR", self.tmp.path().join("cache"))
+            .env("GIT_CONFIG_COUNT", "1")
+            .env(
+                "GIT_CONFIG_KEY_0",
+                format!("url.{}.insteadOf", file_url(&self.bare)),
+            )
+            .env("GIT_CONFIG_VALUE_0", self.remote())
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    fn rev(&self, rev: &str) -> String {
+        git(&self.root, &["rev-parse", rev])
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn promotes_what_a_pull_request_changed() {
+    let forge = Forge::new();
+    let sale = forge.rev("19-test~2");
+    forge.merged(4, "19-test", &[sale]);
+    let (ok, out, err) = forge.odx(&["promote", "--from-pr", "4", "--to", "prod"]);
+    assert!(ok, "{err}");
+    assert!(out.contains("selection: sale_x\n"), "{out}");
+    // A commit that changes nothing.
+    let empty = git(
+        &forge.root,
+        &[
+            "commit-tree",
+            "19-test^{tree}",
+            "-p",
+            "19-test",
+            "-m",
+            "empty",
+        ],
+    );
+    forge.merged(5, "19-test", &[empty]);
+    let (ok, _, err) = forge.odx(&["promote", "--from-pr", "5", "--to", "prod"]);
+    assert!(!ok);
+    assert_eq!(err, "error: #5 changed no project addon of test\n");
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "--from-pr",
+        "4",
+        "--from",
+        "prod",
+        "--to",
+        "test",
+    ]);
+    assert!(!ok);
+    assert_eq!(
+        err,
+        "error: #4 is no pull request merged into prod (19-prod): it is merged into 19-test\n"
+    );
+    let (ok, _, err) = forge.odx(&["promote", "--from-pr", "99", "--to", "prod"]);
+    assert!(!ok);
+    assert!(err.starts_with("error: "), "{err}");
+    // The head cannot be fetched.
+    forge.route(
+        "GET /api/v3/repos/acme/project/pulls/6",
+        200,
+        r#"{"number":6,"title":"PR 6","state":"closed","merged_at":"2026-10-01","base":{"ref":"19-test"},"head":{"sha":"x","ref":"f"}}"#,
+    );
+    forge.route("GET /api/v3/repos/acme/project/pulls/6/commits", 200, "[]");
+    let (ok, _, err) = forge.odx(&["promote", "--from-pr", "6", "--to", "prod"]);
+    assert!(!ok);
+    assert!(
+        err.starts_with("error: cannot fetch #6 from origin: "),
+        "{err}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+#[expect(clippy::too_many_lines, reason = "one scenario, step by step")]
+fn rolls_back_promotions() {
+    let forge = Forge::new();
+    let root = forge.root.as_path();
+    let before = show(root, "19-prod", "uv.lock");
+    let (ok, _, err) = forge.odx(&["promote", "sale_x", "--to", "prod", "--commit", "--yes"]);
+    assert!(ok, "{err}");
+    let promotion = forge.rev("odx/promote/prod-sale_x");
+    // Merged by rebase: another commit with the same change.
+    git(root, &["checkout", "-q", "19-prod"]);
+    git(root, &["cherry-pick", &promotion]);
+    git(
+        root,
+        &[
+            "commit",
+            "-q",
+            "--amend",
+            "-m",
+            "promote sale_x from test to prod (#7)",
+        ],
+    );
+    git(root, &["checkout", "-q", "19-test"]);
+    let landed = forge.rev("19-prod");
+    assert_ne!(landed, promotion);
+    forge.merged(7, "19-prod", std::slice::from_ref(&promotion));
+    let (ok, out, err) = forge.odx(&["promote", "--rollback", "7", "--to", "prod"]);
+    assert!(ok, "{err}");
+    let short = &landed[..7];
+    assert_eq!(
+        out,
+        format!(
+            "roll back #7 (PR 7) on prod (refs/heads/19-prod):\n  revert {short} promote sale_x from test to prod (#7)\n\
+             plan only (--commit or --open-pr with --yes writes it)\n"
+        )
+    );
+    let (ok, _, err) = forge.odx(&["promote", "--rollback", "7", "--to", "prod", "--commit"]);
+    assert!(!ok);
+    assert_eq!(
+        err,
+        "error: --commit and --open-pr write a branch: add --yes to confirm\n"
+    );
+    let (ok, out, err) = forge.odx(&[
+        "promote",
+        "--rollback",
+        "7",
+        "--to",
+        "prod",
+        "--commit",
+        "--yes",
+    ]);
+    assert!(ok, "{err}");
+    assert!(out.contains("committed "), "{out}");
+    assert!(out.contains("on odx/rollback/prod-7\n"), "{out}");
+    assert!(
+        out.contains("newer in prod:\n  odoo-addon-x  19.0.1.1.0 | 19.0.1.0.0\n"),
+        "{out}"
+    );
+    assert_eq!(show(root, "odx/rollback/prod-7", "uv.lock"), before);
+    assert_eq!(
+        git(root, &["log", "-1", "--format=%s", "odx/rollback/prod-7"]),
+        "revert promotion #7: PR 7"
+    );
+    // As JSON, with the pull request.
+    let (ok, out, err) = forge.odx(&[
+        "--json",
+        "promote",
+        "--rollback",
+        "7",
+        "--to",
+        "prod",
+        "--open-pr",
+        "--yes",
+    ]);
+    assert!(ok, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["revert"][0], landed);
+    assert_eq!(value["applied"]["branch"], "odx/rollback/prod-7");
+    assert_eq!(value["applied"]["pull_request"]["number"], 30);
+    let (ok, out, _) = forge.odx(&[
+        "promote",
+        "--rollback",
+        "7",
+        "--to",
+        "prod",
+        "--open-pr",
+        "--yes",
+    ]);
+    assert!(ok);
+    assert!(
+        out.ends_with(&format!("opened {}/acme/project/pull/30\n", forge.api)),
+        "{out}"
+    );
+    // Merged with a merge commit: the pull request's own commits.
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "y",
+        "--to",
+        "prod",
+        "--allow-downgrade",
+        "--commit",
+        "--yes",
+    ]);
+    assert!(ok, "{err}");
+    let tweak = forge.rev("odx/promote/prod-y");
+    git(root, &["checkout", "-q", "19-prod"]);
+    git(
+        root,
+        &[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge #8",
+            "odx/promote/prod-y",
+        ],
+    );
+    git(root, &["checkout", "-q", "19-test"]);
+    forge.merged(8, "19-prod", std::slice::from_ref(&tweak));
+    let (ok, out, err) = forge.odx(&["--json", "promote", "--rollback", "8", "--to", "prod"]);
+    assert!(ok, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["revert"], serde_json::json!([tweak]));
+    // Squashed: two commits as one.
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "account_due",
+        "--to",
+        "prod",
+        "--no-with-odoo",
+        "--commit",
+        "--yes",
+        "--with-code",
+    ]);
+    assert!(ok, "{err}");
+    let picked = forge.rev("odx/promote/prod-account_due");
+    git(root, &["checkout", "-q", "odx/promote/prod-account_due"]);
+    write(&root.join("NOTES.md"), "account_due notes\n");
+    commit_all(root, "account_due notes");
+    let noted = forge.rev("HEAD");
+    git(root, &["checkout", "-q", "19-prod"]);
+    git(
+        root,
+        &["merge", "-q", "--squash", "odx/promote/prod-account_due"],
+    );
+    git(root, &["commit", "-q", "-m", "account_due (#9)"]);
+    let squashed = forge.rev("19-prod");
+    git(root, &["checkout", "-q", "19-test"]);
+    forge.merged(9, "19-prod", &[picked, noted]);
+    let (ok, out, err) = forge.odx(&["--json", "promote", "--rollback", "9", "--to", "prod"]);
+    assert!(ok, "{err}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["revert"], serde_json::json!([squashed]));
+    // Not on the target.
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "sale_x",
+        "--to",
+        "prod",
+        "--with-code",
+        "--commit",
+        "--yes",
+    ]);
+    assert!(ok, "{err}");
+    let elsewhere = forge.rev("odx/promote/prod-sale_x");
+    forge.merged(10, "19-prod", std::slice::from_ref(&elsewhere));
+    let (ok, _, err) = forge.odx(&["promote", "--rollback", "10", "--to", "prod"]);
+    assert!(!ok);
+    assert_eq!(
+        err,
+        "error: #10 is not on prod (refs/heads/19-prod): nothing to roll back\n"
+    );
+    // The rollback branch is checked out elsewhere, or no pull request
+    // can be opened.
+    let other = forge.tmp.path().join("other");
+    let other_text = other.display().to_string();
+    git(
+        root,
+        &["worktree", "add", "-q", &other_text, "odx/rollback/prod-7"],
+    );
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "--rollback",
+        "7",
+        "--to",
+        "prod",
+        "--commit",
+        "--yes",
+    ]);
+    assert!(!ok);
+    assert!(
+        err.starts_with("error: cannot prepare odx/rollback/prod-7: "),
+        "{err}"
+    );
+    git(root, &["worktree", "remove", "--force", &other_text]);
+    forge.route("POST /api/v3/repos/acme/project/pulls", 422, "{}");
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "--rollback",
+        "7",
+        "--to",
+        "prod",
+        "--open-pr",
+        "--yes",
+    ]);
+    assert!(!ok);
+    assert!(err.contains("422"), "{err}");
+    // A later change in the way.
+    git(root, &["checkout", "-q", "19-prod"]);
+    let lock = std::fs::read_to_string(root.join("uv.lock")).unwrap();
+    write(
+        &root.join("uv.lock"),
+        &lock.replace("19.0.1.1.0", "19.0.1.2.0"),
+    );
+    commit_all(root, "x moved on");
+    git(root, &["checkout", "-q", "19-test"]);
+    let (ok, _, err) = forge.odx(&[
+        "promote",
+        "--rollback",
+        "7",
+        "--to",
+        "prod",
+        "--commit",
+        "--yes",
+    ]);
+    assert!(!ok);
+    assert!(
+        err.starts_with("error: #7 does not revert cleanly on prod: "),
+        "{err}"
+    );
+}
+
+#[test]
+fn rollbacks_need_a_forge() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    let (exit, _, err) = odx(root, &["promote", "--rollback", "7", "--to", "prod"]);
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(err, "error: origin is not on a forge\n");
+    let (exit, _, err) = odx(root, &["promote", "--rollback", "7", "--to", "uat"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("neither origin/19-uat nor 19-uat"), "{err}");
+    // An environment in a repository that is not on a forge.
+    let prod = tmp.path().join("prod");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "19-prod",
+            &root.display().to_string(),
+            &prod.display().to_string(),
+        ],
+    );
+    let repo = prod.display().to_string().replace('\\', "/");
+    pyproject(
+        root,
+        &format!("[tool.odx.environments.env.prod]\nrepo = \"{repo}\"\n"),
+    );
+    let (exit, _, err) = odx(root, &["promote", "--rollback", "7", "--to", "prod"]);
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(err, format!("error: {repo} is not on a forge\n"));
+}

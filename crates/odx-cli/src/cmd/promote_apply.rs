@@ -35,9 +35,10 @@ pub(crate) struct Applied {
 }
 
 /// A temporary worktree, removed when dropped.
-struct Worktree<'a> {
+pub(crate) struct Worktree<'a> {
     root: &'a Path,
-    dir: PathBuf,
+    /// Where it is.
+    pub(crate) dir: PathBuf,
 }
 
 impl Drop for Worktree<'_> {
@@ -48,7 +49,7 @@ impl Drop for Worktree<'_> {
     }
 }
 
-fn failed(message: String) -> Report {
+pub(crate) fn failed(message: String) -> Report {
     Report::error(Exit::Failure, message)
 }
 
@@ -101,6 +102,32 @@ fn branch_of(args: &PromoteArgs, plan: &Plan, to: &str) -> String {
     format!("odx/promote/{to}-{key}")
 }
 
+/// A worktree on `branch`, (re)made from `base`: in the repository's own
+/// git directory, so those of other repositories never meet; one left
+/// over from an interrupted run goes.
+pub(crate) fn worktree<'a>(
+    root: &'a Path,
+    branch: &str,
+    base: &str,
+    name: &str,
+) -> Result<Worktree<'a>, Report> {
+    let common = git(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .unwrap_or_default();
+    let dir = PathBuf::from(common).join("odx-promote").join(name);
+    let dir_text = dir.to_string_lossy().into_owned();
+    let _ = git(root, &["worktree", "remove", "--force", &dir_text]);
+    let _ = std::fs::remove_dir_all(&dir);
+    git(
+        root,
+        &["worktree", "add", "--quiet", "-B", branch, &dir_text, base],
+    )
+    .map_err(|e| failed(format!("cannot prepare {branch}: {e}")))?;
+    Ok(Worktree { root, dir })
+}
+
 /// Write `plan` as a commit, and open its pull request with `--open-pr`.
 pub(crate) fn apply(
     ctx: &Context<'_>,
@@ -130,25 +157,7 @@ pub(crate) fn apply(
         ));
     }
     let branch = branch_of(args, plan, &to.env.name);
-    // In the repository's own git directory, so promotions of other
-    // repositories never meet; one left over from an interrupted run goes.
-    let common = git(
-        root,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )
-    .unwrap_or_default();
-    let dir = PathBuf::from(common).join("odx-promote").join(&to.env.name);
-    let dir_text = dir.to_string_lossy().into_owned();
-    let _ = git(root, &["worktree", "remove", "--force", &dir_text]);
-    let _ = std::fs::remove_dir_all(&dir);
-    git(
-        root,
-        &[
-            "worktree", "add", "--quiet", "-B", &branch, &dir_text, &to.from,
-        ],
-    )
-    .map_err(|e| failed(format!("cannot prepare {branch}: {e}")))?;
-    let worktree = Worktree { root, dir };
+    let worktree = worktree(root, &branch, &to.from, &to.env.name)?;
     let wt = worktree.dir.as_path();
     let picked = if args.with_code {
         cherry_pick(wt, from, to, plan)?
@@ -164,7 +173,7 @@ pub(crate) fn apply(
     let body = body(plan, from, to, &args.include_branch_specific);
     commit(wt, &title, &body, picked, &to.env.name).and_then(|commit| {
         let pushed = if args.open_pr {
-            Some(open(ctx, wt, args, sides, plan, &branch)?)
+            Some(open(ctx, wt, to, &args.remote, &branch, title, body)?)
         } else {
             None
         };
@@ -180,7 +189,13 @@ pub(crate) fn apply(
 
 /// Commit what the worktree has and return the head: refused when there is
 /// nothing, and no commit was cherry-picked either.
-fn commit(wt: &Path, title: &str, body: &str, picked: usize, to: &str) -> Result<String, Report> {
+pub(crate) fn commit(
+    wt: &Path,
+    title: &str,
+    body: &str,
+    picked: usize,
+    to: &str,
+) -> Result<String, Report> {
     // What cannot be staged leaves nothing to commit.
     let _ = git(wt, &["add", "-A"]);
     let staged = git(wt, &["diff", "--cached", "--quiet"]).is_err();
@@ -377,15 +392,17 @@ fn body(plan: &Plan, from: &Checkout, to: &Checkout, included: &[String]) -> Str
     out
 }
 
-fn open(
+/// Push the worktree's branch to `to`'s repository (its `repo`, else
+/// `remote`) and open its pull request into `to`'s branch.
+pub(crate) fn open(
     ctx: &Context<'_>,
     wt: &Path,
-    args: &PromoteArgs,
-    sides: [&Checkout; 2],
-    plan: &Plan,
+    to: &Checkout,
+    remote: &str,
     branch: &str,
+    title: String,
+    body: String,
 ) -> Result<Pushed, Report> {
-    let [from, to] = sides;
     let worktree = Context {
         fs: ctx.fs,
         env: ctx.env,
@@ -393,7 +410,7 @@ fn open(
         config: ctx.config,
     };
     let (remote, upstream) = to.env.repo.as_ref().map_or_else(
-        || (args.remote.clone(), forge_repo(&worktree, &args.remote)),
+        || (remote.to_owned(), forge_repo(&worktree, remote)),
         |repo| (repo.clone(), RepoUrl::parse(repo)),
     );
     let upstream = upstream.ok_or_else(|| failed(format!("{remote} is not on a forge")))?;
@@ -406,8 +423,9 @@ fn open(
             upstream: &upstream,
             push_remote: None,
             draft: false,
-            title: title(plan, from, to),
-            body: body(plan, from, to, &args.include_branch_specific),
+            replace: true,
+            title,
+            body,
         },
     )
 }
