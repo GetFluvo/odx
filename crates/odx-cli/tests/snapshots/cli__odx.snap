@@ -31,7 +31,7 @@ Commands:
   port           Port PRs or missing commits to another series; maintainer sweeps; blacklists
   migrate        Migrate addons to another Odoo series, the OCA way: history, pre-commit and odoo-lint fixes
   promote        Copy exact pins (and optionally code) of modules or a feature between environments
-  env            Compare environments
+  env            List and compare environments
   bot            Upstream dashboard issue and actionable PRs (nightly CI)
   sync           Prefetch the repositories and PR refs of workspaces into the cache
   daemon         Run sync continuously or install it as a user-level scheduled job

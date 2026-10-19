@@ -771,6 +771,52 @@ comes from: your branch as `odx migrate pr` pushed it, or the author's fork
 when they let maintainers edit it; otherwise open a pull request against
 their branch.
 
+## Environments
+
+`[tool.odx.environments]` says which branches are which environment, the
+series each runs, and which promotions are allowed. A preset supplies the
+usual layouts; `env.<name>` overrides a preset environment key by key or
+adds one, and `promotion` replaces the preset's edges:
+
+```toml
+[tool.odx.environments]
+preset = "major-branches"
+branch_specific = [".template-answers.yml"]   # never promoted
+
+[tool.odx.environments.env.test]
+series = "20.0"                               # test already runs the next series
+[tool.odx.environments.env.prod]
+repo = "https://git.example.com/odoo/project-prod.git"   # a separate repository
+```
+
+| Preset | Environments (branch) | Promotions |
+| --- | --- | --- |
+| `major-branches` | `test` (`{major}-test`), `uat` (`{major}-uat`, disposable), `prod` (`{major}-prod`) | test → uat, test → prod, uat → prod, prod → test |
+| `series-branches` | `test` (`{series}-staging`), `prod` (`{series}`) | test → prod, prod → test |
+| `main-production` | `test` (`main`), `prod` (`production`) | test → prod, prod → test |
+| `odoo-sh` | `dev` (any other branch), `uat` (`staging/*`), `prod` (`production`) | dev → uat, uat → prod, prod → uat |
+| `explicit` | only `env.<name>` | only `promotion` |
+
+`{series}` is the environment's series (`19.0`), `{major}` its major version
+(`19`), and `*` in a branch matches anything. An environment's series
+defaults to `series`, then to `odoo_version`; its branch defaults to its
+name; `uat` environments are disposable unless `disposable = false` (a
+disposable environment is never the default source of a promotion). Without
+a `preset`, a table that declares environments is `explicit`.
+
+```console
+$ odx env list
+preset major-branches
+  prod  prod  19.0  19-prod  https://git.example.com/odoo/project-prod.git
+* test  test  20.0  20-test
+  uat   uat   19.0  19-uat   (disposable)
+promotion: test → uat, test → prod, uat → prod, prod → test
+branch-specific: .template-answers.yml
+```
+
+`*` marks the environment of the current branch. `odx suggest --env <name>`
+and the dashboard use each environment's series.
+
 ## Locking
 
 ```console

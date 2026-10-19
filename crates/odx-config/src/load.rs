@@ -326,17 +326,13 @@ fn validate_environments(config: &OdxConfig, report: &mut Report<'_>) {
     let Some(envs) = &config.environments else {
         return;
     };
-    let defined = |name: &str| envs.env.is_empty() || envs.env.contains_key(name);
-    for (i, edge) in envs.promotion.iter().flatten().enumerate() {
-        for name in edge {
-            if !defined(name) {
-                report(
-                    format!("tool.odx.environments.promotion[{i}]"),
-                    "names an environment that is not configured",
-                );
-            }
+    if let Err(problems) = crate::environments::Model::resolve(config) {
+        for (key, message) in problems {
+            report(key, &message);
         }
     }
+    let names = crate::environments::Model::names(envs);
+    let defined = |name: &str| names.iter().any(|known| known == name);
     if let Some(env) = config
         .bot
         .as_ref()
@@ -454,6 +450,7 @@ url = "https://forgejo.example/vault.git"
 modules = []
 
 [tool.odx.environments]
+preset = "major-branches"
 promotion = [["test", "nowhere"]]
 [tool.odx.environments.env.test]
 series = "seventeen"

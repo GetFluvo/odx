@@ -68,28 +68,25 @@ pub(crate) fn targets(args: &SuggestArgs, prepared: &Prepared) -> Result<Vec<Str
     if let Some(series) = &args.series {
         return Ok(vec![series.clone()]);
     }
-    let environments = config.environments.as_ref();
-    let default = environments
-        .and_then(|envs| envs.series.clone())
-        .unwrap_or_else(|| config.odoo_version.clone());
-    let series_of = |env: &odx_config::schema::Environment| {
-        env.series.clone().unwrap_or_else(|| default.clone())
-    };
-    let all = environments.map(|envs| &envs.env);
+    // The configuration was validated when it was loaded.
+    let model = odx_config::environments::Model::resolve(config)
+        .ok()
+        .flatten();
+    let all = model.as_ref().map(|model| &model.environments);
     let mut targets: BTreeSet<String> = match &args.env {
         Some(name) => {
             let env = all.and_then(|envs| envs.get(name)).ok_or_else(|| {
                 Report::error(
                     Exit::Usage,
-                    format!("no environment named {name:?} in [tool.odx.environments.env]"),
+                    format!("no environment named {name:?} (`odx env list` shows them)"),
                 )
             })?;
-            BTreeSet::from([series_of(env)])
+            BTreeSet::from([env.series.clone()])
         }
         None => all
             .iter()
             .flat_map(|envs| envs.values())
-            .map(series_of)
+            .map(|env| env.series.clone())
             .collect(),
     };
     if targets.is_empty() {

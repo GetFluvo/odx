@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use clap::{CommandFactory, Parser};
 use odx_core::{Env, Exit, FileSystem};
 
-use crate::cli::{Cli, Command, DaemonCommand};
+use crate::cli::{Cli, Command, DaemonCommand, EnvCommand};
 
 /// What a command needs from its environment, so tests can supply fakes.
 #[derive(Debug)]
@@ -158,6 +158,7 @@ fn execute(
         Command::Lint(args) => cmd::lint::run_lint(args, &cli.global, ctx).emit(out, err),
         Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),
         Command::Drop(args) => cmd::edit::run_drop(args, ctx).emit(out, err),
+        Command::Env(EnvCommand::List) => cmd::env::run_list(&cli.global, ctx).emit(out, err),
         command => {
             writeln!(
                 err,
