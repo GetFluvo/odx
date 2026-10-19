@@ -4,17 +4,16 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use odx_config::environments::{Environment, Model};
-use odx_config::lock::Lockfile;
-use odx_config::uvlock::UvLock;
-use odx_core::{Exit, Invocation};
+use odx_config::environments::Environment;
+use odx_core::Exit;
 use odx_env::{Change, Entry, Kind, Unit, diff, locked, packages};
 use odx_platform::installed::{record_hash, scan, site_packages};
 use odx_vendor::record::VendorRecord;
 
+use super::Report;
 use super::aggregate::prepare;
+use super::checkout::{Checkout, environment, git, read};
 use super::env::model;
-use super::{Report, output_of};
 use crate::Context;
 use crate::cli::{EnvDiffArgs, GlobalArgs};
 
@@ -49,8 +48,8 @@ fn compare(args: &EnvDiffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         ),
         _ => {
             let [a, b] = envs;
-            let a = read_side(root, a, &args.remote)?;
-            let b = read_side(root, b, &args.remote)?;
+            let a = side(read(root, a, &args.remote)?);
+            let b = side(read(root, b, &args.remote)?);
             let specific = differing(root, &model.branch_specific, &a.from, &b.from);
             ([a, b], specific)
         }
@@ -67,31 +66,26 @@ fn compare(args: &EnvDiffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
     })
 }
 
-/// The environment `arg` names, or the one whose branch it is (with that
-/// branch).
-fn environment(model: &Model, arg: &str) -> Result<Environment, Report> {
-    if let Some(env) = model.get(arg) {
-        if !env.is_literal() {
-            return Err(Report::error(
-                Exit::Usage,
-                format!(
-                    "the branch of {arg} is a pattern ({}): name one of its branches instead",
-                    env.branch
-                ),
-            ));
-        }
-        return Ok(env.clone());
+/// The units of a checkout.
+fn side(checkout: Checkout) -> Side {
+    let mut units: Vec<Unit> = checkout
+        .addons
+        .iter()
+        .map(|addon| Unit {
+            kind: Kind::Addon,
+            name: addon.name.clone(),
+            version: odx_analyze::sniff::manifest_version(&addon.manifest),
+            source: "project".to_owned(),
+            pin: addon.tree.clone(),
+        })
+        .collect();
+    units.extend(checkout.uv.iter().flat_map(|(_, uv)| packages(uv)));
+    units.extend(checkout.lock.iter().flat_map(|(_, lock)| locked(lock)));
+    Side {
+        env: checkout.env,
+        from: checkout.from,
+        units,
     }
-    let env = model.of_branch(arg, None).ok_or_else(|| {
-        Report::error(
-            Exit::Usage,
-            format!("{arg} is no environment, nor a branch of one (`odx env list` shows them)"),
-        )
-    })?;
-    Ok(Environment {
-        branch: arg.to_owned(),
-        ..env.clone()
-    })
 }
 
 /// Sides read from a file each, by `read`.
@@ -163,128 +157,6 @@ fn installed(ctx: &Context<'_>, path: &Path) -> Result<Vec<Unit>, Report> {
             }
         })
         .collect())
-}
-
-fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    output_of(&Invocation::new("git").arg("-C").arg(root).args(args))
-}
-
-/// The git ref of `env`'s branch: fetched from its own repository, else
-/// `<remote>/<branch>`, else the local branch.
-fn reference(root: &Path, env: &Environment, remote: &str) -> Result<String, Report> {
-    if let Some(repo) = &env.repo {
-        let local = format!("refs/odx/env/{}", env.name);
-        let spec = format!("+refs/heads/{}:{local}", env.branch);
-        git(root, &["fetch", "--quiet", "--no-tags", repo, &spec]).map_err(|e| {
-            Report::error(
-                Exit::Failure,
-                format!("cannot fetch {} of {repo}: {e}", env.branch),
-            )
-        })?;
-        return Ok(local);
-    }
-    [
-        format!("refs/remotes/{remote}/{}", env.branch),
-        format!("refs/heads/{}", env.branch),
-    ]
-    .into_iter()
-    .find(|candidate| {
-        git(
-            root,
-            &[
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                &format!("{candidate}^{{commit}}"),
-            ],
-        )
-        .is_ok()
-    })
-    .ok_or_else(|| {
-        Report::error(
-            Exit::Failure,
-            format!(
-                "{}: neither {remote}/{branch} nor {branch} is here; fetch it first",
-                env.name,
-                branch = env.branch
-            ),
-        )
-    })
-}
-
-/// `path` (relative to the project) at `reference`, none when it is not
-/// there.
-fn show(root: &Path, reference: &str, path: &str) -> Option<String> {
-    git(root, &["show", &format!("{reference}:./{path}")]).ok()
-}
-
-fn read_side(root: &Path, env: Environment, remote: &str) -> Result<Side, Report> {
-    let from = reference(root, &env, remote)?;
-    let invalid = |what: &str, e: String| {
-        Report::error(Exit::Failure, format!("{what} of {}: {e}", env.name))
-    };
-    let text = show(root, &from, "pyproject.toml")
-        .ok_or_else(|| invalid("pyproject.toml", format!("missing on {from}")))?;
-    let config = odx_config::parse_pyproject(&text, Path::new("pyproject.toml"))
-        .map_err(|e| invalid("pyproject.toml", e.to_string()))?
-        .ok_or_else(|| invalid("pyproject.toml", "no [tool.odx]".to_owned()))?
-        .config;
-    let mut units = addons(root, &from, &config.project_addon_dirs());
-    if let Some(text) = show(root, &from, "uv.lock") {
-        units.extend(packages(
-            &UvLock::parse(&text).map_err(|e| invalid("uv.lock", e))?,
-        ));
-    }
-    let lockfile = config.lockfile().to_string_lossy().replace('\\', "/");
-    if let Some(text) = show(root, &from, &lockfile) {
-        let lock = Lockfile::parse(&text).map_err(|e| invalid(&lockfile, e.to_string()))?;
-        units.extend(locked(&lock));
-    }
-    Ok(Side { env, from, units })
-}
-
-/// The project's own addons at `reference`: each folder directly in one of
-/// `dirs` with a manifest, pinned by its tree.
-fn addons(root: &Path, reference: &str, dirs: &[PathBuf]) -> Vec<Unit> {
-    let mut units = Vec::new();
-    for dir in dirs {
-        let dir = dir.to_string_lossy().replace('\\', "/");
-        let dir = dir.trim_end_matches('/');
-        let prefix = if dir == "." || dir.is_empty() {
-            String::new()
-        } else {
-            format!("{dir}/")
-        };
-        let listed = git(
-            root,
-            &[
-                "ls-tree",
-                "-d",
-                "--format=%(objectname) %(path)",
-                reference,
-                &format!("./{prefix}"),
-            ],
-        )
-        .unwrap_or_default();
-        units.extend(
-            listed
-                .lines()
-                .filter_map(|line| line.split_once(' '))
-                .filter_map(|(tree, path)| {
-                    let manifest = ["__manifest__.py", "__openerp__.py"]
-                        .iter()
-                        .find_map(|name| show(root, reference, &format!("{path}/{name}")))?;
-                    Some(Unit {
-                        kind: Kind::Addon,
-                        name: path.rsplit('/').next().unwrap_or(path).to_owned(),
-                        version: odx_analyze::sniff::manifest_version(&manifest),
-                        source: "project".to_owned(),
-                        pin: tree.to_owned(),
-                    })
-                }),
-        );
-    }
-    units
 }
 
 /// The files matching `patterns` that differ between `a` and `b`.
