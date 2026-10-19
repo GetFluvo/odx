@@ -8,6 +8,12 @@ ignore = [
   # term_size is unmaintained; tokei depends on it unconditionally but only
   # its command-line binary calls it, never the library odx uses.
   { id = "RUSTSEC-2020-0163", reason = "only used by the tokei binary, not by its library" },
+  # zbus 6 absorbed these crates; the Secret Service keyring store still
+  # depends on zbus 5. Unmaintained only, no vulnerability; drop once
+  # zbus-secret-service-keyring-store moves to zbus 6.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant via zbus 5 (keyring store); merged into zbus 6" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names via zbus 5 (keyring store); merged into zbus 6" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via zbus 5 (keyring store); merged into zbus 6" },
 ]
 
 [licenses]
