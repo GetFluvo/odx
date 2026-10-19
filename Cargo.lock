@@ -2760,6 +2760,7 @@ version = "0.0.4"
 dependencies = [
  "odx-config",
  "pep440_rs",
+ "toml_edit 0.25.17+spec-1.1.0",
 ]
 
 [[package]]

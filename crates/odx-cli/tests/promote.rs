@@ -3,9 +3,17 @@
 
 #![expect(clippy::unwrap_used, reason = "test helpers should fail loudly")]
 
+#[cfg(unix)]
+use std::collections::HashMap;
 use std::fmt::Write as _;
+#[cfg(unix)]
+use std::io::{Read, Write as _};
+#[cfg(unix)]
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::Command;
+#[cfg(unix)]
+use std::sync::{Arc, Mutex};
 
 use odx_core::Exit;
 use odx_core::fake::MapEnv;
@@ -23,10 +31,17 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 fn odx(root: &Path, args: &[&str]) -> (Exit, String, String) {
+    odx_with(root, "true", args)
+}
+
+/// `odx` with `uv` replaced by `uv`.
+fn odx_with(root: &Path, uv: &str, args: &[&str]) -> (Exit, String, String) {
     let mut command_line = vec!["odx"];
     command_line.extend_from_slice(args);
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    let env = MapEnv::default().with("ODX_CACHE_DIR", root.join(".cache").display().to_string());
+    let env = MapEnv::default()
+        .with("ODX_CACHE_DIR", root.join(".cache").display().to_string())
+        .with("ODX_UV", uv);
     let exit = odx_cli::run_with_env(command_line, &OsFs, &env, root, &mut out, &mut err);
     (
         exit,
@@ -88,6 +103,8 @@ fn commit_all(root: &Path, message: &str) {
 /// `19-prod`, and `19-test` with newer and older things.
 fn project(root: &Path) {
     git(root, &["init", "-q", "-b", "19-prod"]);
+    git(root, &["config", "user.name", "Odx"]);
+    git(root, &["config", "user.email", "odx@example.com"]);
     pyproject(root, "");
     let addon = |name: &str, version: &str, depends: &[&str], summary: &str| {
         write(
@@ -115,12 +132,14 @@ fn project(root: &Path) {
         &["helper", "x", "sale"],
         "Sales extras",
     );
+    commit_all(root, "add sale_x");
     addon(
         "account_due",
         "19.0.1.1.0",
         &["account"],
         "Due dates on invoices",
     );
+    commit_all(root, "account_due: invoices");
     addon("old", "19.0.1.0.0", &[], "Old");
     addon("tweak", "19.0.1.0.0", &[], "Tweaked");
     write(
@@ -131,7 +150,7 @@ fn project(root: &Path) {
         ]),
     );
     write(&root.join("odx.lock"), &odx_lock('b'));
-    commit_all(root, "test");
+    commit_all(root, "test pins");
 }
 
 #[test]
@@ -153,10 +172,16 @@ fn plans_with_their_closure() {
              \x20 x       newer         19.0.1.1.0 | 19.0.1.0.0\n\
              not copied (Odoo's own addons, or of aggregated repositories): base, sale\n\
              core drift: odoo bbbbbbbbbbbbbb | aaaaaaaaaaaaaa (copied with the pins; --no-with-odoo leaves it)\n\
-             2 to copy into prod; plan only, nothing written\n",
+             code on test not on prod (--with-code cherry-picks it):\n\
+             \x20 {} add sale_x\n\
+             2 to copy into prod; plan only (--commit or --open-pr with --yes writes it)\n",
             &sale[..14],
             &helper[..14],
             &helper[..14],
+            git(
+                root,
+                &["log", "-1", "--format=%h", "--abbrev=7", "19-test~2"]
+            ),
         )
     );
     let (exit, out, _) = odx(
@@ -374,4 +399,588 @@ fn what_cannot_be_promoted() {
     let (exit, _, err) = odx(root, &["promote", "old", "--to", "uat"]);
     assert_eq!(exit, Exit::Failure);
     assert!(err.contains("neither origin/19-uat nor 19-uat"), "{err}");
+}
+
+/// `path` on `branch`.
+#[cfg(unix)]
+fn show(root: &Path, branch: &str, path: &str) -> String {
+    git(root, &["show", &format!("{branch}:{path}")])
+}
+
+#[test]
+#[cfg(unix)]
+#[expect(clippy::too_many_lines, reason = "one scenario, step by step")]
+fn commits_the_plan() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    let (exit, _, err) = odx(root, &["promote", "sale_x", "--to", "prod", "--commit"]);
+    assert_eq!(exit, Exit::Usage);
+    assert_eq!(
+        err,
+        "error: --commit and --open-pr write a branch: add --yes to confirm\n"
+    );
+    let (exit, out, err) = odx(
+        root,
+        &["promote", "sale_x", "--to", "prod", "--commit", "--yes"],
+    );
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    let head = git(root, &["rev-parse", "--short=7", "odx/promote/prod-sale_x"]);
+    assert!(
+        out.ends_with(&format!("committed {head} on odx/promote/prod-sale_x\n")),
+        "{out}"
+    );
+    let branch = "odx/promote/prod-sale_x";
+    assert!(
+        show(root, branch, "uv.lock").contains("name = \"odoo-addon-x\"\nversion = \"19.0.1.1.0\"")
+    );
+    assert!(
+        show(root, branch, "uv.lock").contains("name = \"odoo-addon-y\"\nversion = \"19.0.2.0.0\"")
+    );
+    assert!(show(root, branch, "odx.lock").contains(&"b".repeat(40)));
+    assert_eq!(
+        git(root, &["rev-parse", &format!("{branch}~1")]),
+        git(root, &["rev-parse", "19-prod"])
+    );
+    let message = git(root, &["log", "-1", "--format=%B", branch]);
+    assert!(
+        message.starts_with("promote sale_x from test to prod\n\nPromoted with `odx promote`"),
+        "{message}"
+    );
+    assert!(
+        message.contains("| x | newer | `19.0.1.1.0` | `19.0.1.0.0` |"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Odoo core: `bbbbbbbbbbbb` on test, `aaaaaaaaaaaa` on prod (copied)."),
+        "{message}"
+    );
+    assert!(
+        message
+            .contains("Not copied (Odoo's own addons, or of aggregated repositories): base, sale."),
+        "{message}"
+    );
+    // No worktree is left behind.
+    assert_eq!(git(root, &["worktree", "list"]).lines().count(), 1);
+    // With the code, written again on the same branch.
+    let (exit, out, _) = odx(
+        root,
+        &[
+            "--json",
+            "promote",
+            "sale_x",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--with-code",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{out}");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["applied"]["picked"], 1);
+    assert_eq!(value["applied"]["branch"], branch);
+    assert_eq!(value["applied"]["pull_request"], serde_json::Value::Null);
+    assert_eq!(value["code"][0]["subject"], "add sale_x");
+    assert!(show(root, branch, "modules/sale_x/__manifest__.py").contains("Sales extras"));
+    let (_, out, _) = odx(
+        root,
+        &[
+            "promote",
+            "sale_x",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--with-code",
+        ],
+    );
+    assert!(out.contains("(1 commit(s) cherry-picked)\n"), "{out}");
+    // Only code to promote, and only the code.
+    let (exit, _, err) = odx(
+        root,
+        &[
+            "promote",
+            "account_due",
+            "--to",
+            "prod",
+            "--no-with-odoo",
+            "--commit",
+            "--yes",
+        ],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(
+        err,
+        "error: nothing to write: prod has the pins already (--with-code promotes the code)\n"
+    );
+    let (exit, out, _) = odx(
+        root,
+        &[
+            "promote",
+            "account_due",
+            "--to",
+            "prod",
+            "--no-with-odoo",
+            "--commit",
+            "--yes",
+            "--with-code",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{out}");
+    assert_eq!(
+        git(
+            root,
+            &["log", "-1", "--format=%s", "odx/promote/prod-account_due"]
+        ),
+        "account_due: invoices"
+    );
+    // Warnings go into the message.
+    let (exit, _, _) = odx(
+        root,
+        &["promote", "tweak", "--to", "prod", "--commit", "--yes"],
+    );
+    assert_eq!(exit, Exit::Success);
+    let message = git(
+        root,
+        &["log", "-1", "--format=%B", "odx/promote/prod-tweak"],
+    );
+    assert!(
+        message.contains("Warning: tweak differs at the same version"),
+        "{message}"
+    );
+    let (_, out, _) = odx(
+        root,
+        &[
+            "--json",
+            "promote",
+            "helper",
+            "--to",
+            "prod",
+            "--no-with-odoo",
+        ],
+    );
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["noop"], true);
+    // Nothing to promote writes nothing.
+    let (exit, out, _) = odx(
+        root,
+        &[
+            "promote",
+            "helper",
+            "--to",
+            "prod",
+            "--no-with-odoo",
+            "--commit",
+            "--yes",
+        ],
+    );
+    assert_eq!(exit, Exit::Success);
+    assert!(
+        out.ends_with("nothing to promote: prod has all of it\n"),
+        "{out}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+#[expect(clippy::too_many_lines, reason = "one scenario, step by step")]
+fn what_stops_writing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    // The branch is checked out elsewhere.
+    let other = tmp.path().join("other");
+    let other_text = other.display().to_string();
+    git(
+        root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "odx/promote/prod-sale_x",
+            &other_text,
+            "19-prod",
+        ],
+    );
+    let (exit, _, err) = odx(
+        root,
+        &["promote", "sale_x", "--to", "prod", "--commit", "--yes"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.starts_with("error: cannot prepare odx/promote/prod-sale_x: "),
+        "{err}"
+    );
+    git(root, &["worktree", "remove", "--force", &other_text]);
+    // uv fails, or re-resolves something else.
+    let (exit, _, err) = odx_with(
+        root,
+        "odx-surely-missing-uv",
+        &["promote", "sale_x", "--to", "prod", "--commit", "--yes"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("odx-surely-missing-uv lock"), "{err}");
+    let uv = tmp.path().join("uv");
+    write(
+        &uv,
+        "#!/bin/sh\nsed 's/version = \"19.0.2.0.0\"/version = \"19.0.2.0.1\"/' uv.lock > uv.lock.new && mv uv.lock.new uv.lock\n",
+    );
+    std::fs::set_permissions(&uv, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let uv = uv.display().to_string();
+    let (exit, _, err) = odx_with(
+        root,
+        &uv,
+        &["promote", "sale_x", "--to", "prod", "--commit", "--yes"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(
+        err,
+        "error: transitive drift: `uv lock` re-resolved odoo-addon-y (--allow-transitive keeps it)\n"
+    );
+    let (exit, _, _) = odx_with(
+        root,
+        &uv,
+        &[
+            "promote",
+            "sale_x",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--allow-transitive",
+        ],
+    );
+    assert_eq!(exit, Exit::Success);
+    // A group the target lacks.
+    pyproject(root, "");
+    let text = std::fs::read_to_string(root.join("pyproject.toml")).unwrap();
+    write(
+        &root.join("pyproject.toml"),
+        &text.replace(
+            "[tool.odx]",
+            "[project.optional-dependencies]\noca = [\"odoo-addon-x==19.0.1.1.0\"]\n\n[tool.odx]",
+        ),
+    );
+    commit_all(root, "x declared");
+    let (exit, _, err) = odx(
+        root,
+        &["promote", "sale_x", "--to", "prod", "--commit", "--yes"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(
+        err,
+        "error: the target has no dependency group oca for odoo-addon-x==19.0.1.1.0\n"
+    );
+    // A commit that does not apply.
+    git(root, &["checkout", "-q", "19-prod"]);
+    write(
+        &root.join("modules/account_due/__manifest__.py"),
+        &manifest("19.0.1.0.1", &["account"], "Due dates, fixed"),
+    );
+    commit_all(root, "account_due: fix");
+    git(root, &["checkout", "-q", "19-test"]);
+    let (exit, _, err) = odx(
+        root,
+        &[
+            "promote",
+            "account_due",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--with-code",
+        ],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("account_due: invoices does not apply on prod: "),
+        "{err}"
+    );
+    assert_eq!(git(root, &["worktree", "list"]).lines().count(), 1);
+}
+
+#[test]
+#[cfg(unix)]
+fn branch_specific_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "19-prod"]);
+    git(root, &["config", "user.name", "Odx"]);
+    git(root, &["config", "user.email", "odx@example.com"]);
+    pyproject(root, "branch_specific = [\".answers.yml\", \"local/*\"]\n");
+    write(
+        &root.join("modules/a/__manifest__.py"),
+        &manifest("19.0.1.0.0", &[], "A"),
+    );
+    write(&root.join(".answers.yml"), "env: prod\n");
+    write(&root.join("local/prod.txt"), "prod only\n");
+    commit_all(root, "prod");
+    git(root, &["checkout", "-q", "-b", "19-test"]);
+    write(
+        &root.join("modules/a/__manifest__.py"),
+        &manifest("19.0.1.1.0", &[], "A"),
+    );
+    write(&root.join(".answers.yml"), "env: test\n");
+    write(&root.join("local/test.txt"), "test only\n");
+    git(root, &["rm", "-q", "local/prod.txt"]);
+    commit_all(root, "a: more");
+    let (exit, _, err) = odx(
+        root,
+        &[
+            "promote",
+            "a",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--with-code",
+            "--include-branch-specific",
+            "README.md",
+        ],
+    );
+    assert_eq!(exit, Exit::Usage);
+    assert_eq!(
+        err,
+        "error: README.md is not branch-specific (`branch_specific` in [tool.odx.environments]): nothing to include\n"
+    );
+    let (exit, out, _) = odx(
+        root,
+        &[
+            "promote",
+            "a",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--with-code",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{out}");
+    let branch = "odx/promote/prod-a";
+    assert_eq!(show(root, branch, ".answers.yml"), "env: prod");
+    assert_eq!(show(root, branch, "local/prod.txt"), "prod only");
+    assert!(
+        git(root, &["ls-tree", "-r", "--name-only", branch])
+            .lines()
+            .all(|path| path != "local/test.txt")
+    );
+    assert!(show(root, branch, "modules/a/__manifest__.py").contains("19.0.1.1.0"));
+    // Named, a branch-specific file goes along, and one the source lacks
+    // goes away.
+    let (exit, out, _) = odx(
+        root,
+        &[
+            "promote",
+            "a",
+            "--to",
+            "prod",
+            "--commit",
+            "--yes",
+            "--with-code",
+            "--include-branch-specific",
+            ".answers.yml",
+            "--include-branch-specific",
+            "local/prod.txt",
+        ],
+    );
+    assert_eq!(exit, Exit::Success, "{out}");
+    assert!(
+        out.contains("!!! branch-specific content included: .answers.yml, local/prod.txt !!!\n"),
+        "{out}"
+    );
+    assert_eq!(show(root, branch, ".answers.yml"), "env: test");
+    let tracked = git(root, &["ls-tree", "-r", "--name-only", branch]);
+    assert!(
+        !tracked.contains("local/prod.txt") && !tracked.contains("local/test.txt"),
+        "{tracked}"
+    );
+    let message = git(root, &["log", "-1", "--format=%B", branch]);
+    assert!(
+        message.contains("**Branch-specific content included**: .answers.yml, local/prod.txt"),
+        "{message}"
+    );
+}
+
+#[cfg(unix)]
+type Routes = Arc<Mutex<HashMap<String, (u16, String)>>>;
+
+/// A server on localhost answering from `routes` by method and path, 404
+/// otherwise; the requests it got, as `METHOD path body`.
+#[cfg(unix)]
+fn serve(routes: &Routes) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let routes = Arc::clone(routes);
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let log = Arc::clone(&seen);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => request.extend(buffer.iter().take(n)),
+                }
+            }
+            let text = String::from_utf8_lossy(&request).into_owned();
+            let length: usize = text
+                .lines()
+                .find_map(|line| {
+                    line.to_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|v| v.trim().parse().unwrap_or(0))
+                })
+                .unwrap_or(0);
+            let head_end = text.find("\r\n\r\n").map_or(text.len(), |at| at + 4);
+            let mut body = request.get(head_end..).unwrap_or_default().to_vec();
+            while body.len() < length {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => body.extend(buffer.iter().take(n)),
+                }
+            }
+            let mut words = text.split_whitespace();
+            let method = words.next().unwrap_or("GET").to_owned();
+            let target = words.next().unwrap_or("/").to_owned();
+            let path = target.split('?').next().unwrap_or(&target).to_owned();
+            log.lock().unwrap().push(format!(
+                "{method} {path} {}",
+                String::from_utf8_lossy(&body)
+            ));
+            let (status, answer) = routes
+                .lock()
+                .unwrap()
+                .get(&format!("{method} {path}"))
+                .cloned()
+                .unwrap_or((404, String::new()));
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
+            );
+        }
+    });
+    (base, seen)
+}
+
+#[cfg(unix)]
+fn file_url(path: &Path) -> String {
+    let text = path.display().to_string().replace('\\', "/");
+    if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn opens_the_pull_request() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("project");
+    std::fs::create_dir_all(&root).unwrap();
+    project(&root);
+    // No forge behind the remote.
+    let (exit, _, err) = odx(
+        &root,
+        &["promote", "sale_x", "--to", "prod", "--open-pr", "--yes"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(err, "error: origin is not on a forge\n");
+    // A forge on localhost, its repository a local bare one.
+    let bare = tmp.path().join("bare.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", &bare.display().to_string()],
+    );
+    let routes: Routes = Arc::default();
+    let (api, seen) = serve(&routes);
+    let route = |key: &str, status: u16, body: &str| {
+        routes
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), (status, body.to_owned()));
+    };
+    route("GET /api/v3/meta", 200, "{}");
+    route(
+        "GET /api/v3/repos/acme/project",
+        200,
+        r#"{"permissions":{"push":true}}"#,
+    );
+    route(
+        "POST /api/v3/repos/acme/project/pulls",
+        201,
+        &format!(r#"{{"number":3,"html_url":"{api}/acme/project/pull/3"}}"#),
+    );
+    let remote = format!("{api}/acme/project.git");
+    git(&root, &["remote", "add", "origin", &remote]);
+    let out = Command::new(env!("CARGO_BIN_EXE_odx"))
+        .current_dir(&root)
+        .args(["promote", "sale_x", "--to", "prod", "--open-pr", "--yes"])
+        .env("ODX_UV", "true")
+        .env("ODX_CACHE_DIR", tmp.path().join("cache"))
+        .env("GIT_CONFIG_COUNT", "1")
+        .env(
+            "GIT_CONFIG_KEY_0",
+            format!("url.{}.insteadOf", file_url(&bare)),
+        )
+        .env("GIT_CONFIG_VALUE_0", &remote)
+        .output()
+        .unwrap();
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    );
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stdout.ends_with(&format!(
+            "pushed to origin\nopened {api}/acme/project/pull/3\n"
+        )),
+        "{stdout}"
+    );
+    let pushed = git(
+        &bare,
+        &["log", "-1", "--format=%s", "odx/promote/prod-sale_x"],
+    );
+    assert_eq!(pushed, "promote sale_x from test to prod");
+    let requests = seen.lock().unwrap().join("\n");
+    assert!(requests.contains("\"base\":\"19-prod\""), "{requests}");
+    assert!(
+        requests.contains("\"head\":\"odx/promote/prod-sale_x\""),
+        "{requests}"
+    );
+    // An environment in a repository that is not on a forge.
+    let prod = tmp.path().join("prod");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "19-prod",
+            &root.display().to_string(),
+            &prod.display().to_string(),
+        ],
+    );
+    pyproject(
+        &root,
+        &format!(
+            "[tool.odx.environments.env.prod]\nrepo = \"{}\"\n",
+            prod.display()
+        ),
+    );
+    commit_all(&root, "prod elsewhere");
+    let (exit, _, err) = odx(
+        &root,
+        &["promote", "sale_x", "--to", "prod", "--open-pr", "--yes"],
+    );
+    assert_eq!(exit, Exit::Failure);
+    assert_eq!(
+        err,
+        format!("error: {} is not on a forge\n", prod.display())
+    );
 }

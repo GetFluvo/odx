@@ -298,6 +298,15 @@ impl Model {
         })
     }
 
+    /// Whether `path` (relative to the project, `/`-separated) is one of
+    /// the files that differ per environment.
+    #[must_use]
+    pub fn is_branch_specific(&self, path: &str) -> bool {
+        self.branch_specific
+            .iter()
+            .any(|pattern| glob(pattern.trim_start_matches("./"), path))
+    }
+
     /// The environment named `name`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&Environment> {
@@ -521,6 +530,8 @@ mod tests {
         );
         assert!(mixed.of_branch("main", None).is_none());
         assert_eq!(mixed.branch_specific, [".x"]);
+        assert!(mixed.is_branch_specific(".x"));
+        assert!(!mixed.is_branch_specific("pyproject.toml"));
         // Without a preset, declared environments are the whole model.
         let explicit = model(
             "[tool.odx.environments]\n\

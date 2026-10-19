@@ -926,6 +926,10 @@ pub enum PortCommand {
 
 /// Arguments of `odx promote`.
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are independent switches"
+)]
 pub struct PromoteArgs {
     /// Modules to promote, with their dependency closure.
     #[arg(required_unless_present_any = ["feature", "search"])]
@@ -957,6 +961,24 @@ pub struct PromoteArgs {
     /// Leave the Odoo core revision of the target as it is.
     #[arg(long)]
     pub no_with_odoo: bool,
+    /// Cherry-pick the source's commits on the closure's project addons that the target lacks.
+    #[arg(long)]
+    pub with_code: bool,
+    /// Keep what `uv lock` re-resolves outside the closure.
+    #[arg(long)]
+    pub allow_transitive: bool,
+    /// Also copy this branch-specific file or folder (repeat per path).
+    #[arg(long, value_name = "PATH")]
+    pub include_branch_specific: Vec<String>,
+    /// Write the plan as a commit on `odx/promote/<to>-<selection>`.
+    #[arg(long)]
+    pub commit: bool,
+    /// Commit, push the branch and open its pull request.
+    #[arg(long)]
+    pub open_pr: bool,
+    /// Confirm writing (with --commit or --open-pr).
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// `odx env` subcommands.

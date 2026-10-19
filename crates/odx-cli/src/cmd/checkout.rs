@@ -16,6 +16,8 @@ use super::{Report, output_of};
 pub(crate) struct AddonAt {
     /// Technical name.
     pub(crate) name: String,
+    /// Folder, relative to the project.
+    pub(crate) path: String,
     /// The folder's tree.
     pub(crate) tree: String,
     /// The manifest's text.
@@ -31,6 +33,8 @@ pub(crate) struct Checkout {
     pub(crate) from: String,
     /// Its configuration.
     pub(crate) config: OdxConfig,
+    /// Its `pyproject.toml`.
+    pub(crate) pyproject: String,
     /// Its own addons.
     pub(crate) addons: Vec<AddonAt>,
     /// Its `uv.lock`, text and parsed.
@@ -151,6 +155,7 @@ pub(crate) fn read(root: &Path, env: Environment, remote: &str) -> Result<Checko
         env,
         from,
         config,
+        pyproject,
         addons,
         uv,
         lock,
@@ -190,6 +195,7 @@ fn addons(root: &Path, reference: &str, dirs: &[PathBuf]) -> Vec<AddonAt> {
                         .find_map(|name| show(root, reference, &format!("{path}/{name}")))?;
                     Some(AddonAt {
                         name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+                        path: path.to_owned(),
                         tree: tree.to_owned(),
                         manifest,
                     })
