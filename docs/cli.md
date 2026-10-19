@@ -853,6 +853,51 @@ identical entries there are the proof that one environment runs exactly
 what the other ran. `--json` lists every entry with its kind, change and
 both pins.
 
+### Promoting addons
+
+```console
+$ odx promote sale_x --to prod
+promote test (refs/remotes/origin/19-test) into prod (refs/remotes/origin/19-prod), series 19.0
+selection: sale_x
+  sale_x  new           19.0.1.0.0 0748fce7724a9e | -
+  helper  identical     19.0.1.0.0 eaa0bb8a8497d7 | 19.0.1.0.0 eaa0bb8a8497d7
+  x       newer         19.0.1.1.0 sha256:41c9e0 | 19.0.1.0.0 sha256:9b03f4
+not copied (Odoo's own addons, or of aggregated repositories): base, sale
+core drift: odoo bbbbbbbbbbbbbb | aaaaaaaaaaaaaa (copied with the pins; --no-with-odoo leaves it)
+2 to copy into prod; plan only, nothing written
+$ odx promote --feature invoicing --to prod
+$ odx promote --search "invoicing" --to prod                       # candidates, scored
+$ odx promote --search "invoicing" --select account_due --to prod   # the plan of one
+```
+
+`odx promote` plans copying exactly what the source environment runs for
+the selected addons and everything they depend on (`depends` of the
+project's addons, the dependencies `uv.lock` records between addon
+packages) into the target. Both sides are read through git as for `odx env
+diff`. `--from` defaults to the one environment allowed to promote into
+`--to` that is not disposable; the edge must be in `promotion`, and both
+environments must run the same series (`odx upgrade` prepares a move to
+another series).
+
+Every addon of the closure is listed with its pin on both sides. The plan is
+refused (exit 1) when the target has a newer version of a package
+(`--allow-downgrade`, or `[tool.odx.promote] allow_downgrade`), has the
+addon from another source (`--allow-source-change`), or has a newer version
+of a project addon (sync the target into the source first). A project addon
+whose content differs at the same version, and a pinned merge whose new
+head is red on the source, are warnings. The Odoo core revision is part of
+the plan unless `--no-with-odoo` or `with_odoo = false`.
+
+`--search` scores the source's project addons (technical name, manifest
+`name`, `summary`, `category`, `description`) and feature sets (an exact
+feature name first) against the words given and their synonyms (shipped per
+Odoo domain, extended by `[tool.odx.promote] search_synonyms`), and only
+lists candidates; `--select` names the ones to plan. `--json` gives the
+candidates or the plan.
+
+The plan is all `odx promote` produces so far: writing it as a commit or a
+pull request comes next.
+
 ## Locking
 
 ```console

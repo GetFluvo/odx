@@ -926,38 +926,37 @@ pub enum PortCommand {
 
 /// Arguments of `odx promote`.
 #[derive(Debug, Args)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "command-line flags are independent switches"
-)]
 pub struct PromoteArgs {
     /// Modules to promote, with their dependency closure.
     #[arg(required_unless_present_any = ["feature", "search"])]
     pub modules: Vec<String>,
     /// Promote a feature set from [tool.odx.features].
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, value_name = "NAME", conflicts_with = "search")]
     pub feature: Option<String>,
-    /// Find modules by functional description and show candidates.
+    /// Find modules and feature sets by functional description; lists candidates.
     #[arg(long, value_name = "TEXT")]
     pub search: Option<String>,
-    /// Source environment.
+    /// The candidates of --search to promote.
+    #[arg(long, value_name = "NAMES", value_delimiter = ',', requires = "search")]
+    pub select: Vec<String>,
+    /// Source environment [default: the one environment allowed to promote into --to].
     #[arg(long, value_name = "ENV")]
     pub from: Option<String>,
     /// Target environment.
     #[arg(long, value_name = "ENV")]
-    pub to: Option<String>,
-    /// Also promote code by patch-id.
+    pub to: String,
+    /// The remote whose branches are read (local branches when it has none).
+    #[arg(long, value_name = "NAME", default_value = "origin")]
+    pub remote: String,
+    /// Copy an older package over a newer one.
     #[arg(long)]
-    pub with_code: bool,
-    /// Do not promote the Odoo core revision.
+    pub allow_downgrade: bool,
+    /// Replace an addon that comes from another source on the target.
+    #[arg(long)]
+    pub allow_source_change: bool,
+    /// Leave the Odoo core revision of the target as it is.
     #[arg(long)]
     pub no_with_odoo: bool,
-    /// Show the plan without changing anything.
-    #[arg(long)]
-    pub dry_run: bool,
-    /// Apply without confirmation.
-    #[arg(long, conflicts_with = "dry_run")]
-    pub yes: bool,
 }
 
 /// `odx env` subcommands.
