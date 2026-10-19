@@ -408,6 +408,109 @@ pub fn all_requirements(doc: &DocumentMut) -> Vec<(Option<String>, Requirement)>
     found
 }
 
+/// The requirement strings of `dist` as written, with their group (none
+/// for `[project] dependencies`), in the order [`all_requirements`] uses.
+pub fn written_requirements(doc: &DocumentMut, dist: &str) -> Vec<(Option<String>, String)> {
+    let wanted = normalize_name(dist);
+    let of = |item: &Item| -> Vec<String> {
+        item.as_array()
+            .into_iter()
+            .flat_map(|array| array.iter())
+            .filter_map(|value| value.as_str())
+            .filter(|text| {
+                parse_requirement(text).is_ok_and(|req| normalize_name(&req.name) == wanted)
+            })
+            .map(str::to_owned)
+            .collect()
+    };
+    let mut found: Vec<(Option<String>, String)> = get_path(doc, &["project", "dependencies"])
+        .map(of)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|text| (None, text))
+        .collect();
+    for table in [
+        GroupTable::OptionalDependencies,
+        GroupTable::DependencyGroups,
+    ] {
+        let groups = get_path(doc, table.path()).and_then(Item::as_table_like);
+        for (name, item) in groups.iter().flat_map(|groups| groups.iter()) {
+            found.extend(
+                of(item)
+                    .into_iter()
+                    .map(|text| (Some(name.to_owned()), text)),
+            );
+        }
+    }
+    found
+}
+
+/// The requirement array of `group` (none: `[project] dependencies`).
+fn group_array_mut<'a>(
+    doc: &'a mut DocumentMut,
+    group: Option<&str>,
+) -> Option<&'a mut toml_edit::Array> {
+    let path: Vec<&str> = match group {
+        None => vec!["project", "dependencies"],
+        Some(name) => {
+            let table = [
+                GroupTable::OptionalDependencies,
+                GroupTable::DependencyGroups,
+            ]
+            .into_iter()
+            .find(|table| {
+                get_path(doc, table.path())
+                    .and_then(Item::as_table_like)
+                    .is_some_and(|groups| groups.contains_key(name))
+            })?;
+            table.path().iter().copied().chain([name]).collect()
+        }
+    };
+    get_path_mut(doc, &path)?.as_array_mut()
+}
+
+/// Make `requirement` the one requirement of `dist` in `group` (none:
+/// `[project] dependencies`): in place of the first one there, else
+/// appended, keeping the list's layout.
+///
+/// Returns `false` when the group does not exist.
+pub fn set_requirement(
+    doc: &mut DocumentMut,
+    group: Option<&str>,
+    dist: &str,
+    requirement: &str,
+) -> bool {
+    let wanted = normalize_name(dist);
+    let Some(array) = group_array_mut(doc, group) else {
+        return false;
+    };
+    let ours = |value: &Value| {
+        value
+            .as_str()
+            .and_then(|text| parse_requirement(text).ok())
+            .is_some_and(|req| normalize_name(&req.name) == wanted)
+    };
+    let first = array.iter().position(&ours);
+    let neighbour = first.map_or_else(|| array.iter().last(), |first| array.get(first));
+    let mut value = Value::from(requirement);
+    value.decor_mut().clone_from(
+        &neighbour
+            .map(|item| item.decor().clone())
+            .unwrap_or_default(),
+    );
+    if let Some(first) = first {
+        array.replace_formatted(first, value);
+        let mut index = 0;
+        array.retain(|item| {
+            index += 1;
+            index - 1 == first || !ours(item)
+        });
+    } else {
+        array.push_formatted(value);
+    }
+    true
+}
+
 /// Append a requirement string to group `name`, keeping the list's layout.
 ///
 /// Returns `false` when the group does not exist.
@@ -589,6 +692,58 @@ pub fn remove_uv_source(doc: &mut DocumentMut, dist: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn written_and_set_requirements() {
+        let mut doc: DocumentMut = "[project]\nname = \"p\"\ndependencies = [\"odoo-addon-a==1\", \"other\"]\n\n\
+             [project.optional-dependencies]\noca = [\n    \"odoo-addon-b==1\",\n    \"odoo_addon_b>=0\",\n]\n\n\
+             [dependency-groups]\ndev = []\n"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            written_requirements(&doc, "odoo_addon_a"),
+            [(None, "odoo-addon-a==1".to_owned())]
+        );
+        assert_eq!(written_requirements(&doc, "odoo-addon-b").len(), 2);
+        assert!(set_requirement(
+            &mut doc,
+            Some("oca"),
+            "odoo-addon-b",
+            "odoo-addon-b==2"
+        ));
+        assert!(set_requirement(
+            &mut doc,
+            None,
+            "odoo-addon-a",
+            "odoo-addon-a==2"
+        ));
+        assert!(set_requirement(
+            &mut doc,
+            Some("dev"),
+            "odoo-addon-c",
+            "odoo-addon-c==1"
+        ));
+        assert!(set_requirement(
+            &mut doc,
+            Some("oca"),
+            "odoo-addon-d",
+            "odoo-addon-d==1"
+        ));
+        assert!(!set_requirement(
+            &mut doc,
+            Some("nope"),
+            "odoo-addon-d",
+            "x"
+        ));
+        assert_eq!(
+            doc.to_string(),
+            "[project]\nname = \"p\"\ndependencies = [\"odoo-addon-a==2\", \"other\"]\n\n\
+             [project.optional-dependencies]\noca = [\n    \"odoo-addon-b==2\",\n    \"odoo-addon-d==1\",\n]\n\n\
+             [dependency-groups]\ndev = [\"odoo-addon-c==1\"]\n"
+        );
+        let mut bare: DocumentMut = "[project]\nname = \"p\"\n".parse().unwrap();
+        assert!(!set_requirement(&mut bare, None, "a", "a"));
+    }
 
     #[test]
     fn every_requirement_with_its_group() {

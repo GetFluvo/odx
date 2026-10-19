@@ -70,6 +70,24 @@ Options:
   -q, --quiet
           Errors only
 
+      --with-code
+          Cherry-pick the source's commits on the closure's project addons that the target lacks
+
+      --allow-transitive
+          Keep what `uv lock` re-resolves outside the closure
+
+      --include-branch-specific <PATH>
+          Also copy this branch-specific file or folder (repeat per path)
+
+      --commit
+          Write the plan as a commit on `odx/promote/<to>-<selection>`
+
+      --open-pr
+          Commit, push the branch and open its pull request
+
+      --yes
+          Confirm writing (with --commit or --open-pr)
+
   -h, --help
           Print help
 

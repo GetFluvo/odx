@@ -15,6 +15,7 @@ use std::str::FromStr as _;
 use odx_config::lock::Lockfile;
 use odx_config::uvlock::{UvLock, UvPackage};
 
+pub mod copy;
 pub mod promote;
 pub mod search;
 

@@ -895,8 +895,37 @@ Odoo domain, extended by `[tool.odx.promote] search_synonyms`), and only
 lists candidates; `--select` names the ones to plan. `--json` gives the
 candidates or the plan.
 
-The plan is all `odx promote` produces so far: writing it as a commit or a
-pull request comes next.
+The plan also lists the source's commits on the closure's project addons
+that the target does not have (compared by patch id): the code that goes
+with the pins.
+
+```console
+$ odx promote sale_x --to prod --commit --yes                 # a commit on odx/promote/prod-sale_x
+$ odx promote sale_x --to prod --commit --yes --with-code     # the missing commits cherry-picked first
+$ odx promote sale_x --to prod --open-pr --yes                # pushed, and its pull request opened
+```
+
+`--commit` writes the plan on `odx/promote/<to>-<selection>` (the feature
+name with `--feature`), branched from the target branch in a temporary
+worktree, so the checkout is left alone. For every package of the closure it
+copies the requirement strings of `pyproject.toml` (into the same group),
+the `[tool.uv.sources]` entry and the `uv.lock` blocks verbatim, and the
+`odx.lock` entries; the Odoo core revision too unless `--no-with-odoo`. It
+then runs `uv lock` there and refuses when that re-resolves anything else
+(`transitive drift`; `--allow-transitive` keeps it). `--with-code`
+cherry-picks the listed commits first, authors kept; a commit that does not
+apply stops the promotion. Writing needs `--yes`: odx asks no questions.
+
+Branch-specific files are never promoted: what cherry-picked commits change
+in them is put back as the target has it. `--include-branch-specific <path>`
+copies one such file or folder from the source anyway (or removes it when
+the source has none); the path must match `branch_specific`, it is repeated
+per path, and the output and the commit message say so loudly.
+
+`--open-pr` also pushes the branch to the environment's repository (its
+`repo`, else `--remote`) and opens a pull request into the environment's
+branch, with every addon and its pin on both sides in the description.
+Approvals stay with the forge's branch protection.
 
 ## Locking
 

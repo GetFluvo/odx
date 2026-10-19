@@ -36,6 +36,7 @@ pub(crate) mod migrate;
 pub(crate) mod pin;
 pub(crate) mod port;
 pub(crate) mod promote;
+pub(crate) mod promote_apply;
 pub(crate) mod propose;
 pub(crate) mod sniff;
 pub(crate) mod stats;

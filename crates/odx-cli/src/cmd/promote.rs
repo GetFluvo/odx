@@ -14,6 +14,8 @@ use super::Report;
 use super::aggregate::prepare;
 use super::checkout::{Checkout, environment, read};
 use super::env::model;
+use super::promote_apply::{Applied, addon_paths, apply, missing_commits};
+use super::propose::{opened_json, opened_text};
 use crate::Context;
 use crate::cli::{GlobalArgs, PromoteArgs};
 
@@ -79,10 +81,24 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             names.join(", ")
         )),
     })?;
-    let out = if global.json {
-        json(&from, &to, &planned)
+    let commits = missing_commits(root, &from.from, &to.from, &addon_paths(&from, &planned));
+    let applied = if (args.commit || args.open_pr)
+        && !planned.refused()
+        && !(planned.is_noop() && commits.is_empty())
+    {
+        Some(apply(ctx, root, &model, args, [&from, &to], &planned)?)
     } else {
-        text(&from, &to, &planned)
+        None
+    };
+    let done = Done {
+        commits: &commits,
+        with_code: args.with_code,
+        applied: applied.as_ref(),
+    };
+    let out = if global.json {
+        json(&from, &to, &planned, &done)
+    } else {
+        text(&from, &to, &planned, &done)
     };
     Ok(Report {
         exit: if planned.refused() {
@@ -277,7 +293,7 @@ fn describe(unit: Option<&Unit>) -> String {
     )
 }
 
-const fn status(change: Change) -> &'static str {
+pub(crate) const fn status(change: Change) -> &'static str {
     match change {
         Change::Identical => "identical",
         Change::Ahead => "newer",
@@ -306,7 +322,17 @@ fn verdict(item: &Item, to: &str) -> String {
     }
 }
 
-fn text(from: &Checkout, to: &Checkout, plan: &Plan) -> String {
+/// What came of the plan besides itself.
+struct Done<'a> {
+    /// The source's commits on the closure's project addons the target lacks.
+    commits: &'a [String],
+    /// Whether they were cherry-picked.
+    with_code: bool,
+    /// What writing the plan did.
+    applied: Option<&'a Applied>,
+}
+
+fn text(from: &Checkout, to: &Checkout, plan: &Plan, done: &Done<'_>) -> String {
     let mut out = format!(
         "promote {} ({}) into {} ({}), series {}\nselection: {}\n",
         from.env.name,
@@ -348,6 +374,24 @@ fn text(from: &Checkout, to: &Checkout, plan: &Plan) -> String {
             describe(theirs.as_ref())
         );
     }
+    if !done.commits.is_empty() {
+        let _ = writeln!(
+            out,
+            "code on {} not on {}{}:",
+            from.env.name,
+            to.env.name,
+            if done.with_code {
+                ""
+            } else {
+                " (--with-code cherry-picks it)"
+            }
+        );
+        for commit in done.commits {
+            let (sha, subject) = commit.split_once(' ').unwrap_or((commit, ""));
+            let short: String = sha.chars().take(7).collect();
+            let _ = writeln!(out, "  {short} {subject}");
+        }
+    }
     for warning in &plan.warnings {
         let _ = writeln!(out, "warning: {warning}");
     }
@@ -356,21 +400,40 @@ fn text(from: &Checkout, to: &Checkout, plan: &Plan) -> String {
         .iter()
         .filter(|item| item.change != Change::Identical)
         .count();
+    if let Some(applied) = done.applied {
+        if !applied.included.is_empty() {
+            let _ = writeln!(
+                out,
+                "!!! branch-specific content included: {} !!!",
+                applied.included.join(", ")
+            );
+        }
+        let short: String = applied.commit.chars().take(7).collect();
+        let _ = write!(out, "committed {short} on {}", applied.branch);
+        if applied.picked > 0 {
+            let _ = write!(out, " ({} commit(s) cherry-picked)", applied.picked);
+        }
+        out.push('\n');
+        if let Some(pushed) = &applied.pushed {
+            out.push_str(&opened_text(pushed));
+        }
+        return out;
+    }
     let _ = if plan.refused() {
         writeln!(out, "refused: resolve the conflicts above; nothing written")
-    } else if plan.is_noop() {
+    } else if plan.is_noop() && done.commits.is_empty() {
         writeln!(out, "nothing to promote: {} has all of it", to.env.name)
     } else {
         writeln!(
             out,
-            "{copied} to copy into {}; plan only, nothing written",
+            "{copied} to copy into {}; plan only (--commit or --open-pr with --yes writes it)",
             to.env.name
         )
     };
     out
 }
 
-fn json(from: &Checkout, to: &Checkout, plan: &Plan) -> String {
+fn json(from: &Checkout, to: &Checkout, plan: &Plan, done: &Done<'_>) -> String {
     let side = |checkout: &Checkout| {
         serde_json::json!({
             "env": checkout.env.name,
@@ -417,7 +480,18 @@ fn json(from: &Checkout, to: &Checkout, plan: &Plan) -> String {
         })),
         "warnings": plan.warnings,
         "refused": plan.refused(),
-        "noop": plan.is_noop(),
+        "noop": plan.is_noop() && done.commits.is_empty(),
+        "code": done.commits.iter().map(|commit| {
+            let (sha, subject) = commit.split_once(' ').unwrap_or((commit, ""));
+            serde_json::json!({ "sha": sha, "subject": subject })
+        }).collect::<Vec<_>>(),
+        "applied": done.applied.map(|applied| serde_json::json!({
+            "branch": applied.branch,
+            "commit": applied.commit,
+            "picked": applied.picked,
+            "included": applied.included,
+            "pull_request": applied.pushed.as_ref().map(opened_json),
+        })),
     });
     format!("{value:#}\n")
 }

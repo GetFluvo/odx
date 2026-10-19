@@ -15,6 +15,7 @@ categories.workspace = true
 [dependencies]
 odx-config.workspace = true
 pep440_rs.workspace = true
+toml_edit.workspace = true
 
 [lints]
 workspace = true
