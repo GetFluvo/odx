@@ -2,23 +2,34 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Compare the pins of two environments
+Compare what two environments run, addon by addon
 
 Usage: odx env diff [OPTIONS] <A> <B>
 
 Arguments:
   <A>
-          First environment
+          First environment, or a branch of one
 
   <B>
-          Second environment
+          Second environment, or a branch of one
 
 Options:
   -C, --project-dir <DIR>
           Run as if started in DIR
 
+      --remote <NAME>
+          The remote whose branches are compared (local branches when it has none)
+          
+          [default: origin]
+
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
+
+      --vendored <A> <B>
+          Compare two vendor manifests (`.odx/vendor.lock`) of the environments instead
+
+      --installed <A> <B>
+          Compare the wheels installed in two virtual environments (or site-packages) instead
 
   -j, --jobs <N>
           Override the number of parallel jobs

@@ -185,7 +185,7 @@ jobs:
             | jq -r '.packages[] | select(.name == "odx-cli") | .version')"
           args=()
           for crate in odx-core odx-config odx-git odx-forge odx-aggregate odx-analyze \
-            odx-platform odx-vendor odx-dev odx-sync odx-index odx-port odx-lint \
+            odx-platform odx-vendor odx-dev odx-sync odx-index odx-port odx-lint odx-env \
             odx-verdicts odx-dashboard git-aggregate-rs odx-cli; do
             status="$(curl -s -o /dev/null -w '%{http_code}' -A 'odx release (github.com/GetFluvo/odx)' \
               "https://crates.io/api/v1/crates/$crate/$version")"

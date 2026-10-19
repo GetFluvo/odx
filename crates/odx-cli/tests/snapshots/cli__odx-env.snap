@@ -8,7 +8,7 @@ Usage: odx env [OPTIONS] <COMMAND>
 
 Commands:
   list  The environments with their branches, series and promotion edges
-  diff  Compare the pins of two environments
+  diff  Compare what two environments run, addon by addon
   help  Print this message or the help of the given subcommand(s)
 
 Options:

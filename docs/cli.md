@@ -817,6 +817,42 @@ branch-specific: .template-answers.yml
 `*` marks the environment of the current branch. `odx suggest --env <name>`
 and the dashboard use each environment's series.
 
+### Comparing environments
+
+```console
+$ odx env diff test prod
+test (refs/remotes/origin/19-test) and prod (refs/remotes/origin/19-prod)
+newer in test:
+  account_invoice_x  19.0.1.1.0 tree dcbe79a | 19.0.1.0.0 tree f13f539
+  odoo-addon-sale-y  19.0.1.2.0 sha256:41c9e0a | 19.0.1.1.0 sha256:9b03f4d
+changed:
+  repository pos     tree 3d1f9a2 | tree 77ab0c1
+only in test:
+  odoo-addon-z       19.0.1.0.0 sha256:e2f6b11 | -
+branch-specific files that differ (never promoted):
+  .template-answers.yml
+4 differ, 38 identical
+```
+
+`odx env diff` reads `pyproject.toml`, `uv.lock` and `odx.lock` of both
+environments' branches through git, without checking anything out:
+`<remote>/<branch>` (`--remote`, default `origin`), else the local branch; an
+environment with its own `repo` is fetched from there. It compares, by
+name, the project's own addons (by the tree of their folder, and their
+manifest version), every package `uv.lock` resolves (by wheel hash or
+commit), the aggregated repositories (by the tree they build) and the Odoo
+core revision. Each is identical, newer or older (by version), changed (a
+different pin, same version), from another source, or only on one side; a
+series mismatch is reported first. Fetch first: odx compares what git has.
+
+An environment or one of its branches can be named (`odx env diff
+staging/sprint-4 prod` for the `staging/*` pattern of the `odoo-sh` preset).
+`--vendored A B` compares two vendor manifests and `--installed A B` the
+wheels installed in two virtual environments, file hash by file hash:
+identical entries there are the proof that one environment runs exactly
+what the other ran. `--json` lists every entry with its kind, change and
+both pins.
+
 ## Locking
 
 ```console

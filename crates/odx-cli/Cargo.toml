@@ -28,6 +28,7 @@ odx-aggregate.workspace = true
 odx-analyze.workspace = true
 odx-config.workspace = true
 odx-dev.workspace = true
+odx-env.workspace = true
 odx-core = { workspace = true, features = ["system"] }
 odx-forge.workspace = true
 odx-git.workspace = true

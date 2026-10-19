@@ -2697,6 +2697,7 @@ dependencies = [
  "odx-core",
  "odx-dashboard",
  "odx-dev",
+ "odx-env",
  "odx-forge",
  "odx-git",
  "odx-index",
@@ -2756,6 +2757,10 @@ dependencies = [
 [[package]]
 name = "odx-env"
 version = "0.0.4"
+dependencies = [
+ "odx-config",
+ "pep440_rs",
+]
 
 [[package]]
 name = "odx-forge"
