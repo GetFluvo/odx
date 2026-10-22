@@ -2681,6 +2681,10 @@ dependencies = [
 [[package]]
 name = "odx-bot"
 version = "0.0.7"
+dependencies = [
+ "odx-dashboard",
+ "odx-forge",
+]
 
 [[package]]
 name = "odx-cli"
