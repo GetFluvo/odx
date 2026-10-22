@@ -247,23 +247,60 @@ pub fn table(dashboard: &Dashboard) -> String {
 /// entry is a box `- [ ] <!-- odx:<action> <id> -->` that [`ticked`] reads.
 #[must_use]
 pub fn markdown(dashboard: &Dashboard, checkboxes: bool) -> String {
-    let mut out = format!("# odx dashboard for {}\n", dashboard.series);
+    format!(
+        "# odx dashboard for {}\n{}",
+        dashboard.series,
+        sections(dashboard, &|_, _| if checkboxes {
+            ActionLine::Checkbox
+        } else {
+            ActionLine::Hidden
+        })
+    )
+}
+
+/// How [`sections`] writes one action of an entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionLine {
+    /// A box `- [ ] <action> <!-- odx:<action> <id> -->` that [`ticked`] reads.
+    Checkbox,
+    /// The same box, ticked.
+    Ticked,
+    /// A plain line `- <action>: <text>`, nothing to tick.
+    Note(String),
+    /// Nothing.
+    Hidden,
+}
+
+/// The sections of the dashboard as Markdown, each action of an entry
+/// written as `line` says; the heading is left to the caller.
+#[must_use]
+pub fn sections(dashboard: &Dashboard, line: &dyn Fn(&Entry, Action) -> ActionLine) -> String {
+    let mut out = String::new();
     for section in dashboard.sections.iter().filter(|s| !s.entries.is_empty()) {
-        let _ = write!(out, "\n## {}\n\n", section.kind.title());
+        let _ = write!(
+            out,
+            "\n## {} ({})\n\n",
+            section.kind.title(),
+            section.entries.len()
+        );
         for entry in &section.entries {
             let _ = writeln!(out, "- `{}` {}: {}", entry.id, entry.state, entry.subject);
             for note in &entry.notes {
                 let _ = writeln!(out, "  - {note}");
             }
-            if checkboxes {
-                for action in &entry.actions {
-                    let _ = writeln!(
-                        out,
-                        "  - [ ] {} <!-- odx:{} {} -->",
-                        action.name(),
-                        action.name(),
-                        entry.id
-                    );
+            for action in &entry.actions {
+                let name = action.name();
+                match line(entry, *action) {
+                    ActionLine::Checkbox => {
+                        let _ = writeln!(out, "  - [ ] {name} <!-- odx:{name} {} -->", entry.id);
+                    }
+                    ActionLine::Ticked => {
+                        let _ = writeln!(out, "  - [x] {name} <!-- odx:{name} {} -->", entry.id);
+                    }
+                    ActionLine::Note(text) => {
+                        let _ = writeln!(out, "  - {name}: {text}");
+                    }
+                    ActionLine::Hidden => {}
                 }
             }
         }
@@ -382,8 +419,8 @@ mod tests {
         assert_eq!(
             text,
             "# odx dashboard for 17.0\n\
-             \n## Pinned pull requests\n\n- `pr:OCA/pos#789` open, head same: [17.0][FIX] pos_x: rounding\n  - approved\n  - [ ] drop <!-- odx:drop pr:OCA/pos#789 -->\n\
-             \n## Forward-port suggestions\n\n- `fwd:OCA/pos#1234->17.0` from 16.0: [FIX] pos_x: totals\n  - [ ] port <!-- odx:port fwd:OCA/pos#1234->17.0 -->\n  - [ ] mute <!-- odx:mute fwd:OCA/pos#1234->17.0 -->\n"
+             \n## Pinned pull requests (1)\n\n- `pr:OCA/pos#789` open, head same: [17.0][FIX] pos_x: rounding\n  - approved\n  - [ ] drop <!-- odx:drop pr:OCA/pos#789 -->\n\
+             \n## Forward-port suggestions (1)\n\n- `fwd:OCA/pos#1234->17.0` from 16.0: [FIX] pos_x: totals\n  - [ ] port <!-- odx:port fwd:OCA/pos#1234->17.0 -->\n  - [ ] mute <!-- odx:mute fwd:OCA/pos#1234->17.0 -->\n"
         );
         assert_eq!(ticked(&text), Vec::new());
         let edited = text
@@ -401,5 +438,22 @@ mod tests {
         for (id, action) in picked {
             assert!(model.entry(&id).unwrap().actions.contains(&action));
         }
+    }
+
+    #[test]
+    fn sections_with_notes_instead_of_boxes() {
+        let text = sections(&dashboard(), &|entry, action| match action {
+            Action::Port => ActionLine::Note(format!("`odx dashboard act {} --port`", entry.id)),
+            Action::Mute => ActionLine::Hidden,
+            _ => ActionLine::Ticked,
+        });
+        assert!(
+            text.starts_with("\n## Pinned pull requests (1)\n"),
+            "{text}"
+        );
+        assert!(text.contains("  - [x] drop <!-- odx:drop pr:OCA/pos#789 -->\n"));
+        assert!(text.contains("  - port: `odx dashboard act fwd:OCA/pos#1234->17.0 --port`\n"));
+        assert!(!text.contains("mute"), "{text}");
+        assert_eq!(ticked(&text), [("pr:OCA/pos#789".to_owned(), Action::Drop)]);
     }
 }
