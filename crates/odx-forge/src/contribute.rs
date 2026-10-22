@@ -33,7 +33,7 @@ pub struct Proposal<'a> {
 }
 
 /// The JSON of a `200` or `201` answer.
-fn created(response: &HttpResponse, repo: &RepoUrl) -> Result<Value, ForgeError> {
+pub(crate) fn created(response: &HttpResponse, repo: &RepoUrl) -> Result<Value, ForgeError> {
     if !matches!(response.status, 200..=202) {
         return Err(ForgeError::Status {
             host: repo.host.clone(),

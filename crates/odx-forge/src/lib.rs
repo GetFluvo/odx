@@ -14,6 +14,7 @@ mod ci;
 mod client;
 mod contribute;
 mod http;
+mod issues;
 mod listing;
 mod pulls;
 pub mod secrets;
@@ -26,6 +27,7 @@ pub use ci::{CiReport, CiState};
 pub use client::{ForgeClient, ForgeKind, Visibility, token, token_source};
 pub use contribute::{Opened, Proposal};
 pub use http::{Http, HttpResponse, ReqwestHttp};
+pub use issues::{Comment, Issue, IssueEdit, IssueState};
 pub use pulls::{PrState, PullRequest};
 pub use url::RepoUrl;
 
@@ -58,4 +60,7 @@ pub enum ForgeError {
     /// The repository is missing or the token cannot read it.
     #[error("cannot see {0}: it does not exist, or the token for its host cannot read it")]
     NotVisible(String),
+    /// The forge has no such API odx speaks.
+    #[error("{0}")]
+    Unsupported(String),
 }

@@ -57,6 +57,25 @@ pub trait Http: fmt::Debug + Send + Sync {
         headers: &[(&str, String)],
         body: &serde_json::Value,
     ) -> Result<HttpResponse, ForgeError>;
+
+    /// PATCH `body` as JSON to `url` with `headers`. Clients that only
+    /// read, or only create, need not answer it.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::Http`] when no response arrives (DNS, TLS, connection),
+    /// or when the client does not send PATCH requests.
+    fn patch(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        let _ = (url, headers, body);
+        Err(ForgeError::Http(
+            "this client does not send PATCH requests".to_owned(),
+        ))
+    }
 }
 
 /// [`Http`] over `reqwest` with rustls, verifying certificates against the
@@ -146,6 +165,15 @@ impl Http for ReqwestHttp {
     ) -> Result<HttpResponse, ForgeError> {
         Self::execute(self.client.put(url).json(body), headers)
     }
+
+    fn patch(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        Self::execute(self.client.patch(url).json(body), headers)
+    }
 }
 
 #[cfg(test)]
@@ -187,6 +215,51 @@ mod tests {
             "{request}"
         );
         assert!(request.contains("user-agent: odx/"), "{request}");
+    }
+
+    #[test]
+    fn patches() {
+        /// A client that only reads.
+        #[derive(Debug)]
+        struct Reader;
+        impl Http for Reader {
+            fn get(&self, _: &str, _: &[(&str, String)]) -> Result<HttpResponse, ForgeError> {
+                Ok(HttpResponse::default())
+            }
+            fn post(
+                &self,
+                _: &str,
+                _: &[(&str, String)],
+                _: &serde_json::Value,
+            ) -> Result<HttpResponse, ForgeError> {
+                Ok(HttpResponse::default())
+            }
+            fn put(
+                &self,
+                _: &str,
+                _: &[(&str, String)],
+                _: &serde_json::Value,
+            ) -> Result<HttpResponse, ForgeError> {
+                Ok(HttpResponse::default())
+            }
+        }
+        let (url, server) = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+        let http = ReqwestHttp::new().unwrap();
+        let response = http.patch(&url, &[], &serde_json::json!({"a": 1})).unwrap();
+        assert_eq!(response.status, 200);
+        let request = server.join().unwrap();
+        assert!(request.starts_with("PATCH /repos/a/b "), "{request}");
+        assert!(request.ends_with(r#"{"a":1}"#), "{request}");
+
+        assert!(Reader.get("u", &[]).is_ok());
+        assert!(Reader.post("u", &[], &serde_json::json!({})).is_ok());
+        assert!(Reader.put("u", &[], &serde_json::json!({})).is_ok());
+        assert_eq!(
+            Reader.patch("u", &[], &serde_json::json!({})),
+            Err(ForgeError::Http(
+                "this client does not send PATCH requests".to_owned()
+            ))
+        );
     }
 
     #[test]
