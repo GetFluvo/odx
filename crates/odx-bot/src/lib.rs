@@ -1,4 +1,8 @@
-//! Upstream dashboard issue and actionable pull requests for odx in CI.
+//! The odx bot: the upstream dashboard as an issue, and pull requests for
+//! the changes that are safe to propose, kept idempotent across runs by the
+//! markers they carry.
 //!
-//! Part of [odx](https://github.com/getfluvo/odx). This crate is a placeholder
-//! in the workspace skeleton; its implementation lands in roadmap phase 11.
+//! Part of [odx](https://github.com/getfluvo/odx).
+
+pub mod issue;
+pub mod pr;

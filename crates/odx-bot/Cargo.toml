@@ -8,9 +8,13 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 keywords.workspace = true
 categories.workspace = true
+
+[dependencies]
+odx-dashboard.workspace = true
+odx-forge.workspace = true
 
 [lints]
 workspace = true
