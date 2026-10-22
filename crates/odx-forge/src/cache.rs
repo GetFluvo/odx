@@ -87,6 +87,16 @@ impl<H: Http> Http for CachedHttp<H> {
     ) -> Result<HttpResponse, ForgeError> {
         self.inner.put(url, headers, body)
     }
+
+    /// Not cached either.
+    fn patch(
+        &self,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        self.inner.patch(url, headers, body)
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +167,14 @@ mod tests {
         assert_eq!(
             putting
                 .put("https://x/a", &[], &serde_json::json!({}))
+                .unwrap()
+                .status,
+            200
+        );
+        let patching = CachedHttp::new(Scripted::new(vec![Ok(reply(200, ""))]), tmp.path());
+        assert_eq!(
+            patching
+                .patch("https://x/a", &[], &serde_json::json!({}))
                 .unwrap()
                 .status,
             200

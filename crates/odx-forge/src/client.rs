@@ -216,6 +216,16 @@ impl<'a> ForgeClient<'a> {
         self.http.put(url, &self.headers(repo, kind), body)
     }
 
+    pub(crate) fn patch(
+        &self,
+        url: &str,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        body: &Value,
+    ) -> Result<HttpResponse, ForgeError> {
+        self.http.patch(url, &self.headers(repo, kind), body)
+    }
+
     fn get(&self, url: &str, repo: &RepoUrl, kind: ForgeKind) -> Result<HttpResponse, ForgeError> {
         let headers = self.headers(repo, kind);
         for _ in 0..ATTEMPTS {
