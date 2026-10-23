@@ -4,6 +4,9 @@
 use odx_dashboard::Action;
 use odx_forge::{Issue, IssueState};
 
+/// The label every bot pull request carries, besides its kind's.
+pub const LABEL: &str = "odx:bot";
+
 /// What a bot pull request does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Kind {
@@ -19,17 +22,21 @@ pub enum Kind {
     Drop,
     /// Promote an addon closure to the next environment.
     Promote,
+    /// Record a mute asked for on the dashboard, when mutes live in the
+    /// project (no verdict repository).
+    Mute,
 }
 
 impl Kind {
     /// Every kind.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::DropOverride,
         Self::Repin,
         Self::AutoUpdate,
         Self::Add,
         Self::Drop,
         Self::Promote,
+        Self::Mute,
     ];
 
     /// The kind's name, as in markers, labels and branches.
@@ -42,6 +49,7 @@ impl Kind {
             Self::Add => "add",
             Self::Drop => "drop",
             Self::Promote => "promote",
+            Self::Mute => "mute",
         }
     }
 
@@ -65,7 +73,7 @@ impl Kind {
     }
 
     /// The kind of pull request a ticked dashboard box asks for; `None`
-    /// for actions without one (mute) or that the bot never takes (port).
+    /// for porting upstream, which the bot never does.
     #[must_use]
     pub const fn of_action(action: Action) -> Option<Self> {
         match action {
@@ -73,7 +81,8 @@ impl Kind {
             Action::Drop => Some(Self::Drop),
             Action::Follow => Some(Self::Repin),
             Action::Promote => Some(Self::Promote),
-            Action::Port | Action::Mute => None,
+            Action::Mute => Some(Self::Mute),
+            Action::Port => None,
         }
     }
 }
@@ -92,7 +101,7 @@ pub struct Marker {
 
 impl Marker {
     /// The marker for the pull request a ticked box asks for, keyed by
-    /// the entry; `None` for actions without one.
+    /// the entry; `None` for porting upstream.
     #[must_use]
     pub fn of_entry(action: Action, id: &str) -> Option<Self> {
         Kind::of_action(action).map(|kind| Self {
@@ -255,14 +264,14 @@ mod tests {
         assert_eq!(Kind::parse("port"), None);
         assert_eq!(
             Kind::ALL.map(Kind::grouped),
-            [true, true, true, false, false, false]
+            [true, true, true, false, false, false, false]
         );
         assert_eq!(
             Action::ALL.map(Kind::of_action),
             [
                 Some(Kind::Add),
                 None,
-                None,
+                Some(Kind::Mute),
                 Some(Kind::Drop),
                 Some(Kind::Repin),
                 Some(Kind::Promote)
@@ -282,7 +291,7 @@ mod tests {
             Marker::parse(&format!("{}\nbody", entry.render())),
             Some(entry)
         );
-        assert_eq!(Marker::of_entry(Action::Mute, "x"), None);
+        assert_eq!(Marker::of_entry(Action::Port, "x"), None);
         let grouped = Marker::of_change(Kind::DropOverride, "pos_x pos_y");
         assert_eq!(grouped.key.len(), 12);
         assert_eq!(

@@ -159,18 +159,10 @@ fn execute(
         Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),
         Command::Drop(args) => cmd::edit::run_drop(args, ctx).emit(out, err),
         Command::Promote(args) => cmd::promote::run_promote(args, &cli.global, ctx).emit(out, err),
+        Command::Bot(command) => cmd::bot::run_bot(command, &cli.global, ctx).emit(out, err),
         Command::Env(EnvCommand::List) => cmd::env::run_list(&cli.global, ctx).emit(out, err),
         Command::Env(EnvCommand::Diff(args)) => {
             cmd::env_diff::run_diff(args, &cli.global, ctx).emit(out, err)
-        }
-        command => {
-            writeln!(
-                err,
-                "odx {}: not implemented yet (roadmap phase {})",
-                command.name(),
-                command.phase()
-            )?;
-            Ok(Exit::Usage)
         }
     }
 }

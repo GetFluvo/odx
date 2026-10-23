@@ -357,7 +357,8 @@ would copy offers `promote`.
 Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`, `drift:`) that
 `odx dashboard act` takes: `--drop` and `--include` run `odx drop` and `odx
 add`, `--follow` runs `odx lock --auto-update`, `--mute` records a mute
-(`--kind`, default `not-wanted`, and a mandatory `--reason`). `--port`
+(`--kind`, default `not-wanted`, a mandatory `--reason`, and `--until
+YYYY-MM-DD` for one that expires). `--port`
 ports the change, a person's decision: its commits are cherry-picked as
 `odx port` does, in a clone of the repository under the cache
 (`<cache>/ports/<owner>-<repo>`, sharing the cache's objects), and
@@ -381,6 +382,52 @@ drop, follow, mute (asking for the reason), port (asking for
 confirmation) and plan the promotion of the selected entry, `r` rebuilds the dashboard and `q` or Esc
 quits. The view is an optional feature: install odx with `cargo install
 odx-cli --features tui` (the PyPI wheel leaves it out).
+
+### The dashboard as an issue: `odx bot`
+
+```console
+$ odx bot plan                     # what a run would do, as JSON; writes nothing
+$ odx bot run --apply              # act on ticked boxes, then update the issue
+$ odx bot dashboard --apply        # only the issue; ticked boxes stay ticked
+$ odx bot act --from-issue --apply # only the ticked boxes (for `issues` events)
+```
+
+The bot keeps one issue per series in the project repository (the
+repository of `--remote`, default `origin`), titled `odx upstream dashboard
+(<series>)` and labelled `odx:dashboard`: the dashboard above, rendered with
+a box per action. It finds the issue by the marker on its first line, never
+by its title. Closing the issue pauses that dashboard; `--reopen` opens it
+again. Text below `<!-- odx:notes -->` is a person's and is kept. A run that
+changes nothing writes nothing, not even the time of the run.
+
+Ticking a box asks the bot to act on the next run, as `odx dashboard act`
+does, on a branch `odx/<kind>/<key>` made from the bot's base branch
+(`[tool.odx.bot] environment`, else the branch checked out):
+
+| Box | Pull request |
+| --- | --- |
+| `include` | adds the merge or package and locks it (`odx:add`) |
+| `drop` | drops the override and locks (`odx:drop`) |
+| `follow` | takes the index update (`odx:repin`) |
+| `mute` | records the mute in `.odx/mutes.toml` (`odx:mute`); with a verdict repository it goes there directly, without a pull request |
+| `promote` | the promotion of a drift entry's addon, into the next environment's branch (`odx:promote`) |
+
+Each pull request carries `odx:bot`, its kind's label and `[tool.odx.bot]
+labels`, and starts with a marker `<!-- odx:pr kind=… key=… entry=… -->`.
+On the dashboard the box becomes a link to it; ticked again while the pull
+request is open, the branch is rewritten and the pull request updated,
+never duplicated. A box that cannot be acted on stays ticked for the next
+run. `--max-prs` (default `[tool.odx.bot] max_prs_per_run`, else 10) bounds
+the pull requests a run opens; the rest wait for the next run. Mutes from
+the dashboard expire after `[tool.odx.bot] mute_expiry` (default 180 days).
+Porting upstream is never done by the bot: the dashboard shows the
+`odx dashboard act … --port --open-pr` command instead of a box.
+
+The bot refuses to run on a public repository, since the dashboard names
+the addons and pull requests a project uses, unless `[tool.odx.bot]
+allow_public = true`. It only writes to the project repository (and the
+verdict repository); upstream repositories are only read. On GitHub
+Actions and Forgejo Actions the issue links the workflow run.
 
 ## Verdicts and mutes
 

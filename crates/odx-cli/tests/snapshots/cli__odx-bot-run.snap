@@ -2,13 +2,13 @@
 source: crates/odx-cli/tests/cli.rs
 expression: cmd.render_long_help().to_string()
 ---
-Update the dashboard issue and open actionable pull requests
+The nightly cycle: act on the ticked boxes, then update the dashboard issue
 
 Usage: odx bot run [OPTIONS]
 
 Options:
       --apply
-          Write to the forge; without it the run is a dry run
+          Write to the forge; without it nothing is written and the plan is printed
 
   -C, --project-dir <DIR>
           Run as if started in DIR
@@ -16,17 +16,28 @@ Options:
   -c, --config <FILE>
           The pyproject.toml or repos.yaml to use
 
-      --max-prs <N>
-          Maximum number of pull requests to open in this run
+      --series <SERIES>
+          Only the dashboard of this series
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
+      --remote <NAME>
+          The remote of the project repository, on the forge the bot writes to
+          
+          [default: origin]
+
       --offline
           Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
+      --reopen
+          Reopen a dashboard issue a person closed (closing it pauses the dashboard)
+
       --fresh
           Ignore cached data; refresh everything before answering
+
+      --max-prs <N>
+          Maximum number of pull requests to open in this run (default: `[tool.odx.bot].max_prs_per_run`, else 10)
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only

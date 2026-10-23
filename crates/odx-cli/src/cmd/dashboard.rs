@@ -110,7 +110,7 @@ pub(crate) fn run_dashboard(
 
 /// What `odx add` or `odx drop` take for each pull request entry: the
 /// spec, and whether it is a package.
-type Specs = BTreeMap<String, (String, bool)>;
+pub(crate) type Specs = BTreeMap<String, (String, bool)>;
 
 /// The id of a status row's entry.
 fn row_id(row: &Row) -> String {
@@ -467,7 +467,7 @@ fn drift(prepared: &Prepared, warnings: &mut Vec<Problem>) -> Option<Section> {
 
 /// The dashboards of every target series (`--env` narrows them), with the
 /// specs of their pull request entries.
-fn build(
+pub(crate) fn build(
     args: &DashboardArgs,
     global: &GlobalArgs,
     ctx: &Context<'_>,
@@ -691,7 +691,7 @@ const fn chosen(act: &DashboardActArgs) -> Action {
 }
 
 /// `odx dashboard act <id>`: one action, as the command behind it.
-fn run_act(
+pub(crate) fn run_act(
     act: &DashboardActArgs,
     dashboards: &[Dashboard],
     specs: &Specs,
@@ -745,7 +745,7 @@ fn run_act(
                 reason,
                 scope: None,
                 environments: Vec::new(),
-                until: None,
+                until: act.until.clone(),
                 no_recheck: false,
             };
             Ok(super::verdict::run_verdict(
@@ -854,6 +854,7 @@ fn interactive(
                 promote: *action == Action::Promote,
                 reason: reason.clone(),
                 kind: crate::cli::VerdictKind::NotWanted,
+                until: None,
             };
             let report =
                 run_act(&act, &dashboards, &specs, &fresh, ctx, prepared).unwrap_or_else(|r| r);

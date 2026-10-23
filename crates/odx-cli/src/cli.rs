@@ -487,6 +487,9 @@ pub struct DashboardActArgs {
     /// Kind of the mute or verdict.
     #[arg(long, value_enum, default_value_t = VerdictKind::NotWanted)]
     pub kind: VerdictKind,
+    /// With --mute: when it expires (YYYY-MM-DD).
+    #[arg(long, value_name = "DATE", requires = "mute")]
+    pub until: Option<String>,
 }
 
 /// Arguments of `odx suggest`.
@@ -1022,17 +1025,62 @@ pub struct EnvDiffArgs {
     pub installed: Option<Vec<PathBuf>>,
 }
 
+/// What every `odx bot` command works on.
+#[derive(Debug, Clone, Args)]
+pub struct BotArgs {
+    /// Write to the forge; without it nothing is written and the plan is printed.
+    #[arg(long)]
+    pub apply: bool,
+    /// Only the dashboard of this series.
+    #[arg(long, value_name = "SERIES")]
+    pub series: Option<String>,
+    /// The remote of the project repository, on the forge the bot writes to.
+    #[arg(long, value_name = "NAME", default_value = "origin")]
+    pub remote: String,
+    /// Reopen a dashboard issue a person closed (closing it pauses the dashboard).
+    #[arg(long)]
+    pub reopen: bool,
+}
+
 /// `odx bot` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum BotCommand {
-    /// Update the dashboard issue and open actionable pull requests.
+    /// The nightly cycle: act on the ticked boxes, then update the dashboard issue.
     Run {
-        /// Write to the forge; without it the run is a dry run.
-        #[arg(long)]
-        apply: bool,
-        /// Maximum number of pull requests to open in this run.
+        /// What the run works on.
+        #[command(flatten)]
+        bot: BotArgs,
+        /// Maximum number of pull requests to open in this run (default:
+        /// `[tool.odx.bot].max_prs_per_run`, else 10).
         #[arg(long, value_name = "N")]
         max_prs: Option<usize>,
+    },
+    /// Only update the dashboard issue; ticked boxes stay ticked.
+    Dashboard {
+        /// What the run works on.
+        #[command(flatten)]
+        bot: BotArgs,
+    },
+    /// Only act on the boxes ticked in the dashboard issue (for `issues` events).
+    Act {
+        /// What the run works on.
+        #[command(flatten)]
+        bot: BotArgs,
+        /// Read the requests from the dashboard issue (the only source there is).
+        #[arg(long, required = true)]
+        from_issue: bool,
+        /// Maximum number of pull requests to open.
+        #[arg(long, value_name = "N")]
+        max_prs: Option<usize>,
+    },
+    /// What `odx bot run` would do, as JSON; writes nothing.
+    Plan {
+        /// Only the dashboard of this series.
+        #[arg(long, value_name = "SERIES")]
+        series: Option<String>,
+        /// The remote of the project repository.
+        #[arg(long, value_name = "NAME", default_value = "origin")]
+        remote: String,
     },
 }
 
