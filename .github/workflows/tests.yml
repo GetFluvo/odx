@@ -189,6 +189,50 @@ jobs:
           name: coverage-html
           path: target/llvm-cov/html
 
+  bot-cycle:
+    runs-on: ubuntu-latest
+    env:
+      FORGE_PORT: "18765"
+      ODX_CACHE_DIR: ${{ github.workspace }}/../odx-cache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build -p odx-cli --locked
+      - run: echo "$GITHUB_WORKSPACE/target/debug" >> "$GITHUB_PATH"
+      - name: Start a fake forge and the fixture project
+        run: |
+          python3 scripts/fake_forge.py "$FORGE_PORT" "$RUNNER_TEMP/forge.log" &
+          scripts/bot_cycle.sh "$RUNNER_TEMP/project"
+      - name: The nightly cycle
+        id: first
+        uses: ./
+        with:
+          version: none
+          bot: true
+          apply: true
+          cache: false
+          working-directory: ${{ runner.temp }}/project
+      - name: The same again
+        uses: ./
+        with:
+          version: none
+          bot: true
+          apply: true
+          cache: false
+          working-directory: ${{ runner.temp }}/project
+      - name: One issue created, then nothing written
+        env:
+          ISSUE: ${{ steps.first.outputs.dashboard-issue }}
+        run: |
+          test "$ISSUE" = 1
+          writes=$(grep -cv '^GET ' "$RUNNER_TEMP/forge.log")
+          test "$writes" = 1 || { cat "$RUNNER_TEMP/forge.log"; exit 1; }
+
   deny:
     runs-on: ubuntu-latest
     steps:
@@ -283,7 +327,7 @@ jobs:
 
   all-checks:
     if: always()
-    needs: [fmt, clippy, test, parity, doc, docs, coverage, deny, machete, msrv, typos, commits, package, zizmor]
+    needs: [fmt, clippy, test, parity, doc, docs, coverage, bot-cycle, deny, machete, msrv, typos, commits, package, zizmor]
     runs-on: ubuntu-latest
     steps:
       - name: Every required job succeeded

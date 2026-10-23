@@ -454,6 +454,66 @@ allow_public = true`. It only writes to the project repository (and the
 verdict repository); upstream repositories are only read. On GitHub
 Actions and Forgejo Actions the issue links the workflow run.
 
+### Running the bot nightly
+
+The repository is also a composite action, for GitHub Actions and Forgejo
+Actions alike. It installs odx from PyPI (`version`, default `latest`;
+`none` keeps the odx on `PATH`), restores `~/.cache/odx` keyed on odx.lock
+and, with `bot: true`, runs `odx --json bot run`: with `--apply` on a
+schedule, as a plan on `pull_request` events (`apply: auto`). Its outputs
+are `plan-json`, the path of the run's JSON, and `dashboard-issue`.
+
+```yaml
+# .github/workflows/odx-bot.yml
+on:
+  schedule: [{ cron: "10 2 * * *" }]
+  issues: { types: [edited] }
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.ODX_APP_ID }}
+          private-key: ${{ secrets.ODX_APP_KEY }}
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+      - uses: getfluvo/odx@v0.0.7
+        id: odx
+        with:
+          bot: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odx-plan
+          path: ${{ steps.odx.outputs.plan-json }}
+```
+
+On Forgejo the same workflow lives in `.forgejo/workflows`, uses
+`https://github.com/getfluvo/odx@v0.0.7` (actions hosted elsewhere need the
+full URL), and takes the token of a bot account from a secret instead of
+the app; Forgejo's `upload-artifact` stays at its v3-compatible version.
+
+| Platform | Identity | Why |
+| --- | --- | --- |
+| GitHub | a GitHub App installed on the organization; the workflow mints an installation token (`actions/create-github-app-token`) | pull requests opened with the default `GITHUB_TOKEN` do not trigger other workflows, so CI would not run on bot pull requests; a personal token works but belongs to a person |
+| Forgejo, Gitea | a bot account with a token scoped to the project repository | there is no app API; workflows run on the bot's pushes |
+
+The token needs `contents: write`, `pull-requests: write`, `issues: write`
+and `metadata: read` on the project repository, nothing on upstream
+repositories (public ones are read without a token), and no rights on the
+deployment repository or the package index: merging and promoting stay a
+person's. Pushing to the mirror uses its own credential (a separate secret,
+`ODX_TOKEN_<HOST>`), write-only on the vault. odx reads tokens from the
+environment and never prints them.
+
 ## Verdicts and mutes
 
 ```console
