@@ -1,6 +1,8 @@
-//! `odx bot`: the dashboard as an issue of the project repository, and the
-//! boxes ticked there acted on as pull requests (or mutes), each run
-//! picking up what the last one left.
+//! `odx bot`: the dashboard as an issue of the project repository, the
+//! boxes ticked there acted on as pull requests (or mutes), and the routine
+//! changes (overrides merged upstream, new heads, index updates, promotions
+//! asked for by label) proposed on their own, each run picking up what the
+//! last one left.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -8,12 +10,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use odx_aggregate::date;
 use odx_bot::issue::{self, Page, Request};
-use odx_bot::pr::{self, Earlier, Marker, earlier};
+use odx_bot::pr::{self, Earlier, Kind, Marker, covering, earlier};
 use odx_config::Span;
 use odx_config::environments::Model;
+use odx_config::lock::Lockfile;
+use odx_config::schema::BotAction;
 use odx_core::Exit;
 use odx_core::system::OsRunner;
-use odx_dashboard::{Action, Dashboard};
+use odx_dashboard::{Action, Dashboard, Entry, SectionKind};
 use odx_forge::{
     CachedHttp, ForgeClient, ForgeError, ForgeKind, Http, Issue, IssueEdit, IssueState, Proposal,
     RepoUrl, ReqwestHttp, Visibility,
@@ -21,15 +25,16 @@ use odx_forge::{
 use serde_json::{Value, json};
 
 use super::Report;
-use super::aggregate::{Prepared, prepare, run_lock};
+use super::aggregate::{Prepared, prepare, run_aggregate, run_lock, vault_heads};
 use super::checkout::git;
 use super::dashboard::{Specs, build, run_act};
 use super::promote_apply::{commit, failed, worktree};
 use super::propose::forge_repo;
+use super::verify::run_verify;
 use crate::Context;
 use crate::cli::{
-    BotArgs, BotCommand, DashboardActArgs, DashboardArgs, DashboardFormat, GlobalArgs, LockArgs,
-    PromoteArgs, VerdictKind,
+    AggregateArgs, BotArgs, BotCommand, DashboardActArgs, DashboardArgs, DashboardFormat,
+    GlobalArgs, LockArgs, PromoteArgs, VerdictKind, VerifyArgs,
 };
 
 /// Pull requests a run opens at most, without `--max-prs` or
@@ -40,13 +45,30 @@ const MAX_PRS: usize = 10;
 /// `[tool.odx.bot].mute_expiry`.
 const MUTE_DAYS: u64 = 180;
 
+/// The label on a merged pull request that asks for the promotion of what
+/// it changed, without `[tool.odx.bot].promote_label`.
+const PROMOTE_LABEL: &str = "promote";
+
+/// What a run of `odx bot` does.
+#[derive(Debug, Clone, Copy)]
+struct Mode {
+    /// Act on the ticked boxes.
+    act: bool,
+    /// Propose the routine changes and the promotions asked for by label.
+    auto: bool,
+    /// Check out what odx.lock pins, and verify it, first.
+    full: bool,
+}
+
 /// `odx bot`.
 pub(crate) fn run_bot(command: &BotCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
-    let (bot, act, max_prs, plan) = match command {
-        BotCommand::Run { bot, max_prs } | BotCommand::Act { bot, max_prs, .. } => {
-            (bot.clone(), true, *max_prs, false)
+    let mode = |act, auto, full| Mode { act, auto, full };
+    let (bot, mode, max_prs, plan) = match command {
+        BotCommand::Run { bot, max_prs } => (bot.clone(), mode(true, true, true), *max_prs, false),
+        BotCommand::Act { bot, max_prs, .. } => {
+            (bot.clone(), mode(true, false, false), *max_prs, false)
         }
-        BotCommand::Dashboard { bot } => (bot.clone(), false, None, false),
+        BotCommand::Dashboard { bot } => (bot.clone(), mode(false, false, false), None, false),
         BotCommand::Plan { series, remote } => (
             BotArgs {
                 apply: false,
@@ -54,7 +76,7 @@ pub(crate) fn run_bot(command: &BotCommand, global: &GlobalArgs, ctx: &Context<'
                 remote: remote.clone(),
                 reopen: false,
             },
-            true,
+            mode(true, true, false),
             None,
             true,
         ),
@@ -64,7 +86,7 @@ pub(crate) fn run_bot(command: &BotCommand, global: &GlobalArgs, ctx: &Context<'
         fresh: true,
         ..global.clone()
     };
-    cycle(&bot, act, max_prs, &global, ctx).unwrap_or_else(|report| report)
+    cycle(&bot, mode, max_prs, &global, ctx).unwrap_or_else(|report| report)
 }
 
 #[expect(
@@ -82,7 +104,7 @@ struct Forge<'a> {
     kind: ForgeKind,
 }
 
-/// What became of one ticked box.
+/// What became of one ticked box, or of one routine change.
 #[derive(Debug)]
 enum Outcome {
     /// A dry run: what would be done.
@@ -91,10 +113,21 @@ enum Outcome {
     Deferred,
     /// Its pull request, opened or updated.
     Proposed(Issue, bool),
-    /// Done without a pull request (a mute in the verdict repository).
+    /// Its pull request, open with the same change already.
+    Unchanged(Issue),
+    /// Its pull request, closed by a person: the same change is not
+    /// proposed again.
+    Closed(Issue),
+    /// Done without a pull request (a mute in the verdict repository), or
+    /// nothing to propose.
     Recorded(String),
     /// It failed; the box stays ticked.
     Failed(String),
+}
+
+/// A pull request, as JSON.
+fn pull_json(pull: &Issue) -> Value {
+    json!({"number": pull.number, "url": pull.url})
 }
 
 impl Outcome {
@@ -104,8 +137,12 @@ impl Outcome {
             Self::Deferred => json!({"outcome": "deferred"}),
             Self::Proposed(pull, opened) => json!({
                 "outcome": if *opened { "opened" } else { "updated" },
-                "pull_request": {"number": pull.number, "url": pull.url},
+                "pull_request": pull_json(pull),
             }),
+            Self::Unchanged(pull) => {
+                json!({"outcome": "unchanged", "pull_request": pull_json(pull)})
+            }
+            Self::Closed(pull) => json!({"outcome": "closed", "pull_request": pull_json(pull)}),
             Self::Recorded(message) => json!({"outcome": "recorded", "message": message}),
             Self::Failed(message) => json!({"outcome": "failed", "message": message}),
         }
@@ -121,6 +158,8 @@ impl Outcome {
                 pull.number,
                 pull.url
             ),
+            Self::Unchanged(pull) => format!("unchanged #{} {}", pull.number, pull.url),
+            Self::Closed(pull) => format!("#{} was closed: not proposed again", pull.number),
             Self::Recorded(message) => message.clone(),
             Self::Failed(message) => format!("failed: {message}"),
         }
@@ -213,29 +252,70 @@ const fn all_sections() -> DashboardArgs {
     }
 }
 
+/// `odx aggregate --locked`: the checkout odx.lock pins.
+const fn locked_checkout() -> AggregateArgs {
+    AggregateArgs {
+        fetch_only: false,
+        repo: None,
+        prefer_mirror: false,
+        keep_conflicts: false,
+        force: false,
+        bundle_dir: None,
+        locked: true,
+        update: false,
+    }
+}
+
+/// `odx verify`, nothing more.
+const fn plain_verify() -> VerifyArgs {
+    VerifyArgs {
+        vendored: false,
+        installed: None,
+        requirements: false,
+        deployed: None,
+        allow_shell: false,
+    }
+}
+
 fn cycle(
     bot: &BotArgs,
-    act: bool,
+    mode: Mode,
     max_prs: Option<usize>,
     global: &GlobalArgs,
     ctx: &Context<'_>,
 ) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
+    // The nightly run starts from what odx.lock pins, checked, before
+    // anything is proposed.
+    let ready = if mode.full {
+        checked(run_aggregate(&locked_checkout(), global, ctx))
+            .and_then(|_| checked(run_verify(&plain_verify(), global, ctx)))
+            .map(drop)
+    } else {
+        Ok(())
+    };
     let sleep = std::thread::sleep;
-    ReqwestHttp::new()
-        .map(|http| CachedHttp::new(http, prepared.cache.root().join("http")))
-        .map_err(forge_failure)
+    ready
+        .and_then(|()| {
+            ReqwestHttp::new()
+                .map(|http| CachedHttp::new(http, prepared.cache.root().join("http")))
+                .map_err(forge_failure)
+        })
         .and_then(|http| {
             project_forge(ctx, &prepared, &bot.remote, &http, &sleep)
-                .and_then(|forge| cycle_on(&forge, bot, act, max_prs, global, ctx, &prepared))
+                .and_then(|forge| cycle_on(&forge, bot, mode, max_prs, global, ctx, &prepared))
         })
 }
 
 /// [`cycle`] on the project repository's forge.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the run, dashboard by dashboard, as the issue shows it"
+)]
 fn cycle_on(
     forge: &Forge<'_>,
     bot: &BotArgs,
-    act: bool,
+    mode: Mode,
     max_prs: Option<usize>,
     global: &GlobalArgs,
     ctx: &Context<'_>,
@@ -258,6 +338,21 @@ fn cycle_on(
         .or_else(|| settings?.max_prs_per_run.map(usize::from))
         .unwrap_or(MAX_PRS);
     let mut out = String::new();
+    let job = Job {
+        ctx,
+        global,
+        prepared,
+        forge,
+        dashboards: &dashboards,
+        specs: &specs,
+        base: &base,
+        remote: &bot.remote,
+    };
+    let promotions = if mode.auto {
+        job.promotions(bot.apply, &mut pulls, &mut budget, &mut out)?
+    } else {
+        Vec::new()
+    };
     let mut listed = Vec::new();
     let wanted = dashboards
         .iter()
@@ -274,29 +369,29 @@ fn cycle_on(
             listed.push(json!({"series": dashboard.series, "issue": {"write": "paused"}}));
             continue;
         }
-        let apply = act && bot.apply;
-        let acted = found.map_or_else(Acted::default, |found| {
-            let job = Job {
-                ctx,
-                global,
-                prepared,
-                forge,
-                dashboards: &dashboards,
-                specs: &specs,
-                base: &base,
-                remote: &bot.remote,
-                issue: found,
-            };
+        let apply = mode.act && bot.apply;
+        let mut acted = Acted::default();
+        if let Some(found) = found {
             let requests = issue::requests(&found.body, dashboard);
-            job.all(
+            let work = Work {
                 dashboard,
-                requests,
                 apply,
-                &mut pulls,
-                &mut budget,
-                &mut out,
-            )
-        });
+                pulls: &mut pulls,
+                budget: &mut budget,
+                out: &mut out,
+            };
+            job.all(work, found, requests, &mut acted);
+        }
+        if mode.auto {
+            let work = Work {
+                dashboard,
+                apply: bot.apply,
+                pulls: &mut pulls,
+                budget: &mut budget,
+                out: &mut out,
+            };
+            job.routines(work, &mut acted);
+        }
         let page = Page {
             dashboard,
             now: &now,
@@ -304,7 +399,7 @@ fn cycle_on(
             pulls: &pulls,
             pending: &acted.pending,
             recorded: &acted.recorded,
-            deferred: &[],
+            deferred: &acted.deferred,
             partial: false,
         };
         let body = issue::body(&page, found.map(|i| i.body.as_str()));
@@ -318,6 +413,7 @@ fn cycle_on(
                 "url": written.map(|i| i.url),
             },
             "requests": acted.done,
+            "routine": acted.routine,
         }));
     }
     let value = json!({
@@ -325,6 +421,7 @@ fn cycle_on(
         "repository": format!("{}/{}", forge.repo.host, forge.repo.path),
         "apply": bot.apply,
         "base": base,
+        "promotions": promotions,
         "dashboards": listed,
     });
     Ok(Report {
@@ -383,7 +480,7 @@ fn write_issue(
     Ok((format!("#{} updated", edited.number), Some(edited)))
 }
 
-/// Everything acting on one box needs.
+/// Everything acting on the project needs.
 struct Job<'a> {
     ctx: &'a Context<'a>,
     global: &'a GlobalArgs,
@@ -393,18 +490,33 @@ struct Job<'a> {
     specs: &'a Specs,
     base: &'a str,
     remote: &'a str,
-    issue: &'a Issue,
 }
 
-/// What acting on a dashboard's boxes did.
+/// What a run works through on one dashboard, and keeps current.
+struct Work<'a> {
+    dashboard: &'a Dashboard,
+    /// Act, rather than only plan.
+    apply: bool,
+    /// The bot's pull requests.
+    pulls: &'a mut Vec<Issue>,
+    /// Pull requests the run may still open.
+    budget: &'a mut usize,
+    out: &'a mut String,
+}
+
+/// What acting on a dashboard did.
 #[derive(Default)]
 struct Acted {
     /// Each box and what became of it.
     done: Vec<Value>,
-    /// Those that stay ticked.
+    /// Each routine change and what became of it.
+    routine: Vec<Value>,
+    /// The boxes that stay ticked.
     pending: Vec<(String, Action)>,
     /// Those done without a pull request, and how.
     recorded: Vec<(String, Action, String)>,
+    /// What waits for the next run.
+    deferred: Vec<String>,
 }
 
 /// What acting on a box wrote.
@@ -419,36 +531,94 @@ enum Written {
     },
 }
 
+/// A change a run proposes on its own (`[tool.odx.bot].auto`), one pull
+/// request for everything a dashboard section found.
+struct Routine {
+    kind: Kind,
+    auto: BotAction,
+    /// The section whose entries it takes care of.
+    section: SectionKind,
+    /// Which of them.
+    wanted: fn(&Entry) -> bool,
+    /// What `odx dashboard act` does for each (none: `odx lock --update`).
+    action: Option<Action>,
+    /// How many entries that takes (`odx lock --auto-update` takes all).
+    take: usize,
+    title: &'static str,
+    intro: &'static str,
+}
+
+/// Whether a pinned pull request's head moved upstream.
+fn moved(entry: &Entry) -> bool {
+    ["changed", "orphaned", "rebased-same-patch"]
+        .iter()
+        .any(|head| entry.state.ends_with(&format!(", head {head}")))
+}
+
+/// Whether an entry offers anything.
+const fn actionable(entry: &Entry) -> bool {
+    !entry.actions.is_empty()
+}
+
+const ROUTINES: [Routine; 3] = [
+    Routine {
+        kind: Kind::DropOverride,
+        auto: BotAction::DropOverride,
+        section: SectionKind::Droppable,
+        wanted: actionable,
+        action: Some(Action::Drop),
+        take: usize::MAX,
+        title: "chore(deps): drop overrides merged upstream",
+        intro: "Drops the overrides merged upstream (`odx drop`, then `odx lock`):",
+    },
+    Routine {
+        kind: Kind::Repin,
+        auto: BotAction::Repin,
+        section: SectionKind::Pinned,
+        wanted: moved,
+        action: None,
+        take: usize::MAX,
+        title: "chore(deps): take new pull request heads",
+        intro: "Takes the new heads the guard rail allows (`odx lock --update`) of:",
+    },
+    Routine {
+        kind: Kind::AutoUpdate,
+        auto: BotAction::AutoUpdate,
+        section: SectionKind::AutoUpdate,
+        wanted: actionable,
+        action: Some(Action::Follow),
+        take: 1,
+        title: "chore(deps): index updates under the auto-update policy",
+        intro: "Takes the index releases the auto-update policy allows (`odx lock --auto-update`):",
+    },
+];
+
 impl Job<'_> {
-    /// Act on the boxes ticked on `dashboard` (only plan them, unless
-    /// `apply`), keeping `pulls` current: what became of each, and those
-    /// that stay ticked.
-    fn all(
-        &self,
-        dashboard: &Dashboard,
-        requests: Vec<Request>,
-        apply: bool,
-        pulls: &mut Vec<Issue>,
-        budget: &mut usize,
-        out: &mut String,
-    ) -> Acted {
-        let mut done = Vec::new();
-        let mut pending = Vec::new();
-        let mut recorded = Vec::new();
+    /// Act on the boxes ticked on the dashboard issue `issue` (only plan
+    /// them, unless `apply`).
+    fn all(&self, work: Work<'_>, issue: &Issue, requests: Vec<Request>, acted: &mut Acted) {
+        let Work {
+            dashboard,
+            apply,
+            pulls,
+            budget,
+            out,
+        } = work;
         for request in requests {
             let outcome = if apply {
-                self.run(dashboard, &request, pulls, budget)
+                self.run(dashboard, &request, issue, pulls, budget)
             } else {
                 Outcome::Planned
             };
             let Request { id, action, .. } = request;
+            track(&outcome, pulls);
             match &outcome {
-                Outcome::Proposed(pull, _) => {
-                    pulls.retain(|other| other.number != pull.number);
-                    pulls.push(pull.clone());
-                }
-                Outcome::Recorded(text) => recorded.push((id.clone(), action, text.clone())),
-                _ => pending.push((id.clone(), action)),
+                Outcome::Recorded(text) => acted.recorded.push((id.clone(), action, text.clone())),
+                Outcome::Proposed(..) => {}
+                _ => acted.pending.push((id.clone(), action)),
+            }
+            if matches!(outcome, Outcome::Deferred) {
+                acted.deferred.push(format!("{} `{id}`", action.name()));
             }
             let _ = writeln!(
                 out,
@@ -457,12 +627,9 @@ impl Job<'_> {
                 action.name(),
                 outcome.text()
             );
-            done.push(json!({"id": id, "action": action.name(), "result": outcome.json()}));
-        }
-        Acted {
-            done,
-            pending,
-            recorded,
+            acted
+                .done
+                .push(json!({"id": id, "action": action.name(), "result": outcome.json()}));
         }
     }
 
@@ -472,51 +639,58 @@ impl Job<'_> {
         &self,
         dashboard: &Dashboard,
         request: &Request,
+        issue: &Issue,
         pulls: &[Issue],
         budget: &mut usize,
     ) -> Outcome {
-        let open = match earlier(pulls, &request.marker) {
+        self.propose(&request.marker, pulls, budget, || {
+            if request.action == Action::Promote {
+                self.promotion(dashboard, request, issue)
+            } else {
+                self.change(dashboard, request, issue)
+            }
+        })
+    }
+
+    /// What `write` wrote, proposed as the pull request of `marker`: its
+    /// open one updated, else one opened within `budget`.
+    fn propose(
+        &self,
+        marker: &Marker,
+        pulls: &[Issue],
+        budget: &mut usize,
+        write: impl FnOnce() -> Result<Written, Report>,
+    ) -> Outcome {
+        let open = match earlier(pulls, marker) {
             Earlier::Open(pull) => Some(pull),
             Earlier::Closed(_) | Earlier::None => None,
         };
         if open.is_none() && *budget == 0 {
             return Outcome::Deferred;
         }
-        let written = if request.action == Action::Promote {
-            self.promotion(dashboard, request)
-        } else {
-            self.change(dashboard, request)
-        };
-        let result = written.and_then(|written| match written {
+        let result = write().and_then(|written| match written {
             Written::Nothing(text) => Ok(Outcome::Recorded(text)),
             Written::Branch { base, title, body } => {
-                self.pull_request(&base, &title, &body, &request.marker, open)
+                self.pull_request(&base, &title, &body, marker, open)
             }
         });
-        match result {
-            Ok(Outcome::Proposed(pull, true)) => {
-                *budget = budget.saturating_sub(1);
-                Outcome::Proposed(pull, true)
-            }
-            Ok(outcome) => outcome,
-            Err(report) => Outcome::Failed(report.error.unwrap_or_default()),
-        }
+        spend(result, budget)
     }
 
     /// The description of a box's pull request.
-    fn body(&self, request: &Request, details: &str) -> String {
+    fn body(request: &Request, issue: &Issue, details: &str) -> String {
         format!(
-            "{}\nAsked for on the dashboard ({}): `{} {}`.\n\n```\n{details}```\n\nOpened by `odx bot`; to ask anew after closing it, tick the box again.\n",
+            "{}\nAsked for on the dashboard (#{}): `{} {}`.\n\n```\n{details}```\n\nOpened by `odx bot`; to ask anew after closing it, tick the box again.\n",
             request.marker.render(),
-            self.issue_ref(),
+            issue.number,
             request.action.name(),
             request.id,
         )
     }
 
-    /// Push `commit` of the project to the marker's branch.
-    fn push(&self, commit: &str, request: &Request) -> Result<(), Report> {
-        let refspec = format!("+{commit}:refs/heads/{}", request.marker.branch());
+    /// Push `commit` of the project to `branch`.
+    fn push(&self, commit: &str, branch: &str) -> Result<(), Report> {
+        let refspec = format!("+{commit}:refs/heads/{branch}");
         super::run_checked(
             &git_in(&self.prepared.project.root).args(["push", "--quiet", self.remote, &refspec]),
             "git push",
@@ -524,37 +698,63 @@ impl Job<'_> {
         .map_err(failed)
     }
 
-    /// The box's action taken in a worktree of the base, as `odx
-    /// dashboard act` takes it, and committed; a project that did not
-    /// change (a mute in the verdict repository) has nothing to propose.
-    fn change(&self, dashboard: &Dashboard, request: &Request) -> Result<Written, Report> {
-        let Request { id, action, marker } = request;
+    /// `work` in a worktree of the base on the local `branch`, the project
+    /// there as its context.
+    fn in_worktree<T>(
+        &self,
+        branch: &str,
+        name: &str,
+        work: impl FnOnce(&Context<'_>, &Path) -> Result<T, Report>,
+    ) -> Result<T, Report> {
         let root = self.prepared.project.root.as_path();
         let tracking = format!("refs/remotes/{}/{}", self.remote, self.base);
         // CI checks the base out with its remote; locally it may only be a
         // branch.
         let start = git(root, &["rev-parse", "--verify", "--quiet", &tracking])
             .map_or_else(|_| self.base.to_owned(), |_| tracking.clone());
-        let name = format!("bot-{}", marker.key);
-        worktree(root, &marker.branch(), &start, &name).and_then(|worktree| {
-            let wt = worktree.dir.as_path();
+        worktree(root, branch, &start, &format!("bot-{name}")).and_then(|worktree| {
             let local = Context {
                 fs: self.ctx.fs,
                 env: self.ctx.env,
-                dir: wt.to_path_buf(),
+                dir: worktree.dir.clone(),
                 config: None,
             };
-            let act = self.act_args(request);
+            work(&local, &worktree.dir)
+        })
+    }
+
+    /// The box's action taken in a worktree of the base, as `odx
+    /// dashboard act` takes it, and committed; a project that did not
+    /// change (a mute in the verdict repository) has nothing to propose.
+    fn change(
+        &self,
+        dashboard: &Dashboard,
+        request: &Request,
+        issue: &Issue,
+    ) -> Result<Written, Report> {
+        let Request { id, action, marker } = request;
+        let branch = marker.branch();
+        self.in_worktree(&branch, &marker.key, |local, wt| {
+            let verb = if *action == Action::Mute {
+                "muted"
+            } else {
+                "asked for"
+            };
+            let act = self.act_args(
+                id,
+                *action,
+                format!("{verb} from the dashboard (#{})", issue.number),
+            );
             let done = if *action == Action::Mute {
                 self.mute(&act, wt)
             } else {
-                prepare(self.global, &local).and_then(|prepared| {
+                prepare(self.global, local).and_then(|prepared| {
                     run_act(
                         &act,
                         self.dashboards,
                         self.specs,
                         self.global,
-                        &local,
+                        local,
                         &prepared,
                     )
                     .and_then(checked)
@@ -562,18 +762,18 @@ impl Job<'_> {
             };
             let locked = done.and_then(|done| {
                 if matches!(action, Action::Include | Action::Drop) {
-                    checked(run_lock(&lock_args(), self.global, &local)).map(|_| done)
+                    checked(run_lock(&lock_args(), self.global, local)).map(|_| done)
                 } else {
                     Ok(done)
                 }
             });
             locked.and_then(|done| {
                 let title = title(*action, id, dashboard);
-                let body = self.body(request, &done.out);
+                let body = Self::body(request, issue, &done.out);
                 let Ok(head) = commit(wt, &title, &body, 0, self.base) else {
                     return Ok(Written::Nothing(done.out.trim_end().to_owned()));
                 };
-                self.push(&head, request).map(|()| Written::Branch {
+                self.push(&head, &branch).map(|()| Written::Branch {
                     base: self.base.to_owned(),
                     title,
                     body,
@@ -582,9 +782,9 @@ impl Job<'_> {
         })
     }
 
-    /// `odx dashboard act` for a box, a mute expiring as
+    /// `odx dashboard act` for `id`, a mute expiring as
     /// `[tool.odx.bot].mute_expiry` says.
-    fn act_args(&self, request: &Request) -> DashboardActArgs {
+    fn act_args(&self, id: &str, action: Action, reason: String) -> DashboardActArgs {
         let until = self
             .prepared
             .project
@@ -593,9 +793,8 @@ impl Job<'_> {
             .as_ref()
             .and_then(|bot| bot.mute_expiry)
             .map_or(Duration::from_secs(MUTE_DAYS * 86_400), Span::as_duration);
-        let action = request.action;
         DashboardActArgs {
-            id: request.id.clone(),
+            id: id.to_owned(),
             include: action == Action::Include,
             port: false,
             open_pr: false,
@@ -603,15 +802,10 @@ impl Job<'_> {
             drop: action == Action::Drop,
             follow: action == Action::Follow,
             promote: false,
-            reason: Some(format!("muted from the dashboard ({})", self.issue_ref())),
+            reason: Some(reason),
             kind: VerdictKind::NotWanted,
             until: Some(date(SystemTime::now() + until)),
         }
-    }
-
-    /// The dashboard issue, for people: `#<n>`.
-    fn issue_ref(&self) -> String {
-        format!("#{}", self.issue.number)
     }
 
     /// A mute recorded from the project itself, where the suggestion it is
@@ -646,7 +840,12 @@ impl Job<'_> {
 
     /// A drift entry's addon promoted as `odx promote --commit` writes it,
     /// proposed into the next environment's branch.
-    fn promotion(&self, dashboard: &Dashboard, request: &Request) -> Result<Written, Report> {
+    fn promotion(
+        &self,
+        dashboard: &Dashboard,
+        request: &Request,
+        issue: &Issue,
+    ) -> Result<Written, Report> {
         // `drift:<from>-><to>:<kind>/<name>`, as the dashboard writes it.
         let rest = request.id.strip_prefix("drift:").unwrap_or_default();
         let (from, after) = rest.split_once("->").unwrap_or_default();
@@ -658,29 +857,47 @@ impl Job<'_> {
             .collect();
         let args = PromoteArgs {
             modules: modules.clone(),
-            from_pr: None,
-            rollback: None,
-            feature: None,
-            search: None,
-            select: Vec::new(),
-            from: Some(from.to_owned()),
-            to: to.to_owned(),
-            remote: self.remote.to_owned(),
-            allow_downgrade: false,
-            allow_source_change: false,
-            no_with_odoo: false,
-            with_code: true,
-            allow_transitive: false,
-            include_branch_specific: Vec::new(),
-            commit: true,
-            open_pr: false,
-            yes: true,
+            ..promote_args(from, to, self.remote)
         };
+        self.promote(&args, &request.marker.branch())
+            .map(|(base, items)| Written::Branch {
+                base,
+                title: format!("chore: promote {} from {from} to {to}", modules.join(", ")),
+                body: Self::body(request, issue, &items),
+            })
+    }
+
+    /// What the merged pull request `number` changed in `from`, promoted
+    /// into `to`.
+    fn merged_promotion(
+        &self,
+        number: u64,
+        [from, to]: [&str; 2],
+        marker: &Marker,
+    ) -> Result<Written, Report> {
+        let args = PromoteArgs {
+            from_pr: Some(number),
+            ..promote_args(from, to, self.remote)
+        };
+        self.promote(&args, &marker.branch())
+            .map(|(base, items)| Written::Branch {
+                base,
+                title: format!("chore: promote #{number} from {from} to {to}"),
+                body: format!(
+                    "{}\nPromotes what #{number} merged into {from}: it carries the promotion label.\n\n```\n{items}```\n\nOpened by `odx bot`; closed, it is not proposed again.\n",
+                    marker.render()
+                ),
+            })
+    }
+
+    /// `args` written as `odx promote --commit` writes them and pushed to
+    /// `branch`: the branch to propose it into, and what it promotes.
+    fn promote(&self, args: &PromoteArgs, branch: &str) -> Result<(String, String), Report> {
         let json = GlobalArgs {
             json: true,
             ..self.global.clone()
         };
-        checked(super::promote::run_promote(&args, &json, self.ctx)).and_then(|report| {
+        checked(super::promote::run_promote(args, &json, self.ctx)).and_then(|report| {
             let value: Value = serde_json::from_str(&report.out).unwrap_or_default();
             let text = |pointer: &str| {
                 value
@@ -703,12 +920,256 @@ impl Job<'_> {
                     );
                     items
                 });
-            self.push(&text("/applied/commit"), request)
-                .map(|()| Written::Branch {
-                    base: text("/to/branch"),
-                    title: format!("chore: promote {} from {from} to {to}", modules.join(", ")),
-                    body: self.body(request, &items),
-                })
+            self.push(&text("/applied/commit"), branch)
+                .map(|()| (text("/to/branch"), items))
+        })
+    }
+
+    /// The promotions asked for by labelling merged pull requests into the
+    /// base (`[tool.odx.bot].promote_label`), one into each environment the
+    /// base's promotes into, each proposed once.
+    fn promotions(
+        &self,
+        apply: bool,
+        pulls: &mut Vec<Issue>,
+        budget: &mut usize,
+        out: &mut String,
+    ) -> Result<Vec<Value>, Report> {
+        let config = &self.prepared.project.config;
+        let label = config
+            .bot
+            .as_ref()
+            .and_then(|bot| bot.promote_label.clone())
+            .unwrap_or_else(|| PROMOTE_LABEL.to_owned());
+        let model = Model::resolve(config).ok().flatten();
+        let edges: Vec<[String; 2]> = model
+            .iter()
+            .flat_map(|model| {
+                model
+                    .of_branch(self.base, None)
+                    .into_iter()
+                    .flat_map(|from| {
+                        model
+                            .targets(&from.name)
+                            .into_iter()
+                            .map(|to| [from.name.clone(), to.to_owned()])
+                    })
+            })
+            .collect();
+        let Forge { client, repo, kind } = self.forge;
+        let labelled = client
+            .labelled(repo, *kind, &label, true)
+            .map_err(forge_failure)?;
+        let mut done = Vec::new();
+        for pull in labelled
+            .iter()
+            .filter(|pull| pull.state == IssueState::Closed)
+        {
+            for [from, to] in &edges {
+                let marker = Marker::of_merged(pull.number, to);
+                if earlier(pulls, &marker) != Earlier::None {
+                    continue;
+                }
+                let outcome = if apply {
+                    self.propose(&marker, pulls, budget, || {
+                        self.merged_promotion(pull.number, [from, to], &marker)
+                    })
+                } else {
+                    Outcome::Planned
+                };
+                track(&outcome, pulls);
+                let _ = writeln!(
+                    out,
+                    "promote #{} ({from} -> {to}): {}",
+                    pull.number,
+                    outcome.text()
+                );
+                done.push(json!({
+                    "pull_request": pull.number,
+                    "from": from,
+                    "to": to,
+                    "result": outcome.json(),
+                }));
+            }
+        }
+        Ok(done)
+    }
+
+    /// Propose the routine changes `[tool.odx.bot].auto` lists (all of
+    /// them by default) that the dashboard's sections found.
+    fn routines(&self, work: Work<'_>, acted: &mut Acted) {
+        let Work {
+            dashboard,
+            apply,
+            pulls,
+            budget,
+            out,
+        } = work;
+        let auto = self
+            .prepared
+            .project
+            .config
+            .bot
+            .as_ref()
+            .and_then(|bot| bot.auto.clone())
+            .unwrap_or_else(|| ROUTINES.iter().map(|routine| routine.auto).collect());
+        for routine in ROUTINES
+            .iter()
+            .filter(|routine| auto.contains(&routine.auto))
+        {
+            let ids: Vec<String> = dashboard
+                .sections
+                .iter()
+                .filter(|section| section.kind == routine.section)
+                .flat_map(|section| &section.entries)
+                .filter(|entry| (routine.wanted)(entry))
+                .map(|entry| entry.id.clone())
+                .collect();
+            if ids.is_empty() {
+                continue;
+            }
+            let outcome = if apply {
+                self.routine(routine, &ids, pulls, budget)
+            } else {
+                Outcome::Planned
+            };
+            track(&outcome, pulls);
+            let name = routine.kind.name();
+            let listed = ids.join(", ");
+            if matches!(outcome, Outcome::Deferred) {
+                acted.deferred.push(format!("{name} ({listed})"));
+            }
+            let _ = writeln!(
+                out,
+                "{}: {name} ({listed}): {}",
+                dashboard.series,
+                outcome.text()
+            );
+            acted
+                .routine
+                .push(json!({"kind": name, "entries": ids, "result": outcome.json()}));
+        }
+    }
+
+    /// One routine change for `ids`, in a worktree of the base: its open
+    /// pull request updated (when the change differs), else one opened
+    /// within `budget`, unless a person closed the same change.
+    fn routine(
+        &self,
+        routine: &Routine,
+        ids: &[String],
+        pulls: &[Issue],
+        budget: &mut usize,
+    ) -> Outcome {
+        let open = match earlier(pulls, &Marker::of_change(routine.kind, "")) {
+            Earlier::Open(pull) => Some(pull),
+            Earlier::Closed(_) | Earlier::None => None,
+        };
+        if open.is_none() && *budget == 0 {
+            return Outcome::Deferred;
+        }
+        let name = routine.kind.name();
+        let result = self.in_worktree(&format!("odx/{name}/next"), name, |local, wt| {
+            self.routine_work(routine, ids, local, wt).and_then(|out| {
+                let change = staged(wt);
+                if change.is_empty() {
+                    return Ok(nothing(&out));
+                }
+                let marker = Marker::of_change(routine.kind, &change);
+                match earlier(pulls, &marker) {
+                    Earlier::Open(pull)
+                        if Marker::parse(&pull.body).is_some_and(|m| m.key == marker.key) =>
+                    {
+                        return Ok(Outcome::Unchanged(pull.clone()));
+                    }
+                    Earlier::Closed(pull) => return Ok(Outcome::Closed(pull.clone())),
+                    Earlier::Open(_) | Earlier::None => {}
+                }
+                // An open pull request keeps its branch.
+                let branch = open
+                    .and_then(|pull| Marker::parse(&pull.body))
+                    .map_or_else(|| marker.branch(), |earlier| earlier.branch());
+                let mut body = format!("{}\n{}\n\n", marker.render(), routine.intro);
+                for id in ids {
+                    let _ = writeln!(body, "- `{id}` {}", covering(id));
+                }
+                let _ = write!(
+                    body,
+                    "\n```\n{out}```\n\nOpened by `odx bot`, which updates it while it is open; closed, the same change is not proposed again.\n"
+                );
+                commit(wt, routine.title, &body, 0, self.base)
+                    .and_then(|head| self.push(&head, &branch))
+                    .and_then(|()| self.pull_request(self.base, routine.title, &body, &marker, open))
+            })
+        });
+        spend(result, budget)
+    }
+
+    /// What a routine change does in the worktree `wt`, then `odx lock`:
+    /// its report.
+    fn routine_work(
+        &self,
+        routine: &Routine,
+        ids: &[String],
+        local: &Context<'_>,
+        wt: &Path,
+    ) -> Result<String, Report> {
+        prepare(self.global, local).and_then(|prepared| {
+            routine.action.map_or_else(
+                || self.repin(&prepared, local, wt),
+                |action| {
+                    ids.iter()
+                        .take(routine.take)
+                        .try_fold(String::new(), |out, id| {
+                            let act = self.act_args(id, action, "merged upstream".to_owned());
+                            run_act(
+                                &act,
+                                self.dashboards,
+                                self.specs,
+                                self.global,
+                                local,
+                                &prepared,
+                            )
+                            .and_then(checked)
+                            .map(|report| out + &report.out)
+                        })
+                        .and_then(|out| {
+                            checked(run_lock(&lock_args(), self.global, local))
+                                .map(|report| out + &report.out)
+                        })
+                },
+            )
+        })
+    }
+
+    /// `odx lock --update` in the worktree `wt`, kept only when it takes a
+    /// new head; the heads the guard rail kept go to the mirror with
+    /// `[tool.odx.bot].vault_heads`.
+    fn repin(&self, before: &Prepared, local: &Context<'_>, wt: &Path) -> Result<String, Report> {
+        let update = LockArgs {
+            update: true,
+            ..lock_args()
+        };
+        let config = &self.prepared.project.config;
+        let vaulting = config.bot.as_ref().and_then(|bot| bot.vault_heads) == Some(true);
+        checked(run_lock(&update, self.global, local)).and_then(|locked| {
+            prepare(self.global, local).map(|after| {
+                let vaulted = config
+                    .mirror
+                    .as_ref()
+                    .filter(|_| vaulting)
+                    .map(|mirror| {
+                        let (done, of) = vault_heads(self.ctx, &after, mirror);
+                        format!("vaulted {done} of {of} observed heads on the mirror\n")
+                    })
+                    .unwrap_or_default();
+                if heads(before.lock.as_ref()) == heads(after.lock.as_ref()) {
+                    let _ = git(wt, &["reset", "--quiet", "--hard"]);
+                    vaulted
+                } else {
+                    locked.out + &vaulted
+                }
+            })
         })
     }
 
@@ -784,6 +1245,88 @@ impl Job<'_> {
                 )
             })
             .map_err(forge_failure)
+    }
+}
+
+/// The outcome of proposing something, a pull request opened counted
+/// against `budget`.
+fn spend(result: Result<Outcome, Report>, budget: &mut usize) -> Outcome {
+    match result {
+        Ok(Outcome::Proposed(pull, true)) => {
+            *budget = budget.saturating_sub(1);
+            Outcome::Proposed(pull, true)
+        }
+        Ok(outcome) => outcome,
+        Err(report) => Outcome::Failed(report.error.unwrap_or_default()),
+    }
+}
+
+/// `pulls`, with the pull request `outcome` proposed as it is now.
+fn track(outcome: &Outcome, pulls: &mut Vec<Issue>) {
+    if let Outcome::Proposed(pull, _) = outcome {
+        pulls.retain(|other| other.number != pull.number);
+        pulls.push(pull.clone());
+    }
+}
+
+/// A routine change that changed nothing, and what was done besides.
+fn nothing(out: &str) -> Outcome {
+    let besides = out.lines().fold(String::new(), |mut besides, line| {
+        let _ = write!(besides, "; {line}");
+        besides
+    });
+    Outcome::Recorded(format!("nothing to propose{besides}"))
+}
+
+/// What is staged in the worktree `wt` after staging everything: the lines
+/// added and removed, which key a routine change.
+fn staged(wt: &Path) -> String {
+    let _ = git(wt, &["add", "-A"]);
+    git(wt, &["diff", "--cached", "--unified=0", "--no-color"])
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| {
+            (line.starts_with('+') || line.starts_with('-'))
+                && !line.starts_with("+++")
+                && !line.starts_with("---")
+        })
+        .fold(String::new(), |mut change, line| {
+            let _ = writeln!(change, "{line}");
+            change
+        })
+}
+
+/// The commits `lock` takes from pull requests.
+fn heads(lock: Option<&Lockfile>) -> Vec<String> {
+    lock.into_iter()
+        .flat_map(|lock| &lock.repositories)
+        .flat_map(|repository| &repository.merges)
+        .map(|merge| merge.sha.clone())
+        .collect()
+}
+
+/// `odx promote --from <from> --to <to> --with-code --commit --yes`, of
+/// nothing yet.
+fn promote_args(from: &str, to: &str, remote: &str) -> PromoteArgs {
+    PromoteArgs {
+        modules: Vec::new(),
+        from_pr: None,
+        rollback: None,
+        feature: None,
+        search: None,
+        select: Vec::new(),
+        from: Some(from.to_owned()),
+        to: to.to_owned(),
+        remote: remote.to_owned(),
+        allow_downgrade: false,
+        allow_source_change: false,
+        no_with_odoo: false,
+        with_code: true,
+        allow_transitive: false,
+        include_branch_specific: Vec::new(),
+        commit: true,
+        open_pr: false,
+        yes: true,
     }
 }
 

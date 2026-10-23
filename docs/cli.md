@@ -387,7 +387,7 @@ odx-cli --features tui` (the PyPI wheel leaves it out).
 
 ```console
 $ odx bot plan                     # what a run would do, as JSON; writes nothing
-$ odx bot run --apply              # act on ticked boxes, then update the issue
+$ odx bot run --apply              # the nightly cycle: checkout, boxes, routine changes, issue
 $ odx bot dashboard --apply        # only the issue; ticked boxes stay ticked
 $ odx bot act --from-issue --apply # only the ticked boxes (for `issues` events)
 ```
@@ -422,6 +422,31 @@ the pull requests a run opens; the rest wait for the next run. Mutes from
 the dashboard expire after `[tool.odx.bot] mute_expiry` (default 180 days).
 Porting upstream is never done by the bot: the dashboard shows the
 `odx dashboard act … --port --open-pr` command instead of a box.
+
+`odx bot run` first checks out what odx.lock pins (`odx aggregate
+--locked`) and verifies it (`odx verify`); a checkout that fails proposes
+nothing. It then proposes routine changes on its own, one pull request per
+kind for everything the dashboard found (`[tool.odx.bot] auto`, all three by
+default):
+
+| Kind | Found in | Pull request |
+| --- | --- | --- |
+| `drop-override` | overrides merged upstream | `odx drop` for each, then `odx lock` |
+| `repin` | pinned pull requests whose head moved | `odx lock --update`, proposed only when the guard rail takes a new head |
+| `auto-update` | index updates the auto-update policy allows | `odx lock --auto-update` |
+
+Its key is a digest of the change, so a run with the same change writes
+nothing, a new change updates the open pull request on its branch, and a
+pull request a person closed is not proposed again for the same change. The
+dashboard links the entries it takes care of. With `[tool.odx.bot]
+vault_heads = true` and a `[tool.odx.mirror]`, the heads the guard rail keeps
+are pushed to the mirror too, so that `odx sync` fetches them from there.
+
+A pull request merged into the base with the promotion label
+(`[tool.odx.bot] promote_label`, default `promote`) gets a promotion pull
+request into each environment the base's environment promotes into: what
+`odx promote --from-pr <n> --with-code` writes (`odx:promote`), proposed
+once. What `--max-prs` defers is listed on the dashboard.
 
 The bot refuses to run on a public repository, since the dashboard names
 the addons and pull requests a project uses, unless `[tool.odx.bot]

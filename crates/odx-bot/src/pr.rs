@@ -121,6 +121,17 @@ impl Marker {
         }
     }
 
+    /// The marker for the promotion into `to` of what pull request
+    /// `number` merged (it carries the promotion label).
+    #[must_use]
+    pub fn of_merged(number: u64, to: &str) -> Self {
+        Self {
+            kind: Kind::Promote,
+            key: format!("pr-{number}-{}", slug(to)),
+            entry: None,
+        }
+    }
+
     /// The marker as an HTML comment.
     #[must_use]
     pub fn render(&self) -> String {
@@ -174,6 +185,19 @@ impl Marker {
     }
 }
 
+/// The line a grouped pull request's body carries for each dashboard
+/// entry it takes care of.
+#[must_use]
+pub fn covering(id: &str) -> String {
+    format!("<!-- odx:covers {id} -->")
+}
+
+/// Whether `pull` takes care of the dashboard entry `id`.
+#[must_use]
+pub fn covers(pull: &Issue, id: &str) -> bool {
+    pull.body.lines().any(|line| line.ends_with(&covering(id)))
+}
+
 /// `text` as a branch-safe key: lowercase ASCII letters, digits and dots,
 /// other runs of characters as one `-`.
 #[must_use]
@@ -216,7 +240,8 @@ pub enum Earlier<'a> {
 ///
 /// An open pull request of a grouped kind is taken whatever its
 /// key, since a run has one of each; one for a dashboard box is matched by
-/// its entry. A closed one only counts with the same key: a different
+/// its entry, any other by its key. A closed one only counts with the same
+/// key, and never for a box (ticking it again asks anew): a different
 /// change deserves a new pull request.
 #[must_use]
 pub fn earlier<'a>(pulls: &'a [Issue], marker: &Marker) -> Earlier<'a> {
@@ -226,7 +251,10 @@ pub fn earlier<'a>(pulls: &'a [Issue], marker: &Marker) -> Earlier<'a> {
         .filter(|(_, found)| found.kind == marker.kind)
         .collect();
     let open = candidates.iter().find(|(pull, found)| {
-        pull.state == IssueState::Open && (marker.kind.grouped() || found.entry == marker.entry)
+        pull.state == IssueState::Open
+            && (marker.kind.grouped()
+                || (found.entry == marker.entry
+                    && (marker.entry.is_some() || found.key == marker.key)))
     });
     if let Some((pull, _)) = open {
         return Earlier::Open(pull);
@@ -234,7 +262,7 @@ pub fn earlier<'a>(pulls: &'a [Issue], marker: &Marker) -> Earlier<'a> {
     candidates
         .iter()
         .find(|(pull, found)| {
-            pull.state == IssueState::Closed && found.key == marker.key && marker.kind.grouped()
+            pull.state == IssueState::Closed && found.key == marker.key && marker.entry.is_none()
         })
         .map_or(Earlier::None, |(pull, _)| Earlier::Closed(pull))
 }
@@ -362,5 +390,24 @@ mod tests {
         assert_eq!(earlier(&pulls, &changed), Earlier::None);
         let open = [pull(6, IssueState::Open, &drops.render())];
         assert_eq!(earlier(&open, &changed), Earlier::Open(&open[0]));
+        // Promotions of a merged pull request: by key, open or closed.
+        let promoted = Marker::of_merged(7, "prod");
+        assert_eq!(promoted.branch(), "odx/promote/pr-7-prod");
+        let pulls = [
+            pull(8, IssueState::Open, &Marker::of_merged(6, "prod").render()),
+            pull(9, IssueState::Closed, &promoted.render()),
+        ];
+        assert_eq!(earlier(&pulls, &promoted), Earlier::Closed(&pulls[1]));
+        assert_eq!(earlier(&pulls[..1], &promoted), Earlier::None);
+        let reopened = [pull(10, IssueState::Open, &promoted.render())];
+        assert_eq!(earlier(&reopened, &promoted), Earlier::Open(&reopened[0]));
+    }
+
+    #[test]
+    fn covered_entries() {
+        let body = format!("{}\n- `pr:OCA/pos#1` {}\n", "x", covering("pr:OCA/pos#1"));
+        let grouped = pull(1, IssueState::Open, &body);
+        assert!(covers(&grouped, "pr:OCA/pos#1"));
+        assert!(!covers(&grouped, "pr:OCA/pos#12"));
     }
 }

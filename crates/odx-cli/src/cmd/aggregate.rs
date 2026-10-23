@@ -1093,6 +1093,56 @@ fn vault_lock(
     Ok(())
 }
 
+/// Push the newer upstream heads `prepared`'s odx.lock records for the
+/// pull requests it keeps pinned to `mirror`, so that it serves them too
+/// (`[tool.odx.bot].vault_heads`): how many were vaulted, of how many.
+pub(crate) fn vault_heads(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    mirror: &odx_config::schema::Mirror,
+) -> (usize, usize) {
+    let heads: Vec<(&LockedRepository, Vec<String>)> = prepared
+        .locked()
+        .iter()
+        .map(|entry| {
+            let shas = entry
+                .merges
+                .iter()
+                .filter_map(|merge| merge.upstream_head.clone())
+                .collect();
+            (entry, shas)
+        })
+        .filter(|(_, shas): &(_, Vec<String>)| !shas.is_empty())
+        .collect();
+    let of = heads.iter().map(|(_, shas)| shas.len()).sum();
+    // A vault that is refused vaults nothing, as one that fails.
+    let refs = vault_refs(
+        ctx,
+        prepared.cache.root(),
+        mirror,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    );
+    let git = SystemGit::new(Arc::new(OsRunner));
+    let done = refs.map_or(0, |refs| {
+        heads
+            .iter()
+            .filter(|(entry, shas)| {
+                vault(
+                    &git,
+                    &prepared.cache.repo_dir(&entry.url),
+                    &mirror.url,
+                    shas,
+                    &refs,
+                )
+                .is_ok()
+            })
+            .map(|(_, shas)| shas.len())
+            .sum()
+    });
+    (done, of)
+}
+
 /// The refs vaulted commits get, after checking the vault's visibility on
 /// its forge: a public vault is refused unless `allow_public = true`, and
 /// GitLab vaults use tags (GitLab protects tags, not custom refs).

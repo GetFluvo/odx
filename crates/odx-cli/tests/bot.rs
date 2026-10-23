@@ -132,6 +132,8 @@ struct State {
     base: String,
     /// Requests answered with HTTP 500: method, path and a part of the query.
     failing: Vec<(String, String, String)>,
+    /// Fixed answers to GET requests, by path below the repository.
+    fixed: HashMap<String, String>,
 }
 
 impl State {
@@ -196,6 +198,12 @@ impl State {
             .split('&')
             .filter_map(|pair| pair.split_once('='))
             .collect();
+        if let Some(fixed) = rest
+            .and_then(|rest| self.fixed.get(rest))
+            .filter(|_| request.method == "GET")
+        {
+            return (200, fixed.clone());
+        }
         match (request.method.as_str(), rest) {
             ("GET", _) if request.path == "/api/v1/version" && self.gitea => (200, "{}".to_owned()),
             ("GET", _) if request.path == "/api/v3/meta" && !self.gitea => (200, "{}".to_owned()),
@@ -889,6 +897,7 @@ fn forge_failures_end_the_run() {
         ("GET", "/api/v3/repos/acme/project", "", "answered HTTP 500"),
         ("GET", issues, "labels=odx:dashboard", "answered HTTP 500"),
         ("GET", issues, "labels=odx:bot", "answered HTTP 500"),
+        ("GET", issues, "labels=promote", "answered HTTP 500"),
         ("POST", issues, "", "answered HTTP 500"),
     ] {
         setup.state.lock().unwrap().failing =
@@ -934,4 +943,250 @@ fn forge_failures_end_the_run() {
     .unwrap();
     let (code, _, err) = setup.odx(&["bot", "plan"]);
     assert_ne!(code, 0, "{err}");
+}
+
+/// The pull request's head moved upstream: a new commit on it.
+fn move_head(setup: &Setup, n: u32, file: &str) -> String {
+    git(&setup.up, &["checkout", "--quiet", &format!("pr{n}")]);
+    change(
+        &setup.up,
+        &[(&format!("pos_x/{file}"), "y\n")],
+        "[FIX] more",
+    );
+    let head = git(&setup.up, &["rev-parse", "HEAD"]);
+    git(
+        &setup.up,
+        &["update-ref", &format!("refs/pull/{n}/head"), &head],
+    );
+    git(&setup.up, &["checkout", "--quiet", "17.0"]);
+    setup.route(
+        &format!("/api/v3/repos/OCA/pos/pulls/{n}"),
+        200,
+        &format!(
+            r#"{{"number": {n}, "title": "[17.0][FIX] pos_x: {n}", "state": "open", "merged_at": null, "base": {{"ref": "17.0"}}, "head": {{"sha": "{head}"}}}}"#
+        ),
+    );
+    head
+}
+
+/// CI on `sha` upstream reports nothing to wait for.
+fn no_checks(setup: &Setup, sha: &str) {
+    let commits = format!("/api/v3/repos/OCA/pos/commits/{sha}");
+    setup.route(
+        &format!("{commits}/check-runs"),
+        200,
+        r#"{"check_runs": []}"#,
+    );
+    setup.route(&format!("{commits}/status"), 200, r#"{"statuses": []}"#);
+}
+
+#[test]
+#[expect(clippy::too_many_lines, reason = "one scenario, run after run")]
+fn routine_pull_requests_and_promotions_by_label() {
+    let setup = Setup::new(false);
+    let mirror = setup.root.join("mirror.git");
+    git(
+        &setup.root,
+        &["init", "--quiet", "--bare", &mirror.display().to_string()],
+    );
+    let pyproject = std::fs::read_to_string(setup.project.join("pyproject.toml")).unwrap();
+    std::fs::write(
+        setup.project.join("pyproject.toml"),
+        pyproject.replace(
+            "labels = [\"bot\"]\n",
+            &format!(
+                "labels = [\"bot\"]\nvault_heads = true\n\n[tool.odx.mirror]\nurl = \"{}\"\n",
+                mirror.display()
+            ),
+        ),
+    )
+    .unwrap();
+    let (code, out, err) = setup.odx(&["lock"]);
+    assert_eq!(code, 0, "{out}{err}");
+    git(&setup.project, &["add", "-A"]);
+    git(&setup.project, &["commit", "--quiet", "-m", "mirror"]);
+    setup.git(&["push", "--quiet", "origin", "main"]);
+    setup.git(&["fetch", "--quiet", "origin"]);
+    // A new head whose CI cannot be read: kept, and vaulted.
+    let kept = move_head(&setup, 1, "g.py");
+    let writes = setup.writes(|| {
+        assert_eq!(
+            setup.run(),
+            "17.0: repin (pr:OCA/pos#1): nothing to propose; vaulted 1 of 1 observed heads on the mirror\n\
+             17.0: dashboard issue #1 created\n"
+        );
+    });
+    assert_eq!(writes.len(), 1, "{writes:?}");
+    assert!(git(&mirror, &["ls-remote", "."]).contains(&kept));
+    // Nothing to wait for: taken, through a pull request.
+    no_checks(&setup, &kept);
+    let out = setup.run();
+    assert!(
+        out.starts_with(&format!(
+            "17.0: repin (pr:OCA/pos#1): opened #2 {}/acme/project/pull/2\n",
+            setup.api
+        )),
+        "{out}"
+    );
+    let pull = setup.issue(2);
+    assert_eq!(pull["title"], "chore(deps): take new pull request heads");
+    let branch = pull["head"]["ref"].as_str().unwrap().to_owned();
+    assert!(branch.starts_with("odx/repin/"), "{branch}");
+    let labels: Vec<&str> = pull["labels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|label| label["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["odx:bot", "odx:repin", "bot"]);
+    let body = pull["body"].as_str().unwrap();
+    assert!(body.starts_with("<!-- odx:pr kind=repin key="), "{body}");
+    assert!(
+        body.contains("- `pr:OCA/pos#1` <!-- odx:covers pr:OCA/pos#1 -->\n"),
+        "{body}"
+    );
+    let lock = git(&setup.bare, &["show", &format!("{branch}:odx.lock")]);
+    assert!(lock.contains(&kept), "{lock}");
+    let issue = setup.issue(1)["body"].as_str().unwrap().to_owned();
+    assert!(
+        issue.contains(&format!(
+            "  - drop: in [#2]({}/acme/project/pull/2)\n",
+            setup.api
+        )),
+        "{issue}"
+    );
+    // The same change again: nothing is written.
+    let writes = setup.writes(|| {
+        assert_eq!(
+            setup.run(),
+            format!(
+                "17.0: repin (pr:OCA/pos#1): unchanged #2 {}/acme/project/pull/2\n\
+                 17.0: dashboard issue #1 unchanged\n",
+                setup.api
+            )
+        );
+    });
+    assert_eq!(writes, Vec::<String>::new());
+    // A newer head: the open pull request is updated on its branch.
+    let newer = move_head(&setup, 1, "h.py");
+    no_checks(&setup, &newer);
+    let out = setup.run();
+    assert!(
+        out.starts_with(&format!(
+            "17.0: repin (pr:OCA/pos#1): updated #2 {}/acme/project/pull/2\n",
+            setup.api
+        )),
+        "{out}"
+    );
+    let lock = git(&setup.bare, &["show", &format!("{branch}:odx.lock")]);
+    assert!(lock.contains(&newer), "{lock}");
+    // Closed by a person: not proposed again.
+    setup.state.lock().unwrap().item(2).unwrap()["state"] = json!("closed");
+    let out = setup.run();
+    assert!(
+        out.starts_with("17.0: repin (pr:OCA/pos#1): #2 was closed: not proposed again\n"),
+        "{out}"
+    );
+    // Merged upstream: the override is dropped, within the budget.
+    setup.route(
+        "/api/v3/repos/OCA/pos/pulls/1",
+        200,
+        &format!(
+            r#"{{"number": 1, "title": "[17.0][FIX] pos_x: 1", "state": "closed", "merged_at": "2026-10-01T00:00:00Z", "base": {{"ref": "17.0"}}, "head": {{"sha": "{newer}"}}}}"#
+        ),
+    );
+    let (code, out, err) = setup.odx(&["bot", "run", "--apply", "--max-prs", "0"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.starts_with(
+            "17.0: drop-override (pr:OCA/pos#1): deferred to the next run (--max-prs)\n"
+        ),
+        "{out}"
+    );
+    let issue = setup.issue(1)["body"].as_str().unwrap().to_owned();
+    assert!(
+        issue.contains("\n## Deferred to the next run (1)\n\n- drop-override (pr:OCA/pos#1)\n"),
+        "{issue}"
+    );
+    let out = setup.run();
+    assert!(
+        out.starts_with(&format!(
+            "17.0: drop-override (pr:OCA/pos#1): opened #3 {}/acme/project/pull/3\n",
+            setup.api
+        )),
+        "{out}"
+    );
+    let dropped = setup.issue(3);
+    assert_eq!(
+        dropped["title"],
+        "chore(deps): drop overrides merged upstream"
+    );
+    let branch = dropped["head"]["ref"].as_str().unwrap().to_owned();
+    let pyproject = git(&setup.bare, &["show", &format!("{branch}:pyproject.toml")]);
+    assert!(!pyproject.contains("pr = 1"), "{pyproject}");
+    // A pull request merged into test with the promotion label.
+    git(&setup.project, &["checkout", "--quiet", "-b", "feature"]);
+    change(
+        &setup.project,
+        &[("my_addon/__manifest__.py", "{'version': '17.0.1.1.0'}")],
+        "[IMP] my_addon",
+    );
+    let feature = git(&setup.project, &["rev-parse", "HEAD"]);
+    git(&setup.project, &["checkout", "--quiet", "main"]);
+    git(
+        &setup.project,
+        &["merge", "--quiet", "--no-ff", "feature", "-m", "Merge #50"],
+    );
+    setup.git(&["push", "--quiet", "origin", "main"]);
+    setup.git(&["fetch", "--quiet", "origin"]);
+    git(&setup.bare, &["update-ref", "refs/pull/50/head", &feature]);
+    {
+        let mut state = setup.state.lock().unwrap();
+        let url = format!("{}/acme/project/pull/50", setup.api);
+        state.items.push(json!({
+            "number": 50, "title": "my_addon", "body": "", "state": "closed",
+            "labels": [{"name": "promote"}], "pull_request": {}, "html_url": url,
+        }));
+        state.fixed.insert(
+            "/pulls/50".to_owned(),
+            json!({
+                "number": 50, "title": "my_addon", "state": "closed",
+                "merged_at": "2026-10-20T00:00:00Z", "base": {"ref": "main"},
+                "head": {"sha": feature},
+            })
+            .to_string(),
+        );
+        state.fixed.insert(
+            "/pulls/50/commits".to_owned(),
+            json!([{ "sha": feature }]).to_string(),
+        );
+        drop(state);
+    }
+    let (code, out, err) = setup.odx(&["bot", "plan"]);
+    assert_eq!(code, 0, "{err}");
+    let plan: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        plan["promotions"][0]["result"]["outcome"], "planned",
+        "{plan:#}"
+    );
+    let out = setup.run();
+    assert!(
+        out.starts_with(&format!(
+            "promote #50 (test -> prod): opened #5 {}/acme/project/pull/5\n",
+            setup.api
+        )),
+        "{out}"
+    );
+    let promotion = setup.issue(5);
+    assert_eq!(promotion["title"], "chore: promote #50 from test to prod");
+    assert_eq!(promotion["base"]["ref"], "prod");
+    assert_eq!(promotion["head"]["ref"], "odx/promote/pr-50-prod");
+    let promoted = git(
+        &setup.bare,
+        &["show", "odx/promote/pr-50-prod:my_addon/__manifest__.py"],
+    );
+    assert!(promoted.contains("17.0.1.1.0"), "{promoted}");
+    // Proposed once.
+    let out = setup.run();
+    assert!(!out.contains("promote #50"), "{out}");
 }
