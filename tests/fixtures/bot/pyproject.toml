@@ -1,0 +1,10 @@
+[project]
+name = "acme-project"
+version = "1"
+
+[tool.odx]
+odoo_version = "17.0"
+mergiraf = "never"
+
+[tool.odx.bot]
+labels = ["bot"]
