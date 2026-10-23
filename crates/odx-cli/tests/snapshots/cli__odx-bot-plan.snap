@@ -1,0 +1,52 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+What `odx bot run` would do, as JSON; writes nothing
+
+Usage: odx bot plan [OPTIONS]
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --series <SERIES>
+          Only the dashboard of this series
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --remote <NAME>
+          The remote of the project repository
+          
+          [default: origin]
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

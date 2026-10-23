@@ -58,6 +58,8 @@ pub struct Page<'a> {
     pub pulls: &'a [Issue],
     /// Boxes ticked that this run could not act on: they stay ticked.
     pub pending: &'a [(String, Action)],
+    /// Boxes this run acted on without a pull request, with what it did.
+    pub recorded: &'a [(String, Action, String)],
     /// What the run left for the next one (rate limits, `--max-prs`).
     pub deferred: &'a [String],
     /// Whether the run stopped early.
@@ -100,6 +102,13 @@ pub fn body(page: &Page<'_>, old: Option<&str>) -> String {
                 Earlier::Closed(_) | Earlier::None => None,
             }
         });
+        if let Some((_, _, text)) = page
+            .recorded
+            .iter()
+            .find(|(id, done, _)| *id == entry.id && *done == action)
+        {
+            return ActionLine::Note(text.clone());
+        }
         let pending = page
             .pending
             .iter()
@@ -156,21 +165,34 @@ pub fn same(a: &str, b: &str) -> bool {
     stable(a) == stable(b)
 }
 
+/// A box ticked on the dashboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    /// The entry.
+    pub id: String,
+    /// What was asked.
+    pub action: Action,
+    /// The marker of the pull request that does it.
+    pub marker: Marker,
+}
+
 /// The boxes ticked in `body` that `dashboard` still offers, except
 /// porting upstream, which the bot never does. Text below the notes
 /// marker is a person's and is not read.
 #[must_use]
-pub fn requests(body: &str, dashboard: &Dashboard) -> Vec<(String, Action)> {
+pub fn requests(body: &str, dashboard: &Dashboard) -> Vec<Request> {
     let generated = body
         .split_once(NOTES)
         .map_or(body, |(generated, _)| generated);
-    let mut found: Vec<(String, Action)> = ticked(generated)
+    let mut found: Vec<Request> = ticked(generated)
         .into_iter()
         .filter(|(id, action)| {
-            *action != Action::Port
-                && dashboard
-                    .entry(id)
-                    .is_some_and(|entry| entry.actions.contains(action))
+            dashboard
+                .entry(id)
+                .is_some_and(|entry| entry.actions.contains(action))
+        })
+        .filter_map(|(id, action)| {
+            Marker::of_entry(action, &id).map(|marker| Request { id, action, marker })
         })
         .collect();
     found.dedup();
@@ -235,6 +257,7 @@ mod tests {
             run: Some("https://x/run/1"),
             pulls,
             pending: &[],
+            recorded: &[],
             deferred: &[],
             partial: false,
         }
@@ -277,6 +300,27 @@ mod tests {
              \n<!-- odx:notes -->\nNotes below this line are kept between runs.\n"
         );
         assert_eq!(requests(&text, &model), []);
+        // Porting upstream is never asked of the bot.
+        assert_eq!(
+            requests(
+                &text.replace("- port:", "- [x] <!-- odx:port fwd:pos.pos_x->17.0 -->"),
+                &model
+            ),
+            []
+        );
+    }
+
+    fn asked(body: &str, dashboard: &Dashboard) -> Vec<(String, Action)> {
+        requests(body, dashboard)
+            .into_iter()
+            .map(|request| {
+                assert_eq!(
+                    Some(request.marker),
+                    Marker::of_entry(request.action, &request.id)
+                );
+                (request.id, request.action)
+            })
+            .collect()
     }
 
     #[test]
@@ -288,6 +332,11 @@ mod tests {
         let closed = issue(8, IssueState::Closed, "<!-- odx:pr kind=repin key=k -->");
         let pulls = [open, closed];
         let pending = [("fwd:pos.pos_x->17.0".to_owned(), Action::Include)];
+        let recorded = [(
+            "new:OCA/pos#789".to_owned(),
+            Action::Mute,
+            "recorded m:1".to_owned(),
+        )];
         let deferred = ["auto-update: --max-prs reached".to_owned()];
         let old =
             "old\n<!-- odx:notes -->\nmine\n- [x] include <!-- odx:include new:OCA/pos#789 -->\n";
@@ -295,6 +344,7 @@ mod tests {
             &Page {
                 run: None,
                 pending: &pending,
+                recorded: &recorded,
                 deferred: &deferred,
                 partial: true,
                 ..page(&model, &pulls)
@@ -304,6 +354,7 @@ mod tests {
         assert!(text.contains("Last run: 2026-10-12 02:10 UTC.\n"), "{text}");
         assert!(text.contains("> This run stopped early"), "{text}");
         assert!(text.contains("  - include: [#9](https://x/9)\n"), "{text}");
+        assert!(text.contains("  - mute: recorded m:1\n"), "{text}");
         assert!(text.contains("  - [x] include <!-- odx:include fwd:pos.pos_x->17.0 -->\n"));
         assert!(text.contains("\n## Open bot pull requests (1)\n\n- [#9](https://x/9) odx: #9\n"));
         assert!(
@@ -315,7 +366,7 @@ mod tests {
             "<!-- odx:notes -->\nmine\n- [x] include <!-- odx:include new:OCA/pos#789 -->\n"
         ));
         // The pending box is asked again; the one in the notes is not read.
-        assert_eq!(requests(&text, &model), pending);
+        assert_eq!(asked(&text, &model), pending);
     }
 
     #[test]
@@ -328,7 +379,7 @@ mod tests {
                 "- [x] mute <!-- odx:mute gone -->\n- [x] drop <!-- odx:drop new:OCA/pos#789 -->\n<!-- odx:notes -->",
             );
         assert_eq!(
-            requests(&text, &model),
+            asked(&text, &model),
             [
                 ("new:OCA/pos#789".to_owned(), Action::Include),
                 ("new:OCA/pos#789".to_owned(), Action::Mute),
@@ -337,7 +388,7 @@ mod tests {
         );
         let doubled =
             "- [x] <!-- odx:mute new:OCA/pos#789 -->\n- [x] <!-- odx:mute new:OCA/pos#789 -->\n";
-        assert_eq!(requests(doubled, &model).len(), 1);
+        assert_eq!(asked(doubled, &model).len(), 1);
     }
 
     #[test]

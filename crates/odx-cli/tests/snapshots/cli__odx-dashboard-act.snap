@@ -79,6 +79,9 @@ Options:
   -q, --quiet
           Errors only
 
+      --until <DATE>
+          With --mute: when it expires (YYYY-MM-DD)
+
   -h, --help
           Print help (see a summary with '-h')
 

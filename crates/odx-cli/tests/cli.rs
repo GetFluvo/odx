@@ -18,25 +18,6 @@ fn run(args: &[&str]) -> (Exit, String, String) {
     )
 }
 
-/// Every leaf command path, e.g. `["port", "pr"]`, with required arguments.
-const STUBS: &[(&[&str], u8)] = &[(&["bot", "run"], 11)];
-
-#[test]
-fn stubbed_commands_report_their_phase_with_usage_exit() {
-    for (args, phase) in STUBS {
-        let mut argv = vec!["odx"];
-        argv.extend_from_slice(args);
-        let (exit, out, err) = run(&argv);
-        let name = args[0];
-        assert_eq!(exit, Exit::Usage, "{argv:?}");
-        assert_eq!(out, "", "{argv:?}");
-        assert_eq!(
-            err,
-            format!("odx {name}: not implemented yet (roadmap phase {phase})\n"),
-        );
-    }
-}
-
 #[test]
 fn git_aggregate_subcommand_uses_the_drop_in() {
     let (exit, _, err) = run(&["odx", "git-aggregate", "show-all-prs", "-c", "nowhere.yaml"]);
@@ -101,6 +82,7 @@ fn early_dispatched_commands_have_names_and_phases() {
         (&["odx", "lint"][..], "lint", 9),
         (&["odx", "env", "list"][..], "env", 10),
         (&["odx", "promote", "a", "--to", "prod"][..], "promote", 10),
+        (&["odx", "bot", "plan"][..], "bot", 11),
     ] {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!((cli.command.name(), cli.command.phase()), (name, phase));
@@ -191,10 +173,10 @@ fn binary_exit_codes() {
         .arg("--version")
         .assert()
         .success();
+    // The bot reads its requests from the dashboard issue, nowhere else.
     Command::cargo_bin("odx")
         .unwrap()
-        .args(["bot", "run"])
+        .args(["bot", "act"])
         .assert()
-        .code(2)
-        .stderr("odx bot: not implemented yet (roadmap phase 11)\n");
+        .code(2);
 }
