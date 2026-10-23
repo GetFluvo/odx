@@ -210,7 +210,7 @@ jobs:
           scripts/bot_cycle.sh "$RUNNER_TEMP/project"
       - name: The nightly cycle
         id: first
-        uses: ./
+        uses: $/
         with:
           version: none
           bot: true
@@ -218,7 +218,7 @@ jobs:
           cache: false
           working-directory: ${{ runner.temp }}/project
       - name: The same again
-        uses: ./
+        uses: $/
         with:
           version: none
           bot: true
