@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use odx_dashboard::{Action, ActionLine, Dashboard, sections, ticked};
 use odx_forge::{Issue, IssueState};
 
-use crate::pr::{Earlier, Marker, earlier};
+use crate::pr::{Earlier, Marker, covers, earlier};
 
 /// The label of the dashboard issue.
 pub const LABEL: &str = "odx:dashboard";
@@ -108,6 +108,13 @@ pub fn body(page: &Page<'_>, old: Option<&str>) -> String {
             .find(|(id, done, _)| *id == entry.id && *done == action)
         {
             return ActionLine::Note(text.clone());
+        }
+        let covered = page
+            .pulls
+            .iter()
+            .find(|pull| pull.state == IssueState::Open && covers(pull, &entry.id));
+        if let Some(pull) = covered {
+            return ActionLine::Note(format!("in [#{}]({})", pull.number, pull.url));
         }
         let pending = page
             .pending
@@ -367,6 +374,33 @@ mod tests {
         ));
         // The pending box is asked again; the one in the notes is not read.
         assert_eq!(asked(&text, &model), pending);
+    }
+
+    #[test]
+    fn links_entries_a_grouped_pull_request_takes_care_of() {
+        let model = dashboard();
+        let body = format!(
+            "<!-- odx:pr kind=drop-override key=k -->\n- {}\n",
+            crate::pr::covering("fwd:pos.pos_x->17.0")
+        );
+        let pulls = [
+            issue(7, IssueState::Open, &body),
+            issue(6, IssueState::Closed, &body.replace("key=k", "key=j")),
+        ];
+        let text = body_of(&model, &pulls);
+        assert!(
+            text.contains("  - include: in [#7](https://x/7)\n"),
+            "{text}"
+        );
+        let text = body_of(&model, &pulls[1..]);
+        assert!(
+            text.contains("  - [ ] include <!-- odx:include fwd:pos.pos_x->17.0 -->\n"),
+            "{text}"
+        );
+    }
+
+    fn body_of(model: &Dashboard, pulls: &[Issue]) -> String {
+        body(&page(model, pulls), None)
     }
 
     #[test]

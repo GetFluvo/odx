@@ -319,6 +319,16 @@ impl Model {
         self.promotion.iter().any(|[a, b]| a == from && b == to)
     }
 
+    /// The environments `from` may be promoted into, in configuration order.
+    #[must_use]
+    pub fn targets(&self, from: &str) -> Vec<&str> {
+        self.promotion
+            .iter()
+            .filter(|[a, _]| a == from)
+            .map(|[_, b]| b.as_str())
+            .collect()
+    }
+
     /// The environment a promotion into `to` comes from when `--from` is
     /// not given: the one allowed source that is not disposable, else the
     /// one allowed source.
@@ -469,6 +479,7 @@ mod tests {
         assert_eq!(main.get("test").unwrap().branch, "main");
         assert!(main.allows("test", "prod") && main.allows("prod", "test"));
         assert!(!main.allows("test", "test"));
+        assert_eq!(main.targets("test"), ["prod"]);
         let sh = model("[tool.odx.environments]\npreset = \"odoo-sh\"\n")
             .unwrap()
             .unwrap();
