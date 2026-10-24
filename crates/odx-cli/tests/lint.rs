@@ -44,7 +44,7 @@ fn odx(root: &Path, args: &[&str]) -> (Exit, String, String) {
 
 /// A manifest with a key set to its default (a safe fix removes it) and
 /// no license or author (findings no fix clears).
-const MANIFEST: &str = "{\n    'name': 'X',\n    'version': '18.0.1.0.0',\n    'depends': ['base'],\n    'installable': True,\n}\n";
+const MANIFEST: &str = "{\n    'name': 'X',\n    'version': '18.0.1.0.0',\n    'depends': ['base'],\n    'application': False,\n}\n";
 
 /// A project with two own addons, a vendored group and installed addons.
 fn project(root: &Path) {
@@ -92,7 +92,7 @@ fn findings_formats_and_fixes() {
     let manifest = root.join("modules/custom/a/__manifest__.py");
     let (exit, out, _) = odx(root, &["lint", "--diff", "--ignore", "C8101"]);
     assert_eq!(exit, Exit::Failure);
-    assert!(out.contains("installable"), "{out}");
+    assert!(out.contains("application"), "{out}");
     assert!(out.ends_with("fix(es) would change 2 file(s)\n"), "{out}");
     assert_eq!(std::fs::read_to_string(&manifest).unwrap(), MANIFEST);
     let (_, out, _) = odx(root, &["lint", "--fix"]);
@@ -100,7 +100,7 @@ fn findings_formats_and_fixes() {
     assert!(
         !std::fs::read_to_string(&manifest)
             .unwrap()
-            .contains("installable")
+            .contains("application")
     );
     let (_, out, _) = odx(
         root,
@@ -330,27 +330,44 @@ fn translations_of_the_project_languages() {
         &root.join("pyproject.toml"),
         &pyproject.replacen(
             "odoo_version = \"18.0\"\n",
-            "odoo_version = \"18.0\"\nlanguages = [\"es\", \"nl\", \"nl_BE\"]\n",
+            "odoo_version = \"18.0\"\nlanguages = [\"es\", \"nl_BE\"]\n",
             1,
         ),
     );
     // a has terms, Dutch half done and no Spanish; b has none to translate;
     // vendored c is not the project's.
     let i18n = root.join("modules/custom/a/i18n");
-    write(&i18n.join("a.pot"), "msgid \"Done\"\nmsgstr \"\"\n");
+    write(
+        &i18n.join("a.pot"),
+        "msgid \"Done\"\nmsgstr \"\"\n\nmsgid \"Open\"\nmsgstr \"\"\n",
+    );
     write(
         &i18n.join("nl.po"),
         "msgid \"\"\nmsgstr \"\"\n\nmsgid \"Done\"\nmsgstr \"Klaar\"\n\nmsgid \"Open\"\nmsgstr \"\"\n",
     );
     write(&root.join("modules/oca/c/i18n/c.pot"), "");
-    let (exit, out, err) = odx(root, &["lint", "--select", "ODX006,ODX007"]);
+    let (exit, out, err) = odx(root, &["lint", "--select", "PO105"]);
     assert_eq!((exit, err.as_str()), (Exit::Failure, ""), "{out}");
-    assert_eq!(
-        out,
-        "modules/custom/a/i18n:1:0: ODX006: a has no i18n/es.po for the project language es: its terms show in English (po-missing)\n\
-         modules/custom/a/i18n/nl.po:7:0: ODX007: 1 of 2 terms untranslated (po-untranslated)\n\
-         2 finding(s)\n"
+    let found: Vec<&str> = out.lines().filter(|line| line.contains("PO105")).collect();
+    assert_eq!(found.len(), 2, "{out}");
+    assert!(
+        found.iter().any(|line| line.contains("i18n/es.po")),
+        "{out}"
     );
-    let (_, out, _) = odx(root, &["lint", "--select", "ODX", "--ignore", "po-missing"]);
-    assert!(!out.contains("ODX006") && out.contains("ODX007"), "{out}");
+    // nl.po serves nl_BE.
+    assert!(
+        found
+            .iter()
+            .any(|line| line.contains("nl.po") && line.contains("nl_BE")),
+        "{out}"
+    );
+    assert!(!out.contains("modules/oca"), "{out}");
+    // odoo-lint's own setting wins.
+    let pyproject = std::fs::read_to_string(root.join("pyproject.toml")).unwrap();
+    write(
+        &root.join("pyproject.toml"),
+        &(pyproject + "\n[tool.odoo-lint.rules.po-translation-missing]\nlanguages = [\"nl\"]\n"),
+    );
+    let (_, out, _) = odx(root, &["lint", "--select", "PO105"]);
+    assert!(!out.contains("es.po") && out.contains("nl.po"), "{out}");
 }
