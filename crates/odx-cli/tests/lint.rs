@@ -319,3 +319,38 @@ fn project_rules() {
     let (_, out, _) = odx(root, &["lint", "--select", "ODX005"]);
     assert_eq!(out, "no findings\n");
 }
+
+#[test]
+fn translations_of_the_project_languages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    let pyproject = std::fs::read_to_string(root.join("pyproject.toml")).unwrap();
+    write(
+        &root.join("pyproject.toml"),
+        &pyproject.replacen(
+            "odoo_version = \"18.0\"\n",
+            "odoo_version = \"18.0\"\nlanguages = [\"es\", \"nl\", \"nl_BE\"]\n",
+            1,
+        ),
+    );
+    // a has terms, Dutch half done and no Spanish; b has none to translate;
+    // vendored c is not the project's.
+    let i18n = root.join("modules/custom/a/i18n");
+    write(&i18n.join("a.pot"), "msgid \"Done\"\nmsgstr \"\"\n");
+    write(
+        &i18n.join("nl.po"),
+        "msgid \"\"\nmsgstr \"\"\n\nmsgid \"Done\"\nmsgstr \"Klaar\"\n\nmsgid \"Open\"\nmsgstr \"\"\n",
+    );
+    write(&root.join("modules/oca/c/i18n/c.pot"), "");
+    let (exit, out, err) = odx(root, &["lint", "--select", "ODX006,ODX007"]);
+    assert_eq!((exit, err.as_str()), (Exit::Failure, ""), "{out}");
+    assert_eq!(
+        out,
+        "modules/custom/a/i18n:1:0: ODX006: a has no i18n/es.po for the project language es: its terms show in English (po-missing)\n\
+         modules/custom/a/i18n/nl.po:7:0: ODX007: 1 of 2 terms untranslated (po-untranslated)\n\
+         2 finding(s)\n"
+    );
+    let (_, out, _) = odx(root, &["lint", "--select", "ODX", "--ignore", "po-missing"]);
+    assert!(!out.contains("ODX006") && out.contains("ODX007"), "{out}");
+}

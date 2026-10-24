@@ -41,6 +41,17 @@ pub const VERSION_NOT_BUMPED: Rule = Rule {
     name: "version-not-bumped",
 };
 
+/// A project language without its `.po` file.
+pub const PO_MISSING: Rule = Rule {
+    code: "ODX006",
+    name: "po-missing",
+};
+/// Terms of a project language left untranslated.
+pub const PO_UNTRANSLATED: Rule = Rule {
+    code: "ODX007",
+    name: "po-untranslated",
+};
+
 /// Every odx rule.
 pub const RULES: &[Rule] = &[
     VERSION_SERIES,
@@ -48,6 +59,8 @@ pub const RULES: &[Rule] = &[
     MIGRATION_VERSION,
     TWO_SOURCES,
     VERSION_NOT_BUMPED,
+    PO_MISSING,
+    PO_UNTRANSLATED,
 ];
 
 /// Whether a `select`/`ignore` entry names `rule`: `ALL`, its code or name,
@@ -235,6 +248,103 @@ pub fn version_not_bumped(addon: &Addon, tag: &str, released: &str) -> Option<Vi
     })
 }
 
+/// The `.po` file in `files` (the names in `i18n/`) that Odoo loads for
+/// `language`: its own, else its base language's (`nl.po` for `nl_BE`).
+#[must_use]
+pub fn po_file<'a>(language: &str, files: &'a [String]) -> Option<&'a str> {
+    let base = language.split(['_', '@']).next().unwrap_or(language);
+    [language, base]
+        .iter()
+        .find_map(|name| files.iter().find(|file| **file == format!("{name}.po")))
+        .map(String::as_str)
+}
+
+/// ODX006: an addon with terms to translate (an `i18n/*.pot`) must have a
+/// `.po` file for each of the project's `languages`; `files` are the names
+/// in its `i18n/`.
+#[must_use]
+pub fn po_missing(addon: &Addon, languages: &[String], files: &[String]) -> Vec<Violation> {
+    if !files.iter().any(|file| {
+        Path::new(file)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("pot"))
+    }) {
+        return Vec::new();
+    }
+    languages
+        .iter()
+        .filter(|language| po_file(language, files).is_none())
+        .map(|language| {
+            finding(
+                PO_MISSING,
+                &addon.dir.join("i18n"),
+                1,
+                format!(
+                    "{} has no i18n/{language}.po for the project language {language}: its terms show in English",
+                    addon.name
+                ),
+            )
+        })
+        .collect()
+}
+
+/// The `msgid` lines of the entries of a `.po` file and whether each is
+/// translated; the header (the empty `msgid`) and obsolete entries left
+/// out.
+fn po_entries(text: &str) -> Vec<(usize, bool)> {
+    // Per entry: its line, its msgid, its msgstr(s) so far.
+    let mut entries: Vec<(usize, String, String)> = Vec::new();
+    let mut in_msgstr = false;
+    for (at, line) in text.lines().enumerate() {
+        let line = line.trim();
+        let quoted = |rest: &str| rest.trim().trim_matches('"').to_owned();
+        if let Some(rest) = line.strip_prefix("msgid ") {
+            entries.push((at + 1, quoted(rest), String::new()));
+            in_msgstr = false;
+        } else if line.starts_with("msgstr") {
+            in_msgstr = true;
+            let rest = line.split_once(' ').map_or("", |(_, rest)| rest);
+            entries
+                .last_mut()
+                .into_iter()
+                .for_each(|entry| entry.2.push_str(&quoted(rest)));
+        } else if line.starts_with('"') {
+            entries.last_mut().into_iter().for_each(|entry| {
+                if in_msgstr {
+                    entry.2.push_str(&quoted(line));
+                } else {
+                    entry.1.push_str(&quoted(line));
+                }
+            });
+        }
+    }
+    entries
+        .into_iter()
+        .filter(|(_, msgid, _)| !msgid.is_empty())
+        .map(|(line, _, msgstr)| (line, !msgstr.is_empty()))
+        .collect()
+}
+
+/// ODX007: the terms of a project language's `.po` file must be
+/// translated; one finding per file, at its first untranslated term.
+#[must_use]
+pub fn po_untranslated(file: &Path, text: &str) -> Option<Violation> {
+    let entries = po_entries(text);
+    let open: Vec<usize> = entries
+        .iter()
+        .filter(|(_, translated)| !translated)
+        .map(|(line, _)| *line)
+        .collect();
+    open.first().map(|line| {
+        finding(
+            PO_UNTRANSLATED,
+            file,
+            *line,
+            format!("{} of {} terms untranslated", open.len(), entries.len()),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +439,61 @@ mod tests {
         let same = version_not_bumped(&current, "v1", "18.0.1.0.0").unwrap();
         assert_eq!((same.line, same.code.as_str()), (3, "ODX005"));
         assert!(same.message.starts_with("a changed since v1"));
+    }
+
+    #[test]
+    fn po_files_of_languages() {
+        let files: Vec<String> = ["a.pot", "nl.po", "es_AR.po", "README"]
+            .map(str::to_owned)
+            .to_vec();
+        assert_eq!(po_file("nl_BE", &files), Some("nl.po"));
+        assert_eq!(po_file("es_AR", &files), Some("es_AR.po"));
+        assert_eq!(po_file("sr@latin", &files), None);
+        assert_eq!(po_file("es", &files), None);
+        let languages: Vec<String> = ["nl", "nl_BE", "es"].map(str::to_owned).to_vec();
+        let found = po_missing(&addon(None), &languages, &files);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].code, "ODX006");
+        assert_eq!(
+            found[0].message,
+            "a has no i18n/es.po for the project language es: its terms show in English"
+        );
+        assert!(found[0].file_path.ends_with("i18n"));
+        assert_eq!(po_missing(&addon(None), &languages, &files[1..]), []);
+    }
+
+    #[test]
+    fn untranslated_terms() {
+        let po = "\
+msgid \"\"
+msgstr \"\"
+\"Project-Id-Version: Odoo\\n\"
+
+#. module: a
+msgid \"Done\"
+msgstr \"Klaar\"
+
+msgid \"\"
+\"Long \"
+\"text\"
+msgstr \"\"
+
+msgid \"One\"
+msgid_plural \"Many\"
+msgstr[0] \"\"
+msgstr[1] \"\"
+
+msgid \"Wrapped\"
+msgstr \"\"
+\"Ingepakt\"
+
+#~ msgid \"Gone\"
+#~ msgstr \"\"
+";
+        let found = po_untranslated(Path::new("a/i18n/nl.po"), po).unwrap();
+        assert_eq!((found.line, found.code.as_str()), (9, "ODX007"));
+        assert_eq!(found.message, "2 of 4 terms untranslated");
+        assert!(po_untranslated(Path::new("nl.po"), "msgid \"A\"\nmsgstr \"B\"\n").is_none());
+        assert!(po_untranslated(Path::new("nl.po"), "\"stray\"\nmsgstr \"x\"\n").is_none());
     }
 }

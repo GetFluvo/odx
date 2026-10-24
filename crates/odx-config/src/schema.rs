@@ -18,6 +18,10 @@ use crate::Span;
 pub struct OdxConfig {
     /// Odoo series of the project, e.g. `"17.0"`.
     pub odoo_version: String,
+    /// Languages the project is translated into besides English, as Odoo
+    /// codes (`"es"`, `"nl_BE"`).
+    #[serde(default)]
+    pub languages: Vec<String>,
     /// Neutral project identifier for the verdict repository.
     pub project_id: Option<String>,
     /// Maximum concurrent fetches and merge jobs.

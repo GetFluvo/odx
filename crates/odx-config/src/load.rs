@@ -214,6 +214,20 @@ fn is_series(text: &str) -> bool {
         .is_some_and(|major| !major.is_empty() && major.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// `es`, `nl_BE`, `sr@latin`: a language, a region, a script.
+fn is_language(text: &str) -> bool {
+    let (code, script) = text.split_once('@').unwrap_or((text, "a"));
+    let (language, region) = code.split_once('_').unwrap_or((code, "AA"));
+    (2..=3).contains(&language.len())
+        && language.bytes().all(|b| b.is_ascii_lowercase())
+        && (2..=3).contains(&region.len())
+        && region
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        && !script.is_empty()
+        && script.bytes().all(|b| b.is_ascii_lowercase())
+}
+
 fn is_sha(text: &str) -> bool {
     (7..=40).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -234,6 +248,14 @@ fn validate(config: &OdxConfig) -> Vec<Problem> {
             "tool.odx.odoo_version".to_owned(),
             "must be an Odoo series such as \"17.0\"",
         );
+    }
+    for (i, language) in config.languages.iter().enumerate() {
+        if !is_language(language) {
+            report(
+                format!("tool.odx.languages[{i}]"),
+                "must be an Odoo language code such as \"es\" or \"nl_BE\"",
+            );
+        }
     }
     validate_repositories(config, &mut report);
     validate_packages(config, &mut report);
@@ -517,6 +539,24 @@ environment = "staging"
         );
         for bad in [".0", "x.0", "17.1"] {
             assert!(!is_series(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn languages_are_odoo_codes() {
+        let text =
+            "[tool.odx]\nodoo_version = \"17.0\"\nlanguages = [\"es\", \"nl_BE\", \"Dutch\"]\n";
+        let err = parse_pyproject(text, Path::new("p.toml")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("languages[2]: must be an Odoo language code"),
+            "{err}"
+        );
+        for good in ["es", "nl_BE", "sr@latin", "es_419", "fil_PH"] {
+            assert!(is_language(good), "{good}");
+        }
+        for bad in ["e", "nl_be", "NL", "sr@", "sr@Latin", "nl_B", "es_"] {
+            assert!(!is_language(bad), "{bad}");
         }
     }
 
