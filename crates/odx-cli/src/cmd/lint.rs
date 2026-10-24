@@ -58,6 +58,8 @@ struct Facts {
     series: String,
     sources: BTreeMap<String, Vec<String>>,
     known: BTreeSet<String>,
+    /// `[tool.odx] languages`.
+    languages: Vec<String>,
 }
 
 fn scope(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Scope, Report> {
@@ -122,6 +124,7 @@ fn scope(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Scope, Report> {
             series,
             sources,
             known,
+            languages: config.languages.clone(),
         }),
     })
 }
@@ -212,6 +215,45 @@ fn released(ctx: &Context<'_>, tag: &str, dir: &Path) -> Option<String> {
         .and_then(|manifest| manifest.version)
 }
 
+/// The names in `dir`, of folders too when `folders`, else of files.
+fn names(dir: &Path, folders: bool) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.path().is_dir() == folders)
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// ODX006 and ODX007 over an addon, for the project's languages.
+fn translations(addon: &Addon, languages: &[String], on: &dyn Fn(Rule) -> bool) -> Vec<Violation> {
+    let i18n = addon.dir.join("i18n");
+    let files = names(&i18n, false);
+    let mut found = Vec::new();
+    if on(project::PO_MISSING) {
+        found.extend(project::po_missing(addon, languages, &files));
+    }
+    if on(project::PO_UNTRANSLATED) {
+        let mut po: Vec<&str> = languages
+            .iter()
+            .filter_map(|language| project::po_file(language, &files))
+            .collect();
+        po.sort_unstable();
+        po.dedup();
+        found.extend(po.into_iter().filter_map(|name| {
+            let file = i18n.join(name);
+            let text = std::fs::read_to_string(&file).unwrap_or_default();
+            project::po_untranslated(&file, &text)
+        }));
+    }
+    found
+}
+
 /// odx's project rules over the own addons among `paths`.
 fn project_rules(
     ctx: &Context<'_>,
@@ -247,15 +289,7 @@ fn project_rules(
             }));
         }
         if on(project::MIGRATION_VERSION) {
-            let folders: Vec<String> = std::fs::read_dir(dir.join("migrations"))
-                .map(|entries| {
-                    entries
-                        .flatten()
-                        .filter(|entry| entry.path().is_dir())
-                        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                        .collect()
-                })
-                .unwrap_or_default();
+            let folders = names(&dir.join("migrations"), true);
             found.extend(project::migration_folders(&addon, &facts.series, &folders));
         }
         if on(project::TWO_SOURCES) {
@@ -267,6 +301,7 @@ fn project_rules(
         {
             found.extend(project::version_not_bumped(&addon, tag, &version));
         }
+        found.extend(translations(&addon, &facts.languages, &on));
     }
     found
 }

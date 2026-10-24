@@ -172,6 +172,15 @@ fn project(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<C
             config.odoo_version
         ),
     )];
+    checks.push(check(
+        Level::Info,
+        "languages",
+        if config.languages.is_empty() {
+            "English only (`[tool.odx] languages` names the others)".to_owned()
+        } else {
+            format!("English, {}", config.languages.join(", "))
+        },
+    ));
     let mut hosts: Vec<(String, ForgeKind)> = config
         .repositories
         .iter()

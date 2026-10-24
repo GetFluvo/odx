@@ -653,6 +653,14 @@ odoo-lint's and selected the same way (`--select ODX`, `--ignore ODX005`):
 | `ODX003` | `migration-folder-version` | a folder in `migrations/` that is no version, of another series, or newer than the manifest version: its scripts never run |
 | `ODX004` | `addon-from-two-sources` | an addon the project gets from two places |
 | `ODX005` | `version-not-bumped` | an addon changed since the last tag (`git describe --tags`) whose version is still the released one: the platform would not update it |
+| `ODX006` | `po-missing` | an addon with terms to translate (an `i18n/*.pot`) without the `.po` file of one of the project's `languages` |
+| `ODX007` | `po-untranslated` | the `.po` file of a project language with untranslated terms, counted per file |
+
+`[tool.odx] languages` names the languages the project is translated into
+besides English, as Odoo codes (`languages = ["es", "nl"]`); `odx doctor`
+shows them. A regional language is satisfied by its own file or its base
+language's, as Odoo loads them: `nl.po` serves `nl_BE`. Without `languages`,
+ODX006 and ODX007 find nothing.
 
 ## Preparing a series upgrade
 

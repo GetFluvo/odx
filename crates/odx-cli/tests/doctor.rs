@@ -126,6 +126,7 @@ fn a_protected_private_vault_passes() {
         "warn uv: odx-surely-missing-uv not found",
         "info odl: odx-surely-missing-odl not found",
         "ok   project: ",
+        "info languages: English only",
         "ok   token github.com: found",
         "warn token 127.0.0.1: none",
         "ok   vault visibility: ",
@@ -256,7 +257,7 @@ fn forges_that_do_not_answer() {
 fn everything_found() {
     // git stands in for mergiraf and odl: both answer --version.
     let mut project = Project::new(
-        "[tool.odx.platform]\nprovided = \"constraints.txt\"\nprovided_extra = [\"a==1\"]\n\n\
+        "languages = [\"es\", \"nl\"]\n[tool.odx.platform]\nprovided = \"constraints.txt\"\nprovided_extra = [\"a==1\"]\n\n\
          [tool.odx.packages]\nodoo-addon-x = { url = \"https://gitlab.example/odoo/x.git\", branch = \"17.0\" }\n",
     );
     write(&project.root.join("constraints.txt"), "requests==2.31.0\n");
@@ -273,6 +274,7 @@ fn everything_found() {
         "ok   mergiraf: git resolves conflicts",
         "ok   odl: git version",
         "warn token gitlab.example: none",
+        "info languages: English, es, nl",
         "ok   platform: generic-wheels, provided set constraints.txt (2 packages, 1 overrides)",
         "info cache: ",
         " (2.0 KB)",
