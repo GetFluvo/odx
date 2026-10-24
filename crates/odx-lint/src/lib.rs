@@ -18,7 +18,7 @@ pub use odoo_lint::output::OutputFormat;
 #[macro_export]
 macro_rules! odoo_lint_version {
     () => {
-        "0.1.0-alpha.15"
+        "0.1.0-alpha.17"
     };
 }
 
@@ -46,6 +46,9 @@ pub struct Request {
     /// Folders with other addons, for the checks across modules; none
     /// keeps the configuration's.
     pub addons_path: Vec<PathBuf>,
+    /// The languages PO105 checks the translations of, unless odoo-lint's
+    /// configuration names them.
+    pub languages: Vec<String>,
     /// Rules to select instead of the configuration's.
     pub select: Option<Vec<String>>,
     /// Rules to ignore on top of the configuration's.
@@ -93,7 +96,16 @@ pub fn lint(request: &Request) -> Result<Outcome, String> {
                 .collect()
         }),
     };
-    let loaded = odoo_lint::settings::Settings::load(&request.root, None, overrides)?;
+    let mut loaded = odoo_lint::settings::Settings::load(&request.root, None, overrides)?;
+    loaded
+        .settings
+        .config
+        .rules
+        .get_or_insert_with(Default::default)
+        .po_translation_missing
+        .get_or_insert_with(Default::default)
+        .languages
+        .get_or_insert_with(|| request.languages.clone());
     let mut outcome = Outcome {
         config: loaded.config_path,
         warnings: loaded.warnings,
@@ -171,6 +183,7 @@ mod tests {
             paths: vec![root.join("addons")],
             target: Some("18.0".to_owned()),
             addons_path: Vec::new(),
+            languages: Vec::new(),
             select: None,
             ignore: Vec::new(),
             fixes: Fixes::None,
@@ -213,7 +226,7 @@ mod tests {
         let manifest = tmp.path().join("addons/my_addon/__manifest__.py");
         write(
             &manifest,
-            "{\n    'name': 'My addon',\n    'version': '18.0.1.0.0',\n    'depends': ['base'],\n    'installable': True,\n}\n",
+            "{\n    'name': 'My addon',\n    'version': '18.0.1.0.0',\n    'depends': ['base'],\n    'application': False,\n}\n",
         );
         write(&tmp.path().join("addons/my_addon/__init__.py"), "");
         let before = std::fs::read_to_string(&manifest).unwrap();
@@ -237,7 +250,7 @@ mod tests {
             assert_eq!(fixed.fixed, shown.fixed);
         }
         assert!(shown.fixed > 0, "{shown:?}");
-        assert!(shown.diffs[0].contains("installable"), "{:?}", shown.diffs);
+        assert!(shown.diffs[0].contains("application"), "{:?}", shown.diffs);
     }
 
     #[test]
@@ -255,8 +268,9 @@ mod tests {
         let manifest = tmp.path().join("addons/my_addon/__manifest__.py");
         write(
             &manifest,
-            "{\n    'name': 'X',\n    'installable': True,\n}\n",
+            "{\n    'name': 'X',\n    'application': False,\n}\n",
         );
+        write(&tmp.path().join("addons/my_addon/__init__.py"), "");
         std::fs::set_permissions(&manifest, std::fs::Permissions::from_mode(0o444)).unwrap();
         let error = lint(&Request {
             fixes: Fixes::Safe,
@@ -277,7 +291,7 @@ mod tests {
         );
         assert_eq!(addon_of(root, &root.join("README.md")), None);
         assert_eq!(addon_of(&addon, &addon.join("__init__.py")), None);
-        assert_eq!(odoo_lint_version!(), "0.1.0-alpha.15");
+        assert_eq!(odoo_lint_version!(), "0.1.0-alpha.17");
         // The version above is the one depended on.
         let manifest =
             std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
