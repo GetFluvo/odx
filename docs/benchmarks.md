@@ -50,3 +50,12 @@ The script ([`scripts/benchmark.py`](https://github.com/getfluvo/odx/blob/main/s
 builds the mirrors under `target/bench`, installs git-aggregator 4.1 in a
 virtual environment of its own with `uv`, prints the table and rewrites the
 chart in `docs/_static/`.
+
+On every pull request that touches the code, the `bench` workflow builds
+the base and the pull request and times both on the same runner
+(`--ours-only`: git-aggregate-rs and `odx aggregate --locked`, median of 3,
+mirrors cached between runs), then comments the difference per scenario on
+the pull request
+([`scripts/bench_compare.py`](https://github.com/getfluvo/odx/blob/main/scripts/bench_compare.py)).
+It is not a gate: GitHub runners vary by about 10% between runs, so only
+larger changes are shown in bold.
