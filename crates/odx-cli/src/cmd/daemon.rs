@@ -1,9 +1,10 @@
 //! `odx daemon`: `odx sync --all` as a user-level scheduled job, or in a
-//! loop in the foreground.
+//! loop in the foreground that a change to a workspace wakes early.
 
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::time::{Duration, Instant, SystemTime};
 
 use odx_config::Span;
 use odx_config::user::{self, SyncSettings, load_user_config};
@@ -230,9 +231,63 @@ fn status(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     Ok(report)
 }
 
-/// `odx daemon run`: `odx sync --all`, then wait, forever.
+/// The files of a workspace whose change wakes `odx daemon run`.
+const WATCHED: [&str; 2] = ["pyproject.toml", "odx.lock"];
+
+/// How often `odx daemon run` looks at them.
+const TICK: Duration = Duration::from_secs(2);
+
+/// When the watched files of the workspaces were last modified, in order
+/// (a missing file has no time).
+type Stamps = Vec<Option<SystemTime>>;
+
+/// The [`Stamps`] of `workspaces`.
+fn stamps(workspaces: &[PathBuf]) -> Stamps {
+    workspaces
+        .iter()
+        .flat_map(|dir| {
+            WATCHED.iter().map(move |name| {
+                std::fs::metadata(dir.join(name))
+                    .and_then(|meta| meta.modified())
+                    .ok()
+            })
+        })
+        .collect()
+}
+
+/// Wait up to `pause`, looking every `tick`: what `look` sees is compared
+/// with `seen`, which it then becomes. Whether it changed; a change ends
+/// the wait once a look sees it settled, so that a save in several writes
+/// wakes once.
+fn wait(
+    pause: Duration,
+    tick: Duration,
+    seen: &mut Stamps,
+    look: &mut dyn FnMut() -> Stamps,
+) -> bool {
+    let start = Instant::now();
+    let mut changed = false;
+    while start.elapsed() < pause {
+        std::thread::sleep(tick);
+        let now = look();
+        if now == *seen {
+            if changed {
+                break;
+            }
+        } else {
+            changed = true;
+            *seen = now;
+        }
+    }
+    changed
+}
+
+/// `odx daemon run`: `odx sync --all`, then wait, forever; a change to the
+/// `pyproject.toml` or `odx.lock` of a registered workspace (or to which
+/// are registered) starts the next sync early.
 // The loop never ends by design, so it cannot run under test; each round is
-// `odx sync --all` and the interval comes from `interval`, both tested.
+// `odx sync --all`, the interval comes from `interval` and the wait from
+// `wait` over `stamps`, all tested.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn run_forever(
     given: Option<&String>,
@@ -256,9 +311,77 @@ pub(crate) fn run_forever(
         workspace: Vec::new(),
         max_duration: None,
     };
+    // The registered workspaces, `[workspaces]` of the user configuration.
+    let registered = || {
+        load_user_config(ctx.fs, ctx.env)
+            .map(|user| {
+                user.workspaces
+                    .keys()
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let mut seen = stamps(&registered());
     loop {
         run_sync(&all, global, ctx).emit(out, err)?;
         out.flush()?;
-        std::thread::sleep(pause);
+        if wait(pause, TICK, &mut seen, &mut || stamps(&registered())) {
+            writeln!(out, "a workspace changed: syncing early")?;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use super::*;
+
+    const MS: Duration = Duration::from_millis(1);
+
+    /// One file, modified `n` seconds after the epoch.
+    fn at(n: u64) -> Stamps {
+        vec![Some(UNIX_EPOCH + Duration::from_secs(n))]
+    }
+
+    #[test]
+    fn stamps_have_a_time_per_watched_file_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("odx.lock"), "").unwrap();
+        let found = stamps(&[tmp.path().to_path_buf()]);
+        assert_eq!(
+            found.iter().map(Option::is_some).collect::<Vec<_>>(),
+            [false, true]
+        );
+    }
+
+    #[test]
+    fn nothing_changed_waits_the_whole_pause() {
+        let mut seen = at(0);
+        let start = Instant::now();
+        assert!(!wait(20 * MS, MS, &mut seen, &mut || at(0)));
+        assert!(start.elapsed() >= 20 * MS);
+    }
+
+    #[test]
+    fn a_change_wakes_once_it_settled() {
+        let mut looks = 0;
+        let mut seen = at(0);
+        let woke = wait(Duration::from_secs(60), MS, &mut seen, &mut || {
+            looks += 1;
+            at(looks.min(3))
+        });
+        assert_eq!((woke, seen, looks), (true, at(3), 4));
+    }
+
+    #[test]
+    fn a_change_that_never_settles_wakes_at_the_end() {
+        let mut looks = 0;
+        let mut seen = at(0);
+        assert!(wait(20 * MS, MS, &mut seen, &mut || {
+            looks += 1;
+            at(looks)
+        }));
     }
 }
