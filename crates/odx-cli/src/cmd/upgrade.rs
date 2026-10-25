@@ -15,7 +15,7 @@ use odx_config::deps::normalize_name;
 use odx_config::schema::{Index, IndexSource};
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner, repo_key};
-use odx_forge::{CachedHttp, ForgeClient, ForgeKind, Http, RepoUrl, ReqwestHttp};
+use odx_forge::{CachedHttp, ForgeClient, Http, PullRequest, RepoUrl, ReqwestHttp};
 use odx_git::{Forge, Merger};
 use odx_index::sources::openupgrade;
 use odx_index::{AddonIndex, Build, Listing, Renames, SeriesIndex, build, series_key};
@@ -103,7 +103,7 @@ pub(crate) fn addons(ctx: &Context<'_>, prepared: &Prepared) -> Vec<Addon> {
         .collect();
     let planned = plan_config(config, root, None).unwrap_or_default();
     for (repo, configured) in planned.iter().zip(&config.repositories) {
-        let patterns = configured.addons.clone().unwrap_or_default();
+        let patterns = configured.addons.as_deref().unwrap_or_default();
         for dir in addon_dirs(&repo.target_dir) {
             let name = name_of(&dir);
             let selected = patterns.is_empty()
@@ -457,7 +457,7 @@ impl Run<'_> {
         &self,
         addon: &Addon,
         index: &AddonIndex,
-        kinds: &mut BTreeMap<String, Option<ForgeKind>>,
+        open: &mut BTreeMap<String, Option<Vec<PullRequest>>>,
     ) -> Row {
         let mut row = Row {
             name: addon.name.clone(),
@@ -490,16 +490,20 @@ impl Run<'_> {
             .and_then(RepoUrl::parse)
             .zip(self.online)
             .and_then(|(repo, http)| {
-                let client = ForgeClient::new(http, self.ctx.env, &OsRunner, &sleep);
-                let kind = kinds
-                    .entry(repo.origin())
-                    .or_insert_with(|| client.kind(&repo).ok())
-                    .as_ref()
-                    .copied()?;
-                let open = client
-                    .open_pull_requests(&repo, kind, &self.target)
-                    .unwrap_or_default();
-                open.into_iter()
+                // The pull requests of a repository, listed once for all
+                // of its addons.
+                open.entry(repo.origin())
+                    .or_insert_with(|| {
+                        let client = ForgeClient::new(http, self.ctx.env, &OsRunner, &sleep);
+                        let kind = client.kind(&repo).ok()?;
+                        Some(
+                            client
+                                .open_pull_requests(&repo, kind, &self.target)
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .as_ref()?
+                    .iter()
                     .find(|pr| pr.title.contains("[MIG]") && pr.title.contains(&new_name))
                     .map(|pr| pr.number)
             });
@@ -865,14 +869,22 @@ pub(crate) fn dependencies_first(
     names: &[String],
     depends: &dyn Fn(&str) -> Vec<String>,
 ) -> Vec<String> {
+    // Asked once per name: `depends` may read a manifest out of git.
+    let known: BTreeMap<&str, Vec<String>> = names
+        .iter()
+        .map(|name| (name.as_str(), depends(name)))
+        .collect();
     let mut order: Vec<String> = Vec::new();
     let mut left: Vec<&String> = names.iter().collect();
     while !left.is_empty() {
         // What `name` still waits for among `names`.
         let waits = |name: &str| -> Vec<String> {
-            depends(name)
-                .into_iter()
-                .filter(|dep| dep != name && names.contains(dep) && !order.contains(dep))
+            known
+                .get(name)
+                .map_or(&[][..], Vec::as_slice)
+                .iter()
+                .filter(|dep| *dep != name && names.contains(dep) && !order.contains(dep))
+                .cloned()
                 .collect()
         };
         let ready = left.iter().position(|name| waits(name).is_empty());
@@ -953,7 +965,7 @@ fn assess(
             BTreeMap::new()
         })
     };
-    let mut kinds = BTreeMap::new();
+    let mut open = BTreeMap::new();
     let rows: Vec<Row> = addons
         .iter()
         .map(|addon| match addon.kind {
@@ -964,7 +976,7 @@ fn assess(
                 effort: efforts.get(&addon.name).copied(),
                 ..Row::default()
             },
-            Kind::Aggregated | Kind::Package => run.row(addon, &index, &mut kinds),
+            Kind::Aggregated | Kind::Package => run.row(addon, &index, &mut open),
         })
         .collect();
     let (current, target) = (run.current, run.target);

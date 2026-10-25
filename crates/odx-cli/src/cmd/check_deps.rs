@@ -194,7 +194,7 @@ pub(crate) fn inventory(prepared: &Prepared) -> Inventory {
     let merger = Merger::new(Arc::new(OsRunner));
     let mut aggregated: Vec<Scanned> = Vec::new();
     for (repo, configured) in planned.iter().zip(&config.repositories) {
-        let patterns = configured.addons.clone().unwrap_or_default();
+        let patterns = configured.addons.as_deref().unwrap_or_default();
         let selected = |name: &str| {
             patterns.is_empty()
                 || patterns

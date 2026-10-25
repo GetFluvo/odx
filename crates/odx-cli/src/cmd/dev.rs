@@ -209,7 +209,7 @@ fn editable_addons(prepared: &Prepared) -> Vec<PathBuf> {
         .collect();
     let planned = plan_config(config, root, None).unwrap_or_default();
     for (repo, configured) in planned.iter().zip(&config.repositories) {
-        let patterns = configured.addons.clone().unwrap_or_default();
+        let patterns = configured.addons.as_deref().unwrap_or_default();
         addons.extend(addon_dirs(&repo.target_dir).into_iter().filter(|addon| {
             let name = addon
                 .file_name()
@@ -250,12 +250,12 @@ fn develop(
     let config = &prepared.project.config;
     let mut state = read_state(ctx, root)?;
     let dist = normalize_name(package);
-    let lock = prepared.lock.clone().unwrap_or_default();
-    let Some(locked) = lock
-        .packages
+    let Some(locked) = prepared
+        .lock
         .iter()
+        .flat_map(|lock| &lock.packages)
         .find(|(name, _)| normalize_name(name) == dist)
-        .map(|(_, entry)| entry.clone())
+        .map(|(_, entry)| entry)
     else {
         return Err(failed(format!(
             "{package} is not a locked package; add it to a group or [tool.odx.packages] and run `odx lock`"

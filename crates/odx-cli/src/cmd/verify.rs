@@ -39,7 +39,7 @@ pub(crate) fn run_verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'
 
 fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
-    let lock = prepared.lock.clone().unwrap_or_default();
+    let lock = prepared.lock_or_default();
     let mut problems = Vec::new();
     let submodules = submodules(&prepared.project.root, &mut problems);
     let checked = repositories(&prepared, &lock, &submodules, &mut problems);

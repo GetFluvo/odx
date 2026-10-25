@@ -276,8 +276,11 @@ fn project_rules(
             found.extend(project::migration_folders(&addon, &facts.series, &folders));
         }
         if on(project::TWO_SOURCES) {
-            let sources = facts.sources.get(&addon.name).cloned().unwrap_or_default();
-            found.extend(project::two_sources(&addon, &sources));
+            let sources = facts
+                .sources
+                .get(&addon.name)
+                .map_or(&[][..], Vec::as_slice);
+            found.extend(project::two_sources(&addon, sources));
         }
         if let Some(tag) = tag.as_deref().filter(|_| on(project::VERSION_NOT_BUMPED))
             && let Some(version) = released(ctx, tag, &dir)
