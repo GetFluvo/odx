@@ -477,6 +477,10 @@ fn commits_the_plan() {
             .contains("Not copied (Odoo's own addons, or of aggregated repositories): base, sale."),
         "{message}"
     );
+    assert!(
+        message.contains("\n## Changelog\n\n### Odoo\n\n- updated: `aaaaaaa` → `bbbbbbb`"),
+        "{message}"
+    );
     // No worktree is left behind.
     assert_eq!(git(root, &["worktree", "list"]).lines().count(), 1);
     // With the code, written again on the same branch.

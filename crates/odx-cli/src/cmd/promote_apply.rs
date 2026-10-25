@@ -11,6 +11,7 @@ use odx_env::copy;
 use odx_env::promote::Plan;
 use odx_env::{Change, Kind, Unit};
 use odx_forge::RepoUrl;
+use odx_git::Cache;
 
 use super::Report;
 use super::aggregate::uv_program;
@@ -128,10 +129,13 @@ pub(crate) fn worktree<'a>(
     Ok(Worktree { root, dir })
 }
 
-/// Write `plan` as a commit, and open its pull request with `--open-pr`.
+/// Write `plan` as a commit, and open its pull request with `--open-pr`;
+/// its description has the changelog of `to`'s `odx.lock`, with the
+/// commits counted in `cache`.
 pub(crate) fn apply(
     ctx: &Context<'_>,
     root: &Path,
+    cache: &Cache,
     model: &Model,
     args: &PromoteArgs,
     sides: [&Checkout; 2],
@@ -168,9 +172,13 @@ pub(crate) fn apply(
     for path in &args.include_branch_specific {
         include(wt, &from.from, path);
     }
-    write_pins(ctx, wt, args, sides, plan)?;
+    let notes = write_pins(ctx, wt, args, sides, plan)?.map_or_else(String::new, |lock| {
+        let empty = Lockfile::new();
+        let old = to.lock.as_ref().map_or(&empty, |(_, lock)| lock);
+        super::changelog::notes(cache, old, &lock)
+    });
     let title = title(plan, from, to);
-    let body = body(plan, from, to, &args.include_branch_specific);
+    let body = body(plan, from, to, &args.include_branch_specific) + &notes;
     commit(wt, &title, &body, picked, &to.env.name).and_then(|commit| {
         let pushed = if args.open_pr {
             Some(open(ctx, wt, to, &args.remote, &branch, title, body)?)
@@ -266,14 +274,15 @@ fn include(wt: &Path, from: &str, path: &str) {
 }
 
 /// Copy the pins of the plan's packages and the Odoo core into the
-/// worktree, and check that `uv lock` keeps them.
+/// worktree, and check that `uv lock` keeps them; the `odx.lock` written,
+/// if any.
 fn write_pins(
     ctx: &Context<'_>,
     wt: &Path,
     args: &PromoteArgs,
     sides: [&Checkout; 2],
     plan: &Plan,
-) -> Result<(), Report> {
+) -> Result<Option<Lockfile>, Report> {
     let [from, to] = sides;
     let dists: Vec<String> = plan
         .items
@@ -319,8 +328,9 @@ fn write_pins(
         copy::odx_lock(ours, &mut lock, &dists, plan.core.is_some());
         let path = to.config.lockfile().to_string_lossy().replace('\\', "/");
         save(&path, &lock.render());
+        return Ok(Some(lock));
     }
-    Ok(())
+    Ok(None)
 }
 
 fn title(plan: &Plan, from: &Checkout, to: &Checkout) -> String {

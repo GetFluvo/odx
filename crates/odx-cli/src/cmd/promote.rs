@@ -79,20 +79,7 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         &selection,
         options,
     )
-    .map_err(|error| match error {
-        PlanError::SeriesMismatch => Report::error(
-            Exit::Failure,
-            format!(
-                "{} runs {} and {} runs {}: a promotion across series is refused; `odx upgrade` prepares one",
-                from.env.name, from.env.series, to.env.name, to.env.series
-            ),
-        ),
-        PlanError::Missing(names) => usage(format!(
-            "not on {}: {}",
-            from.env.name,
-            names.join(", ")
-        )),
-    })?;
+    .map_err(|error| refused(&error, &from, &to))?;
     planned.warnings.extend(unreadable.iter().map(|name| {
         format!(
             "the manifest of {name} on {} does not parse: its dependencies are not promoted with it",
@@ -104,7 +91,15 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         && !planned.refused()
         && !(planned.is_noop() && commits.is_empty())
     {
-        Some(apply(ctx, root, &model, args, [&from, &to], &planned)?)
+        Some(apply(
+            ctx,
+            root,
+            &prepared.cache,
+            &model,
+            args,
+            [&from, &to],
+            &planned,
+        )?)
     } else {
         None
     };
@@ -127,6 +122,21 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         out,
         ..Report::default()
     })
+}
+
+fn refused(error: &PlanError, from: &Checkout, to: &Checkout) -> Report {
+    match error {
+        PlanError::SeriesMismatch => Report::error(
+            Exit::Failure,
+            format!(
+                "{} runs {} and {} runs {}: a promotion across series is refused; `odx upgrade` prepares one",
+                from.env.name, from.env.series, to.env.name, to.env.series
+            ),
+        ),
+        PlanError::Missing(names) => {
+            usage(format!("not on {}: {}", from.env.name, names.join(", ")))
+        }
+    }
 }
 
 /// The side of `checkout` with its `addons`.
