@@ -350,3 +350,23 @@ fn repo_names() {
     assert_eq!(repo_name("git@github.com:OCA/pos.git"), "pos");
     assert_eq!(repo_name("https://forge.example/x/"), "x");
 }
+
+#[test]
+fn glue_is_ignored_with_a_reason() {
+    let mut edit = PyprojectEdit::parse("[tool.odx]\nodoo_version = \"17.0\"\n").unwrap();
+    edit.ignore_glue("pos_x_sale", "no credit sales").unwrap();
+    edit.ignore_glue("pos_y_sale", "later").unwrap();
+    assert_eq!(
+        edit.to_string(),
+        "[tool.odx]\nodoo_version = \"17.0\"\n\n[tool.odx.glue]\nignore = { pos_x_sale = \"no credit sales\", pos_y_sale = \"later\" }\n"
+    );
+    let mut none = PyprojectEdit::parse("[project]\n").unwrap();
+    assert_eq!(none.ignore_glue("x", "y"), Err(EditError::NoOdxTable));
+    for (text, key) in [
+        ("[tool.odx]\nglue = 1\n", "[tool.odx.glue]"),
+        ("[tool.odx.glue]\nignore = 1\n", "[tool.odx.glue] ignore"),
+    ] {
+        let mut bad = PyprojectEdit::parse(text).unwrap();
+        assert_eq!(bad.ignore_glue("x", "y"), Err(EditError::Malformed(key)));
+    }
+}

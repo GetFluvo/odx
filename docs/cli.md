@@ -351,14 +351,17 @@ would copy offers `promote`.
 | `forward-port` | changes from lower series (`odx suggest`) | `port`, `mute` |
 | `backport` | changes from higher series | `port`, `mute` |
 | `auto-update` | index releases the auto-update policy would take, or leaves for review | `follow` |
+| `glue` | glue addons Odoo would install with what the project has, that it does not have (`odx glue`) | `include`, `mute` |
 | `drift` | what differs between environments (`odx env diff`), per pair | `promote` |
 | `suppressed` | what blacklists, verdicts and mutes hide, with the reason | |
 
-Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`, `drift:`) that
-`odx dashboard act` takes: `--drop` and `--include` run `odx drop` and `odx
-add`, `--follow` runs `odx lock --auto-update`, `--mute` records a mute
-(`--kind`, default `not-wanted`, a mandatory `--reason`, and `--until
-YYYY-MM-DD` for one that expires). `--port`
+Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`, `glue:`,
+`drift:`) that `odx dashboard act` takes: `--drop` and `--include` run `odx
+drop` and `odx add` (a glue addon is added as a package from its
+repository's series branch), `--follow` runs `odx lock --auto-update`,
+`--mute` records a mute (`--kind`, default `not-wanted`, a mandatory
+`--reason`, and `--until YYYY-MM-DD` for one that expires); a muted glue
+addon goes into `[tool.odx.glue] ignore` with the reason instead. `--port`
 ports the change, a person's decision: its commits are cherry-picked as
 `odx port` does, in a clone of the repository under the cache
 (`<cache>/ports/<owner>-<repo>`, sharing the cache's objects), and
@@ -650,8 +653,12 @@ glue addons Odoo would install with what the project has (18.0):
     odx add OCA/sale-workflow@18.0 --package odoo-addon-sale-automatic-workflow-payment-mode --subdirectory sale_automatic_workflow_payment_mode
 ```
 
-`odx lock` names missing glue addons in a warning. Glue the project does not
-want is listed with why, and no longer reported:
+`odx lock` names missing glue addons in a warning, and the dashboard lists
+them in its `glue` section, so the bot's issue shows glue that appears on the
+series branch; a ticked `include` or `mute` there becomes a pull request.
+In CI the cache holds only the repositories the project fetches, so the bot
+sees glue next to the addons the project uses, not in other repositories.
+Glue the project does not want is listed with why, and no longer reported:
 
 ```toml
 [tool.odx.glue]

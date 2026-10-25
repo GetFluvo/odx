@@ -300,3 +300,68 @@ fn nothing_missing_and_no_project() {
     let (exit, _, err) = project.odx(&["-C", &elsewhere, "glue"]);
     assert_eq!(exit, Exit::Usage, "{err}");
 }
+
+#[test]
+fn the_dashboard_offers_glue_to_add_or_ignore() {
+    let project = Project::new("");
+    let (exit, out, err) = project.odx(&["--fresh", "dashboard", "--section", "glue"]);
+    assert_eq!(exit, Exit::Success, "{out}{err}");
+    assert!(
+        out.contains("Glue addons the project misses (4)\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  glue:pos_x_sale  with pos_x, sale           pos_x_sale from up/pos   include,mute\n    also needs pos_extra\n"),
+        "{out}"
+    );
+    // Included: added as a package from its repository, and no longer
+    // missing.
+    let (exit, out, err) = project.odx(&["dashboard", "act", "glue:pos_x_sale", "--include"]);
+    assert_eq!(exit, Exit::Success, "{out}{err}");
+    let pyproject = std::fs::read_to_string(project.root.join("pyproject.toml")).unwrap();
+    assert!(
+        pyproject.contains(&format!(
+            "odoo-addon-pos-x-sale = {{ url = \"{}\", branch = \"17.0\", subdirectory = \"pos_x_sale\" }}",
+            project.pos
+        )),
+        "{pyproject}"
+    );
+    // Muted: ignored with the reason.
+    let (exit, _, err) = project.odx(&["dashboard", "act", "glue:pos_quiet", "--mute"]);
+    assert_eq!(
+        (exit, err.as_str()),
+        (Exit::Usage, "error: --mute needs --reason\n")
+    );
+    let (exit, out, _) = project.odx(&[
+        "dashboard",
+        "act",
+        "glue:pos_quiet",
+        "--mute",
+        "--reason",
+        "not here",
+    ]);
+    assert_eq!(exit, Exit::Success, "{out}");
+    let (_, out, _) = project.odx(&["glue"]);
+    assert!(!out.contains("  pos_x_sale ("), "{out}");
+    assert!(out.ends_with("ignored: pos_quiet (not here)\n"), "{out}");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_pyproject_is_said() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = Project::new("");
+    let file = project.root.join("pyproject.toml");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let (exit, _, err) = project.odx(&[
+        "dashboard",
+        "act",
+        "glue:pos_quiet",
+        "--mute",
+        "--reason",
+        "r",
+    ]);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("pyproject.toml: "), "{err}");
+}

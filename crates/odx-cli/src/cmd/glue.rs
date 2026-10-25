@@ -11,6 +11,7 @@ use odx_analyze::core::core_addons;
 use odx_analyze::glue::{Candidate, Offered, candidates, installed};
 use odx_analyze::manifest::parse_manifest;
 use odx_config::Problem;
+use odx_config::edit::PyprojectEdit;
 use odx_core::system::OsRunner;
 use odx_core::{Exit, repo_key};
 use odx_forge::RepoUrl;
@@ -19,7 +20,7 @@ use odx_index::sources::distribution;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
-use super::check_deps::inventory;
+use super::check_deps::{addon_of, inventory};
 use crate::Context;
 use crate::cli::{GlobalArgs, GlueArgs};
 
@@ -122,17 +123,52 @@ impl Catalogue {
     }
 }
 
-/// How to add `candidate`: as a package from the git repository.
-fn add_command(candidate: &Candidate, series: &str) -> String {
+/// What `odx add` takes to add `candidate` as a package from its git
+/// repository: the spec (the series branch), the distribution and the
+/// subdirectory.
+pub(crate) fn add_spec(candidate: &Candidate, series: &str) -> (String, String, String) {
     let offered = &candidate.offered;
     let repo = RepoUrl::parse(&offered.url)
         .filter(|repo| repo.host == "github.com")
         .map_or_else(|| offered.url.clone(), |repo| repo.path);
-    format!(
-        "odx add {repo}@{series} --package {} --subdirectory {}",
+    (
+        format!("{repo}@{series}"),
         distribution(&offered.addon, series),
-        offered.path
+        offered.path.clone(),
     )
+}
+
+/// How to add `candidate`.
+fn add_command(candidate: &Candidate, series: &str) -> String {
+    let (spec, dist, path) = add_spec(candidate, series);
+    format!("odx add {spec} --package {dist} --subdirectory {path}")
+}
+
+/// `odx dashboard act glue:<addon> --mute`: the addon goes into
+/// `[tool.odx.glue] ignore` with `reason`, which is required.
+pub(crate) fn ignore(
+    prepared: &Prepared,
+    addon: &str,
+    reason: Option<&str>,
+) -> Result<Report, Report> {
+    let reason =
+        reason.ok_or_else(|| Report::error(Exit::Usage, "--mute needs --reason".to_owned()))?;
+    let file = &prepared.project.file;
+    PyprojectEdit::parse(&prepared.project.text)
+        .and_then(|mut edit| edit.ignore_glue(addon, reason).map(|()| edit.to_string()))
+        .as_ref()
+        .map_err(ToString::to_string)
+        .and_then(|text| {
+            std::fs::write(file, text)
+                .as_ref()
+                .map_err(ToString::to_string)
+                .copied()
+        })
+        .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", file.display())))?;
+    Ok(Report {
+        out: format!("{addon} is ignored in {}\n", file.display()),
+        ..Report::default()
+    })
 }
 
 /// The glue addons the project misses, the ignored ones with why, and how
@@ -187,8 +223,21 @@ pub(crate) fn glue(prepared: &Prepared) -> Glue {
     for repo in &repositories {
         scanned += usize::from(catalogue.add(&merger, repo, None));
     }
-    let installed = installed(inventory.installs(), &catalogue.depends);
-    let present: BTreeSet<String> = inventory.sources.keys().cloned().collect();
+    // Packages of [tool.odx.packages] count as added, also before they are
+    // declared as a requirement.
+    let configured: Vec<String> = config.packages.keys().filter_map(|d| addon_of(d)).collect();
+    let installed = installed(
+        inventory
+            .installs()
+            .chain(configured.iter().map(String::as_str)),
+        &catalogue.depends,
+    );
+    let present: BTreeSet<String> = inventory
+        .sources
+        .keys()
+        .chain(&configured)
+        .cloned()
+        .collect();
     let ignore = config
         .glue
         .as_ref()

@@ -745,7 +745,9 @@ impl Job<'_> {
                 *action,
                 format!("{verb} from the dashboard (#{})", issue.number),
             );
-            let done = if *action == Action::Mute {
+            // A glue addon is ignored in the project's own configuration,
+            // as any other change.
+            let done = if *action == Action::Mute && !id.starts_with("glue:") {
                 self.mute(&act, wt)
             } else {
                 prepare(self.global, local).and_then(|prepared| {
