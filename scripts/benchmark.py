@@ -273,6 +273,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.record and args.ours_only:
         parser.error("--record needs git-aggregator: drop --ours-only")
+    # The tools run in their own directories.
+    args.odx = args.odx.resolve()
+    args.gar = args.gar.resolve()
 
     work = args.work.resolve()
     work.mkdir(parents=True, exist_ok=True)
