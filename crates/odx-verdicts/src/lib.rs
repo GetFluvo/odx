@@ -282,10 +282,8 @@ pub fn read(file: &Path) -> Result<Vec<Entry>, String> {
         #[serde(default)]
         mute: Vec<Entry>,
     }
-    let Ok(text) = std::fs::read_to_string(file) else {
-        return Ok(Vec::new());
-    };
-    let parsed: File = toml::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?;
+    let parsed: File =
+        toml::from_str(&text_of(file)?).map_err(|e| format!("{}: {e}", file.display()))?;
     Ok(parsed.verdict.into_iter().chain(parsed.mute).collect())
 }
 
@@ -320,10 +318,20 @@ pub fn read_all(root: &Path) -> Result<Vec<(PathBuf, Entry)>, String> {
     Ok(all)
 }
 
+/// The text of `file`, empty when it does not exist; one that cannot be
+/// read is an error, so an edit does not start over from nothing.
+fn text_of(file: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(file) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(format!("{}: {e}", file.display()))
+        }
+        read => Ok(read.unwrap_or_default()),
+    }
+}
+
 /// Load `file` for editing (empty when missing).
 fn load(file: &Path) -> Result<DocumentMut, String> {
-    std::fs::read_to_string(file)
-        .unwrap_or_default()
+    text_of(file)?
         .parse()
         .map_err(|e| format!("{}: {e}", file.display()))
 }
@@ -486,6 +494,17 @@ mod tests {
 
     /// An edit that changes nothing.
     fn untouched(_: &mut Table) {}
+
+    #[test]
+    fn unreadable_files_are_not_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("v.toml");
+        std::fs::write(&file, b"# caf\xe9\n").unwrap();
+        assert!(read(&file).unwrap_err().contains("v.toml"));
+        assert!(append(&file, &entry(Kind::NotNeeded)).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"# caf\xe9\n");
+        assert_eq!(read(&tmp.path().join("none.toml")).unwrap(), []);
+    }
 
     #[test]
     fn files_are_appended_updated_and_read_back() {

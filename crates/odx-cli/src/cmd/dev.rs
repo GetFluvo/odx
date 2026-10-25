@@ -137,7 +137,14 @@ fn workspace(ctx: &Context<'_>, prepared: &Prepared, args: &DevArgs) -> Result<R
     let _ = writeln!(report.out, "{verb} {}", relative(&file, root));
     if let Some(conf) = dev.odoo_conf {
         let conf = root.join(conf);
-        let text = std::fs::read_to_string(&conf).unwrap_or_default();
+        // A missing file is written anew; one that cannot be read is not
+        // overwritten with the addons path alone.
+        let text = match std::fs::read_to_string(&conf) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(failed(format!("{}: {e}", conf.display())));
+            }
+            read => read.unwrap_or_default(),
+        };
         if !args.dry_run {
             std::fs::write(&conf, set_addons_path(&text, &path))
                 .map_err(|e| failed(format!("{}: {e}", conf.display())))?;

@@ -1441,6 +1441,14 @@ fn pins_come_back_out_once_released() {
     assert!(!ok);
     assert!(err.contains("uncommitted changes"), "{err}");
     git(&forge.work, &["checkout", "--", "my_addon/later.py"]);
+    // When git cannot tell whether the worktree is clean, nothing changes.
+    let index = forge.work.join(".git/index");
+    let saved = std::fs::read(&index).unwrap();
+    std::fs::write(&index, "corrupt").unwrap();
+    let (ok, _, err) = run(&["migrate", "unpin"]);
+    assert!(!ok);
+    assert!(err.contains("index"), "{err}");
+    std::fs::write(&index, saved).unwrap();
     // What the pull request has that the branch does not is kept.
     let pushed = git(&forge.up, &["rev-parse", "19.0-mig-my_addon"]);
     let elsewhere = git(&forge.up, &["rev-parse", "18.0"]);

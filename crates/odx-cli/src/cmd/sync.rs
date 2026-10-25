@@ -348,28 +348,41 @@ pub(crate) fn run_cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Conte
 }
 
 /// The repositories in the cache, and whether a registered workspace (or
-/// the one here) uses them.
+/// the one here) uses them; and the registered workspaces that are there
+/// but cannot be read, whose repositories cannot be told apart from unused
+/// ones.
 fn repositories(
     ctx: &Context<'_>,
     global: &GlobalArgs,
     user: &UserConfig,
     cache: &Path,
-) -> Vec<CachedRepo> {
+) -> (Vec<CachedRepo>, Vec<String>) {
     let mut wanted = Vec::new();
+    let mut unreadable = Vec::new();
     let dirs = user
         .workspaces
         .keys()
-        .map(PathBuf::from)
-        .chain(std::iter::once(ctx.dir.clone()));
-    for dir in dirs {
+        .map(|dir| (PathBuf::from(dir), true))
+        .chain(std::iter::once((ctx.dir.clone(), false)));
+    for (dir, registered) in dirs {
         let workspace = Context {
             fs: ctx.fs,
             env: ctx.env,
-            dir,
+            dir: dir.clone(),
             config: None,
         };
-        let Ok(prepared) = prepare(global, &workspace) else {
-            continue;
+        let prepared = match prepare(global, &workspace) {
+            Ok(prepared) => prepared,
+            Err(report) => {
+                if registered && dir.is_dir() {
+                    unreadable.push(format!(
+                        "{}: {}",
+                        dir.display(),
+                        report.error.as_deref().unwrap_or_default().trim_end()
+                    ));
+                }
+                continue;
+            }
         };
         let config = &prepared.project.config;
         let planned = plan_config(config, &prepared.project.root, None).unwrap_or_default();
@@ -405,7 +418,7 @@ fn repositories(
         })
         .collect();
     found.sort_by(|a, b| a.hash.cmp(&b.hash));
-    found
+    (found, unreadable)
 }
 
 /// `odx cache detach [<repo>]`.
@@ -455,7 +468,7 @@ fn detach_cached(
 fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let (user, cache) = shared(ctx)?;
     let mut report = Report::default();
-    let repos = repositories(ctx, global, &user, &cache);
+    let (repos, unreadable) = repositories(ctx, global, &user, &cache);
     let total = size(&cache);
     match command {
         CacheCommand::Info => {
@@ -500,6 +513,15 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
                 })?),
                 None => None,
             };
+            if !unreadable.is_empty() {
+                return Err(failed(
+                    Exit::Failure,
+                    format!(
+                        "nothing collected: what these registered workspaces use is unknown; fix them, or run `odx sync --unregister` in them\n  {}",
+                        unreadable.join("\n  ")
+                    ),
+                ));
+            }
             let mut freed = 0;
             for repo in to_collect(&repos, total, limit) {
                 let dir = cache.join("repos").join(&repo.hash);

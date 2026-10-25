@@ -1189,4 +1189,42 @@ fn routine_pull_requests_and_promotions_by_label() {
     // Proposed once.
     let out = setup.run();
     assert!(!out.contains("promote #50"), "{out}");
+    // Once prod has it, another labelled pull request of the same change
+    // writes nothing, and pushes nothing (an empty commit would delete the
+    // branch).
+    git(
+        &setup.bare,
+        &["update-ref", "refs/heads/prod", "refs/heads/main"],
+    );
+    git(&setup.bare, &["update-ref", "refs/pull/51/head", &feature]);
+    setup.git(&["fetch", "--quiet", "origin"]);
+    {
+        let mut state = setup.state.lock().unwrap();
+        let url = format!("{}/acme/project/pull/51", setup.api);
+        state.items.push(json!({
+            "number": 51, "title": "my_addon again", "body": "", "state": "closed",
+            "labels": [{"name": "promote"}], "pull_request": {}, "html_url": url,
+        }));
+        for (path, value) in [
+            (
+                "/pulls/51",
+                json!({
+                    "number": 51, "title": "my_addon again", "state": "closed",
+                    "merged_at": "2026-10-21T00:00:00Z", "base": {"ref": "main"},
+                    "head": {"sha": feature},
+                }),
+            ),
+            ("/pulls/51/commits", json!([{ "sha": feature }])),
+        ] {
+            state.fixed.insert(path.to_owned(), value.to_string());
+        }
+        drop(state);
+    }
+    let out = setup.run();
+    assert!(
+        out.starts_with("promote #51 (test -> prod): nothing to promote: prod has it already\n"),
+        "{out}"
+    );
+    let branches = git(&setup.bare, &["branch", "--list", "odx/promote/*"]);
+    assert!(!branches.contains("pr-51-prod"), "{branches}");
 }

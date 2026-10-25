@@ -148,6 +148,15 @@ fn registered_workspaces_are_synced() {
     assert!(out.starts_with("unregistered "), "{out}");
     let (_, out, _) = machine.odx(&b, &["sync", "--unregister"]);
     assert!(out.ends_with("was not registered\n"), "{out}");
+    // A registered workspace odx cannot read could use any repository:
+    // nothing is collected.
+    let pyproject = std::fs::read_to_string(a.join("pyproject.toml")).unwrap();
+    std::fs::write(a.join("pyproject.toml"), "[tool.odx\n").unwrap();
+    let (code, out, err) = machine.odx(&b, &["cache", "gc"]);
+    assert_eq!(code, Exit::Failure, "{out}");
+    assert!(err.contains("nothing collected"), "{err}");
+    assert!(err.contains(&a.display().to_string()), "{err}");
+    std::fs::write(a.join("pyproject.toml"), pyproject).unwrap();
     let (_, out, _) = machine.odx(&a, &["cache", "gc", "--dry-run"]);
     assert!(out.starts_with("would remove file://"), "{out}");
     assert!(out.contains("up-b"), "{out}");

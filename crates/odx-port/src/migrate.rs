@@ -188,7 +188,7 @@ impl<'a> Worktree<'a> {
         self
     }
 
-    fn bytes(&self, invocation: &Invocation) -> Result<Vec<u8>, String> {
+    pub(crate) fn bytes(&self, invocation: &Invocation) -> Result<Vec<u8>, String> {
         let output = self.runner.run(invocation).map_err(|e| e.to_string())?;
         if output.success() {
             Ok(output.stdout)
@@ -224,6 +224,17 @@ impl<'a> Worktree<'a> {
     #[must_use]
     pub fn state(&self) -> Option<State> {
         self.load(STATE_FILE)
+    }
+
+    /// Whether `file` is in the git directory, readable or not: a state
+    /// file that cannot be read still means something is in progress.
+    pub(crate) fn has(&self, file: &str) -> bool {
+        self.git_dir().is_ok_and(|dir| dir.join(file).is_file())
+    }
+
+    /// Whether a migration is in progress.
+    pub(crate) fn migrating(&self) -> bool {
+        self.has(STATE_FILE)
     }
 
     /// What `file` in the git directory keeps.
@@ -275,10 +286,11 @@ impl<'a> Worktree<'a> {
     /// uncommitted changes, the series cannot be fetched, the addon is not
     /// on the source series or already on the target, or git fails.
     pub fn start(&self, plan: Plan, tools: &Tools) -> Result<Outcome, String> {
-        if let Some(state) = self.state() {
+        if self.migrating() {
             return Err(format!(
                 "the migration of {} is in progress: run `odx migrate --continue` or `odx migrate --abort`",
-                state.plan.addon
+                self.state()
+                    .map_or_else(|| "an addon".to_owned(), |state| state.plan.addon)
             ));
         }
         self.clean()?;
@@ -949,6 +961,19 @@ mod tests {
                 .unwrap_err()
                 .contains("is in progress")
         );
+        // A state file odx cannot read still means a migration is in
+        // progress: nothing starts over a half-finished one.
+        let file = work.join(".git").join(STATE_FILE);
+        let saved = std::fs::read(&file).unwrap();
+        std::fs::write(&file, "{").unwrap();
+        assert!(
+            tree.start(plan(), &none)
+                .unwrap_err()
+                .contains("the migration of an addon is in progress")
+        );
+        assert!(tree.update(plan(), None, &none).is_err());
+        assert!(tree.branch_from("origin", "19.0", "x").is_err());
+        std::fs::write(&file, saved).unwrap();
         // Unresolved, it stops again.
         let _ = halted(tree.resume(&none));
         // Resolved: the patch applied by hand, staged.

@@ -223,6 +223,14 @@ fn workspace_failures() {
     let (exit, _, err) = project.odx(&["dev"]);
     assert_eq!(exit, Exit::Failure);
     assert!(err.contains("odoo.conf"), "{err}");
+    // An odoo.conf odx cannot read is left as it is.
+    let conf = project.root.join("conf/odoo.conf");
+    std::fs::create_dir_all(conf.parent().unwrap()).unwrap();
+    std::fs::write(&conf, b"; caf\xe9\n[options]\n").unwrap();
+    let (exit, _, err) = project.odx(&["dev"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("odoo.conf"), "{err}");
+    assert_eq!(std::fs::read(&conf).unwrap(), b"; caf\xe9\n[options]\n");
     write(&project.root.join(".odx/develop.toml"), "broken");
     let (exit, _, _) = project.odx(&["dev"]);
     assert_eq!(exit, Exit::Usage);

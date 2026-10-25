@@ -770,14 +770,19 @@ impl Job<'_> {
             locked.and_then(|done| {
                 let title = title(*action, id, dashboard);
                 let body = Self::body(request, issue, &done.out);
-                let Ok(head) = commit(wt, &title, &body, 0, self.base) else {
+                // Nothing staged: the change lives outside the project (a
+                // mute in the verdict repository). A failing commit is an
+                // error, so the box stays asked for.
+                if staged(wt).is_empty() {
                     return Ok(Written::Nothing(done.out.trim_end().to_owned()));
-                };
-                self.push(&head, &branch).map(|()| Written::Branch {
-                    base: self.base.to_owned(),
-                    title,
-                    body,
-                })
+                }
+                commit(wt, &title, &body, 0, self.base)
+                    .and_then(|head| self.push(&head, &branch))
+                    .map(|()| Written::Branch {
+                        base: self.base.to_owned(),
+                        title,
+                        body,
+                    })
             })
         })
     }
@@ -859,12 +864,13 @@ impl Job<'_> {
             modules: modules.clone(),
             ..promote_args(from, to, self.remote)
         };
-        self.promote(&args, &request.marker.branch())
-            .map(|(base, items)| Written::Branch {
+        self.promote(&args, &request.marker.branch(), |base, items| {
+            Written::Branch {
                 base,
                 title: format!("chore: promote {} from {from} to {to}", modules.join(", ")),
-                body: Self::body(request, issue, &items),
-            })
+                body: Self::body(request, issue, items),
+            }
+        })
     }
 
     /// What the merged pull request `number` changed in `from`, promoted
@@ -879,20 +885,25 @@ impl Job<'_> {
             from_pr: Some(number),
             ..promote_args(from, to, self.remote)
         };
-        self.promote(&args, &marker.branch())
-            .map(|(base, items)| Written::Branch {
-                base,
-                title: format!("chore: promote #{number} from {from} to {to}"),
-                body: format!(
-                    "{}\nPromotes what #{number} merged into {from}: it carries the promotion label.\n\n```\n{items}```\n\nOpened by `odx bot`; closed, it is not proposed again.\n",
-                    marker.render()
-                ),
-            })
+        self.promote(&args, &marker.branch(), |base, items| Written::Branch {
+            base,
+            title: format!("chore: promote #{number} from {from} to {to}"),
+            body: format!(
+                "{}\nPromotes what #{number} merged into {from}: it carries the promotion label.\n\n```\n{items}```\n\nOpened by `odx bot`; closed, it is not proposed again.\n",
+                marker.render()
+            ),
+        })
     }
 
     /// `args` written as `odx promote --commit` writes them and pushed to
-    /// `branch`: the branch to propose it into, and what it promotes.
-    fn promote(&self, args: &PromoteArgs, branch: &str) -> Result<(String, String), Report> {
+    /// `branch`, then `written` of the branch to propose it into and what it
+    /// promotes; nothing when the target has it all already.
+    fn promote(
+        &self,
+        args: &PromoteArgs,
+        branch: &str,
+        written: impl FnOnce(String, &str) -> Written,
+    ) -> Result<Written, Report> {
         let json = GlobalArgs {
             json: true,
             ..self.global.clone()
@@ -920,8 +931,17 @@ impl Job<'_> {
                     );
                     items
                 });
-            self.push(&text("/applied/commit"), branch)
-                .map(|()| (text("/to/branch"), items))
+            // A promotion with nothing to write commits nothing, and an
+            // empty commit would push a deletion of the branch.
+            let commit = text("/applied/commit");
+            if commit.is_empty() {
+                return Ok(Written::Nothing(format!(
+                    "nothing to promote: {} has it already",
+                    text("/to/env")
+                )));
+            }
+            self.push(&commit, branch)
+                .map(|()| written(text("/to/branch"), &items))
         })
     }
 
