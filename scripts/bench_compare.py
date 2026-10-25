@@ -19,16 +19,17 @@ from pathlib import Path
 
 MARKER = "<!-- odx:bench -->"
 SCENARIOS = ["cold", "warm", "no-op"]
-# GitHub runners vary by about this much between runs of the same binary.
-NOISE = 0.10
+# GitHub runners vary by about this much between runs of the same binary;
+# the short warm and no-op runs vary most.
+NOISE = {"cold": 0.10, "warm": 0.20, "no-op": 0.20}
 
 
-def cell(base: float | None, head: float | None) -> str:
+def cell(base: float | None, head: float | None, noise: float) -> str:
     if base is None or head is None:
         return "-" if head is None else f"{head:.2f} s"
     change = (head - base) / base if base else 0.0
     text = f"{base:.2f} s → {head:.2f} s ({change:+.0%})"
-    return f"**{text}**" if abs(change) > NOISE else text
+    return f"**{text}**" if abs(change) > noise else text
 
 
 def main() -> None:
@@ -48,7 +49,8 @@ def main() -> None:
     ]
     for tool in head:
         cells = " | ".join(
-            cell(base.get(tool, {}).get(s), head[tool].get(s)) for s in SCENARIOS
+            cell(base.get(tool, {}).get(s), head[tool].get(s), NOISE[s])
+            for s in SCENARIOS
         )
         lines.append(f"| {tool} | {cells} |")
     lines += [
@@ -56,8 +58,9 @@ def main() -> None:
         (
             f"Base against this pull request, median of {args.runs} runs on a GitHub "
             f"runner ({os.cpu_count()} CPUs), the fixture of docs/benchmarks.md from "
-            f"local mirrors. Not a gate: changes within ±{NOISE:.0%} are runner "
-            "noise; larger ones are in bold."
+            f"local mirrors. Not a gate: changes within ±{NOISE['cold']:.0%} (cold) "
+            f"and ±{NOISE['warm']:.0%} (warm, no-op) are runner noise; larger "
+            "ones are in bold."
         ),
     ]
     print("\n".join(lines))
