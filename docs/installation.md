@@ -15,6 +15,16 @@ $ uv tool install git-aggregate-rs
 $ cargo install git-aggregate-rs
 ```
 
+## Editors
+
+The [odx extension](https://open-vsx.org/extension/getfluvo/odx) for VS Code
+and its Open VSX based relatives (VSCodium, Cursor, Windsurf) adds an odx view
+with the dashboard, per section, and the project's pull requests; entries take
+their actions (`odx dashboard act`) from the context menu. Its commands run
+`odx aggregate`, `lock`, `vendor`, `dev`, `sniff`, `check-deps`, `verify` and
+`glue` as tasks. It uses `odx` from the `odx.path` setting, the workspace's
+`.venv` or `PATH`, and otherwise downloads the wheel from PyPI.
+
 ## Shell completions
 
 ```console
