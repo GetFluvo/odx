@@ -246,6 +246,7 @@ fn new_upstream(
     prepared: &Prepared,
     global: &GlobalArgs,
     specs: &mut Specs,
+    warnings: &mut Vec<Problem>,
 ) -> Section {
     let config = &prepared.project.config;
     let planned = plan_config(config, &prepared.project.root, None).unwrap_or_default();
@@ -267,15 +268,23 @@ fn new_upstream(
             .iter()
             .filter_map(|merge| merge.pr)
             .collect();
+        // A forge that does not answer leaves the section without this
+        // repository, and says so.
         let open = RepoUrl::parse(&repo.url)
             .filter(|_| !global.offline)
             .zip(http.as_ref().ok())
-            .and_then(|(url, http)| {
+            .map(|(url, http)| {
                 let client = ForgeClient::new(http, ctx.env, &OsRunner, &sleep);
-                let kind = client.kind(&url).ok()?;
                 client
-                    .open_pull_requests(&url, kind, &config.odoo_version)
-                    .ok()
+                    .kind(&url)
+                    .and_then(|kind| client.open_pull_requests(&url, kind, &config.odoo_version))
+                    .unwrap_or_else(|e| {
+                        warnings.push(Problem {
+                            key: format!("new upstream {}", repo.name),
+                            message: e.to_string(),
+                        });
+                        Vec::new()
+                    })
             })
             .unwrap_or_default();
         for pr in open {
@@ -501,7 +510,7 @@ pub(crate) fn build(
         let own = target == config.odoo_version;
         if own {
             sections.extend(pinned(&status, &mut specs));
-            sections.push(new_upstream(ctx, prepared, global, &mut specs));
+            sections.push(new_upstream(ctx, prepared, global, &mut specs, warnings));
         }
         sections.extend(suggestions(&judged, &target));
         if own {

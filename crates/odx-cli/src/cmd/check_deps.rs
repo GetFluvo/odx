@@ -33,6 +33,8 @@ struct Scanned {
     name: String,
     dir: PathBuf,
     manifest: Manifest,
+    /// Why the manifest could not be read, when it could not.
+    unreadable: Option<String>,
 }
 
 /// What check-deps found.
@@ -144,13 +146,13 @@ fn relative(root: &Path, dir: &Path) -> String {
 
 fn scan(dir: PathBuf) -> Scanned {
     let manifest = std::fs::read_to_string(dir.join("__manifest__.py"))
-        .ok()
-        .and_then(|text| parse_manifest(&text).ok())
-        .unwrap_or_default();
+        .map_err(|e| e.to_string())
+        .and_then(|text| parse_manifest(&text));
     Scanned {
         name: name_of(&dir),
         dir,
-        manifest,
+        unreadable: manifest.as_ref().err().cloned(),
+        manifest: manifest.unwrap_or_default(),
     }
 }
 
@@ -369,6 +371,18 @@ fn check_deps(
         .into_iter()
         .collect();
     let inventory = inventory(&prepared);
+    // An addon whose manifest odx cannot read has no dependencies to check:
+    // say so rather than find it fine.
+    report
+        .warnings
+        .extend(inventory.scanned().filter_map(|addon| {
+            addon.unreadable.as_ref().map(|why| Problem {
+                key: addon.name.clone(),
+                message: format!(
+                    "the manifest cannot be read ({why}); its dependencies are not checked"
+                ),
+            })
+        }));
     let mut findings = Findings::default();
     missing(&inventory, &core, &provided, &mut findings);
     stray(&prepared, &inventory, &mut findings);

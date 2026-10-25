@@ -569,18 +569,10 @@ fn change(
     edit: impl FnOnce(&mut toml_edit::Table),
 ) -> Result<(), Report> {
     sync(store, global.offline).map_err(|e| failed(Exit::Failure, e))?;
-    let file = store
-        .repo
-        .iter()
-        .flat_map(|(_, dir)| read_all(dir).unwrap_or_default())
+    let file = stored(store)?
+        .into_iter()
+        .find(|(_, entry)| entry.id == id)
         .map(|(file, _)| file)
-        .chain(std::iter::once(store.local.clone()))
-        .find(|file| {
-            read(file)
-                .unwrap_or_default()
-                .iter()
-                .any(|entry| entry.id == id)
-        })
         .ok_or_else(|| failed(Exit::Usage, format!("no verdict or mute {id}")))?;
     update(&file, id, edit)
         .and_then(
@@ -595,24 +587,35 @@ fn change(
     Ok(())
 }
 
-/// `base`, or `base-2`, `base-3`... when one change gets several entries.
-fn unique_id(store: &Store, base: &str) -> String {
-    let mut taken: Vec<String> = store
+/// Every entry of the store with its file: the verdict repository's, then
+/// the project's own. A file that cannot be read is an error, so an id is
+/// neither missed nor handed out twice.
+fn stored(store: &Store) -> Result<Vec<(PathBuf, Entry)>, Report> {
+    store
         .repo
         .iter()
-        .flat_map(|(_, dir)| read_all(dir).unwrap_or_default())
+        .map(|(_, dir)| read_all(dir))
+        .chain(std::iter::once(read(&store.local).map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| (store.local.clone(), entry))
+                .collect()
+        })))
+        .collect::<Result<Vec<Vec<_>>, String>>()
+        .map(|all| all.into_iter().flatten().collect())
+        .map_err(|e| failed(Exit::Failure, e))
+}
+
+/// `base`, or `base-2`, `base-3`... when one change gets several entries.
+fn unique_id(store: &Store, base: &str) -> Result<String, Report> {
+    let taken: std::collections::BTreeSet<String> = stored(store)?
+        .into_iter()
         .map(|(_, entry)| entry.id)
         .collect();
-    taken.extend(
-        read(&store.local)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|entry| entry.id),
-    );
-    std::iter::once(base.to_owned())
+    Ok(std::iter::once(base.to_owned())
         .chain((2..=taken.len() + 1).map(|n| format!("{base}-{n}")))
         .find(|id| !taken.contains(id))
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// The file an entry of `scope` goes to.
@@ -737,7 +740,7 @@ fn add(
         .collect();
     let prefix = if scope == Scope::Org { "v" } else { "m" };
     let recheck = recheck(kind, *no_recheck, &item, &group, addon);
-    let id = unique_id(store, &format!("{prefix}:{target}:{addon}:{short}"));
+    let id = unique_id(store, &format!("{prefix}:{target}:{addon}:{short}"))?;
     let entry = Entry {
         id,
         change: change.clone(),

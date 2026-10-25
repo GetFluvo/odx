@@ -254,6 +254,15 @@ fn forges_that_do_not_answer() {
 }
 
 #[test]
+fn a_project_that_does_not_load_fails() {
+    let project = Project::new("jobs = \"many\"");
+    let (exit, out, _) = project.odx(&["doctor"]);
+    assert_eq!(exit, Exit::Failure, "{out}");
+    assert!(out.contains("FAIL project: "), "{out}");
+    assert!(out.contains("pyproject.toml:3:8: invalid type"), "{out}");
+}
+
+#[test]
 fn everything_found() {
     // git stands in for mergiraf and odl: both answer --version.
     let mut project = Project::new(

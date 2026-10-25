@@ -371,3 +371,24 @@ fn translations_of_the_project_languages() {
     let (_, out, _) = odx(root, &["lint", "--select", "PO105"]);
     assert!(!out.contains("es.po") && out.contains("nl.po"), "{out}");
 }
+
+#[test]
+fn a_series_without_a_list_of_odoo_addons_skips_odx002() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    let pyproject = std::fs::read_to_string(root.join("pyproject.toml")).unwrap();
+    write(
+        &root.join("pyproject.toml"),
+        &pyproject.replace("odoo_version = \"18.0\"", "odoo_version = \"15.0\""),
+    );
+    let (_, out, err) = odx(root, &["lint", "--select", "ODX002"]);
+    assert_eq!(out, "no findings\n");
+    assert!(
+        err.contains("no list of Odoo's own addons for 15.0: ODX002 is skipped"),
+        "{err}"
+    );
+    // Not asked for, not warned about.
+    let (_, _, err) = odx(root, &["lint", "--select", "ODX001"]);
+    assert!(!err.contains("ODX002"), "{err}");
+}

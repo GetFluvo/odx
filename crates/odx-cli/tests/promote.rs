@@ -154,6 +154,23 @@ fn project(root: &Path) {
 }
 
 #[test]
+fn a_manifest_that_does_not_parse_is_warned_about() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    project(root);
+    write(&root.join("modules/broken/__manifest__.py"), "{'name': ");
+    commit_all(root, "broken");
+    let (exit, out, _) = odx(root, &["promote", "tweak", "--to", "prod"]);
+    assert_eq!(exit, Exit::Success, "{out}");
+    assert!(
+        out.contains(
+            "warning: the manifest of broken on test does not parse: its dependencies are not promoted with it"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
 fn plans_with_their_closure() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

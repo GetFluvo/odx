@@ -274,6 +274,25 @@ fn a_clean_project_and_an_unknown_series() {
     let (exit, out, err) = project.odx(&["check-deps"]);
     assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
     assert_eq!(out, "the dependencies of 1 addons are provided\n");
+    // Manifests odx cannot read are said to be unchecked, not fine.
+    write(
+        &project.root.join("addons/broken/__manifest__.py"),
+        "{'name': ",
+    );
+    std::fs::create_dir_all(project.root.join("addons/latin")).unwrap();
+    std::fs::write(
+        project.root.join("addons/latin/__manifest__.py"),
+        b"{'name': 'bad \xff'}",
+    )
+    .unwrap();
+    let (_, _, err) = project.odx(&["check-deps"]);
+    for addon in ["broken", "latin"] {
+        assert!(
+            err.contains(&format!("{addon}: the manifest cannot be read (")),
+            "{err}"
+        );
+    }
+    std::fs::remove_dir_all(project.root.join("addons")).unwrap();
     project.edit("odoo_version = \"17.0\"", "odoo_version = \"15.0\"");
     let (exit, out, err) = project.odx(&["check-deps"]);
     assert_eq!(exit, Exit::Failure);

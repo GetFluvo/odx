@@ -72,8 +72,8 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         allow_source_change: args.allow_source_change,
         with_odoo: !args.no_with_odoo && defaults.and_then(|p| p.with_odoo).unwrap_or(true),
     };
-    let (ours, theirs) = (addons(&from), addons(&to));
-    let planned = plan(
+    let ((ours, unreadable), (theirs, _)) = (addons(&from), addons(&to));
+    let mut planned = plan(
         &snapshot(&from, &ours),
         &snapshot(&to, &theirs),
         &selection,
@@ -93,6 +93,12 @@ fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             names.join(", ")
         )),
     })?;
+    planned.warnings.extend(unreadable.iter().map(|name| {
+        format!(
+            "the manifest of {name} on {} does not parse: its dependencies are not promoted with it",
+            from.env.name
+        )
+    }));
     let commits = missing_commits(root, &from.from, &to.from, &addon_paths(&from, &planned));
     let applied = if (args.commit || args.open_pr)
         && !planned.refused()
@@ -144,13 +150,18 @@ fn allowed(model: &Model, from: &str, to: &str) -> Result<(), Report> {
     }
 }
 
-/// The project addons of a checkout, as the plan sees them.
-fn addons(checkout: &Checkout) -> Vec<Addon> {
-    checkout
+/// The project addons of a checkout, as the plan sees them, and those
+/// whose manifest does not parse (their dependencies are unknown).
+fn addons(checkout: &Checkout) -> (Vec<Addon>, Vec<String>) {
+    let mut unreadable = Vec::new();
+    let addons = checkout
         .addons
         .iter()
         .map(|addon| {
-            let manifest = parse_manifest(&addon.manifest).ok();
+            let manifest = parse_manifest(&addon.manifest);
+            if manifest.is_err() {
+                unreadable.push(addon.name.clone());
+            }
             Addon {
                 name: addon.name.clone(),
                 version: odx_analyze::sniff::manifest_version(&addon.manifest),
@@ -158,7 +169,8 @@ fn addons(checkout: &Checkout) -> Vec<Addon> {
                 depends: manifest.map(|m| m.depends).unwrap_or_default(),
             }
         })
-        .collect()
+        .collect();
+    (addons, unreadable)
 }
 
 /// The project addons pull request `number`, merged into the source,
