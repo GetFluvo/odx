@@ -2741,6 +2741,9 @@ dependencies = [
 [[package]]
 name = "odx-core"
 version = "0.0.7"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "odx-dashboard"
@@ -2876,6 +2879,7 @@ dependencies = [
 name = "odx-verdicts"
 version = "0.0.7"
 dependencies = [
+ "odx-core",
  "serde",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",

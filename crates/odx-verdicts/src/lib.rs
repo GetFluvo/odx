@@ -318,15 +318,11 @@ pub fn read_all(root: &Path) -> Result<Vec<(PathBuf, Entry)>, String> {
     Ok(all)
 }
 
-/// The text of `file`, empty when it does not exist; one that cannot be
-/// read is an error, so an edit does not start over from nothing.
+/// The text of `file`, empty when it does not exist.
 fn text_of(file: &Path) -> Result<String, String> {
-    match std::fs::read_to_string(file) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            Err(format!("{}: {e}", file.display()))
-        }
-        read => Ok(read.unwrap_or_default()),
-    }
+    odx_core::read_if_exists(file)
+        .map(Option::unwrap_or_default)
+        .map_err(|e| format!("{}: {e}", file.display()))
 }
 
 /// Load `file` for editing (empty when missing).
@@ -499,11 +495,18 @@ mod tests {
     fn unreadable_files_are_not_overwritten() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("v.toml");
-        std::fs::write(&file, b"# caf\xe9\n").unwrap();
+        std::fs::write(&file, b"# bad \xff\n").unwrap();
         assert!(read(&file).unwrap_err().contains("v.toml"));
         assert!(append(&file, &entry(Kind::NotNeeded)).is_err());
-        assert_eq!(std::fs::read(&file).unwrap(), b"# caf\xe9\n");
+        assert_eq!(std::fs::read(&file).unwrap(), b"# bad \xff\n");
         assert_eq!(read(&tmp.path().join("none.toml")).unwrap(), []);
+        // Nor is one that is not TOML.
+        std::fs::write(&file, "[verdict\n").unwrap();
+        assert!(
+            append(&file, &entry(Kind::NotNeeded))
+                .unwrap_err()
+                .contains("v.toml")
+        );
     }
 
     #[test]
