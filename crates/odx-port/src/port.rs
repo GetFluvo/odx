@@ -166,12 +166,14 @@ impl Worktree<'_> {
         let file = root.join(&relative);
         // A blacklist that cannot be read is not replaced by the new entries
         // alone.
-        let mut list = odx_core::read_if_exists(&file)
-            .map_err(|e| e.to_string())
-            .and_then(|text| {
-                text.map_or_else(|| Ok(Blacklist::default()), |text| Blacklist::parse(&text))
-            })
-            .map_err(|e| format!("{}: {e}", file.display()))?;
+        let text =
+            odx_core::read_if_exists(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        let mut list = match text {
+            None => Blacklist::default(),
+            Some(text) => {
+                Blacklist::parse(&text).map_err(|e| format!("{}: {e}", file.display()))?
+            }
+        };
         for (key, reason) in entries {
             list.add(key, reason)?;
         }
