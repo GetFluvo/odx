@@ -468,7 +468,7 @@ pub struct DashboardArgs {
     /// Environment to show; defaults to all.
     #[arg(long, value_name = "ENV")]
     pub env: Option<String>,
-    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, drift, suppressed).
+    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, drift, suppressed).
     #[arg(long, value_name = "SECTION")]
     pub section: Vec<String>,
     /// With `--format markdown`, a box per action for the bot to read back.

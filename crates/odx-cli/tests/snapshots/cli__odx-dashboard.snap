@@ -34,7 +34,7 @@ Options:
           Override the number of parallel jobs
 
       --section <SECTION>
-          Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, drift, suppressed)
+          Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, drift, suppressed)
 
       --checkboxes
           With `--format markdown`, a box per action for the bot to read back
