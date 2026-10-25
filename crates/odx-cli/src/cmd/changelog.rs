@@ -10,7 +10,7 @@ use odx_config::lock::{LockSource, LockedMerge, LockedPackage, LockedRepository,
 use odx_core::Exit;
 use odx_core::system::OsRunner;
 use odx_forge::{ForgeKind, RepoUrl};
-use odx_git::Merger;
+use odx_git::{Cache, Merger};
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -378,6 +378,12 @@ fn markdown(title: &str, sections: &[Section], migrations: &str) -> String {
     if sections.is_empty() {
         out.push_str("\nNo changes.\n");
     }
+    out + &rendered(sections, migrations, "##")
+}
+
+/// The sections and migrations, each under a `heading` of its own.
+fn rendered(sections: &[Section], migrations: &str, heading: &str) -> String {
+    let mut out = String::new();
     for section in sections {
         let state = match section.state {
             "added" => ", new",
@@ -389,7 +395,7 @@ fn markdown(title: &str, sections: &[Section], migrations: &str) -> String {
         } else {
             format!(" ({}{state})", section.kind)
         };
-        let _ = writeln!(out, "\n## {}{kind}", section.name);
+        let _ = writeln!(out, "\n{heading} {}{kind}", section.name);
         if !section.items.is_empty() {
             out.push('\n');
         }
@@ -398,9 +404,26 @@ fn markdown(title: &str, sections: &[Section], migrations: &str) -> String {
         }
     }
     if !migrations.is_empty() {
-        let _ = write!(out, "\n## Migrations\n\n```text\n{migrations}```\n");
+        let _ = write!(out, "\n{heading} Migrations\n\n```text\n{migrations}```\n");
     }
     out
+}
+
+/// The release notes from `old` to `new` for a pull request description,
+/// under `## Changelog`; empty when nothing changed. Migrations that cannot
+/// be read from `cache` are left out.
+pub(crate) fn notes(cache: &Cache, old: &Lockfile, new: &Lockfile) -> String {
+    let merger = Merger::new(Arc::new(OsRunner));
+    let count = |url: &str, from: &str, to: &str| merger.count(&cache.repo_dir(url), from, to);
+    let sections = compare(old, new, &count);
+    let sniffed = since(&merger, cache, old, new, &mut Vec::new());
+    if sections.is_empty() && sniffed.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\n## Changelog\n{}",
+        rendered(&sections, &describe(&sniffed), "###")
+    )
 }
 
 /// `odx.lock` as committed at `since`, and at `to` or in the working tree,

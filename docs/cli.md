@@ -1130,6 +1130,8 @@ per path, and the output and the commit message say so loudly.
 `--open-pr` also pushes the branch to the environment's repository (its
 `repo`, else `--remote`) and opens a pull request into the environment's
 branch, with every addon and its pin on both sides in the description. The
+description and the commit message end with the changelog of the target's
+`odx.lock`, as `odx changelog` writes it (*Release notes*). The
 branch is odx's: writing it again replaces it. Approvals stay with the
 forge's branch protection.
 
