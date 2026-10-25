@@ -2,6 +2,7 @@
 
 Usage:
     python scripts/benchmark.py [--mode mirror|github] [--seed DIR]
+                                [--mirrors DIR] [--ours-only]
 
 Both tools aggregate tests/fixtures/benchmark/repos.yaml (12 OCA
 repositories, 25 pull requests) in three scenarios:
@@ -79,9 +80,8 @@ def fixture() -> dict[str, dict[str, list[str]]]:
     return repos
 
 
-def build_mirrors(work: Path, seed: Path | None) -> Path:
+def build_mirrors(mirrors: Path, seed: Path | None) -> Path:
     """Bare repositories with 17.0 and the fixture's pull request refs."""
-    mirrors = work / "mirrors"
     for repo, refs in fixture().items():
         bare = mirrors / "OCA" / f"{repo}.git"
         if (bare / "HEAD").exists():
@@ -254,6 +254,14 @@ def main() -> None:
     parser.add_argument("--seed", type=Path, help="clones to build the mirrors from")
     parser.add_argument("--work", type=Path, default=ROOT / "target" / "bench")
     parser.add_argument(
+        "--mirrors", type=Path, help="where the mirrors are (default: WORK/mirrors)"
+    )
+    parser.add_argument(
+        "--ours-only",
+        action="store_true",
+        help="time git-aggregate-rs and odx only, not git-aggregator",
+    )
+    parser.add_argument(
         "--gar", type=Path, default=ROOT / "target" / "release" / "git-aggregate-rs"
     )
     parser.add_argument("--odx", type=Path, default=ROOT / "target" / "release" / "odx")
@@ -263,25 +271,36 @@ def main() -> None:
     )
     parser.add_argument("--no-chart", action="store_true")
     args = parser.parse_args()
+    if args.record and args.ours_only:
+        parser.error("--record needs git-aggregator: drop --ours-only")
 
     work = args.work.resolve()
     work.mkdir(parents=True, exist_ok=True)
     origin = (
         "https://github.com"
         if args.mode == "github"
-        else build_mirrors(work, args.seed and args.seed.expanduser()).as_uri()
+        else build_mirrors(
+            (args.mirrors or work / "mirrors").resolve(),
+            args.seed and args.seed.expanduser(),
+        ).as_uri()
     )
     config = work / "config"
     config.mkdir(exist_ok=True)
     env = dict(os.environ, ORIGIN=origin, ODX_CONFIG_DIR=str(config), **IDENTITY)
     jobs = os.cpu_count() or 1
-    ga = str(gitaggregate(work))
+    theirs = (
+        []
+        if args.ours_only
+        else [
+            ("git-aggregator", str(gitaggregate(work)), False, jobs),
+            ("git-aggregator, 1 job", str(gitaggregate(work)), False, 1),
+        ]
+    )
     tools = []
     for name, program, cache, threads in [
         ("git-aggregate-rs", str(args.gar), True, jobs),
         ("git-aggregate-rs, 1 job", str(args.gar), True, 1),
-        ("git-aggregator", ga, False, jobs),
-        ("git-aggregator, 1 job", ga, False, 1),
+        *theirs,
     ]:
         run = work / "run" / re.sub(r"\W+", "-", name)
         run.mkdir(parents=True, exist_ok=True)

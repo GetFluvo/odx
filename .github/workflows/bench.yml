@@ -1,0 +1,87 @@
+name: bench
+
+# Times the base and the pull request on the benchmark fixture and comments
+# the difference on the pull request. Not a gate: runner timings are noisy.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/benchmark.py"
+      - "scripts/bench_compare.py"
+      - "tests/fixtures/benchmark/**"
+      - ".github/workflows/bench.yml"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            . -> target
+            base -> target
+      - name: Cache the mirrors
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/bench/mirrors
+          key: bench-mirrors-${{ hashFiles('tests/fixtures/benchmark/repos.yaml') }}
+      - name: Build the base and the pull request
+        run: |
+          cargo build --release --locked -p odx-cli -p git-aggregate-rs
+          cargo build --release --locked -p odx-cli -p git-aggregate-rs --manifest-path base/Cargo.toml
+      - name: Time both
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@localhost
+          for side in base head; do
+            if [ "$side" = base ]; then bin=base/target/release; else bin=target/release; fi
+            python3 scripts/benchmark.py --ours-only --no-chart --runs 3 \
+              --mirrors target/bench/mirrors --work "target/bench/$side" \
+              --odx "$bin/odx" --gar "$bin/git-aggregate-rs"
+          done
+          python3 scripts/bench_compare.py --runs 3 \
+            target/bench/base/results.json target/bench/head/results.json > "$RUNNER_TEMP/comment.md"
+          cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment on the pull request
+        # A pull request from a fork has no token that may comment; its
+        # numbers are in the job summary.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.body | startswith("<!-- odx:bench -->")) | .id' | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          fi
