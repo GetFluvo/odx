@@ -1,0 +1,47 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Glue addons Odoo would install with what the project has, that it does not have
+
+Usage: odx glue [OPTIONS]
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --fail
+          Exit 1 when glue addons are missing
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

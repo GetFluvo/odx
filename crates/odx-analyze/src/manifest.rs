@@ -67,6 +67,10 @@ pub struct Manifest {
     pub installable: bool,
     /// `license`.
     pub license: Option<String>,
+    /// The addons whose installation installs this one: `depends` for
+    /// `auto_install: True`, the listed ones for a list; `None` when the
+    /// addon is not installed automatically.
+    pub auto_install: Option<Vec<String>>,
 }
 
 /// Parse a manifest.
@@ -96,6 +100,11 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             .get("license")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        auto_install: match value.get("auto_install") {
+            Some(Value::Bool(true)) => Some(field("depends")),
+            Some(list @ Value::List(_)) => Some(list.strings()),
+            _ => None,
+        },
     })
 }
 
@@ -480,6 +489,21 @@ b",
     'pre': b'x' u"y",
 }
 "#;
+
+    #[test]
+    fn auto_install_names_its_triggers() {
+        let triggers = |text: &str| parse_manifest(text).unwrap().auto_install;
+        assert_eq!(
+            triggers("{'depends': ['a', 'b'], 'auto_install': True}"),
+            Some(vec!["a".to_owned(), "b".to_owned()])
+        );
+        assert_eq!(
+            triggers("{'depends': ['a', 'b'], 'auto_install': ['b']}"),
+            Some(vec!["b".to_owned()])
+        );
+        assert_eq!(triggers("{'depends': ['a'], 'auto_install': False}"), None);
+        assert_eq!(triggers("{'depends': ['a']}"), None);
+    }
 
     #[test]
     fn oca_manifest() {

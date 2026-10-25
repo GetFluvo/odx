@@ -172,6 +172,21 @@ impl Inventory {
     fn scanned(&self) -> impl Iterator<Item = &Scanned> {
         self.own.iter().chain(&self.aggregated)
     }
+
+    /// The `depends` of every scanned addon, by addon.
+    pub(crate) fn depends(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.scanned()
+            .map(|addon| (addon.name.as_str(), addon.manifest.depends.as_slice()))
+    }
+
+    /// The project's own addons and the addons of its addon packages: what
+    /// it installs.
+    pub(crate) fn installs(&self) -> impl Iterator<Item = &str> {
+        self.own
+            .iter()
+            .map(|addon| addon.name.as_str())
+            .chain(self.packages.keys().map(String::as_str))
+    }
 }
 
 pub(crate) fn inventory(prepared: &Prepared) -> Inventory {

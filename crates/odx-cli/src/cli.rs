@@ -122,6 +122,8 @@ pub enum Command {
     Verdict(VerdictCommand),
     /// Compare __manifest__.py dependencies with pyproject.toml.
     CheckDeps(CheckDepsArgs),
+    /// Glue addons Odoo would install with what the project has, that it does not have.
+    Glue(GlueArgs),
     /// List database migration scripts introduced by merges.
     Sniff(SniffArgs),
     /// Release notes between two states of odx.lock: merges, packages, Odoo and migrations.
@@ -340,6 +342,14 @@ pub struct DiffArgs {
     /// of the file in the working tree.
     #[arg(long, value_name = "REV")]
     pub to: Option<String>,
+}
+
+/// Arguments of `odx glue`.
+#[derive(Debug, Args)]
+pub struct GlueArgs {
+    /// Exit 1 when glue addons are missing.
+    #[arg(long)]
+    pub fail: bool,
 }
 
 /// Arguments of `odx dev`.
@@ -1298,6 +1308,7 @@ impl Command {
             Self::Sniff(_) => "sniff",
             Self::Changelog(_) => "changelog",
             Self::Diff(_) => "diff",
+            Self::Glue(_) => "glue",
             Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
             Self::Port(_) => "port",
@@ -1339,7 +1350,7 @@ impl Command {
             Self::Lint(_) => 9,
             Self::Promote(_) | Self::Env(_) => 10,
             Self::Bot(_) => 11,
-            Self::Changelog(_) | Self::Diff(_) => 12,
+            Self::Changelog(_) | Self::Diff(_) | Self::Glue(_) => 12,
         }
     }
 }
