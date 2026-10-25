@@ -108,9 +108,20 @@ pub(crate) fn run_dashboard(
     dashboard(args, global, ctx).unwrap_or_else(|report| report)
 }
 
-/// What `odx add` or `odx drop` take for each pull request entry: the
-/// spec, and whether it is a package.
-pub(crate) type Specs = BTreeMap<String, (String, bool)>;
+/// What `odx add` or `odx drop` take for an entry.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Edit {
+    /// The spec, or the distribution of a package.
+    spec: String,
+    /// Whether `spec` is a distribution.
+    package: bool,
+    /// For an addon added as a package from its repository: the
+    /// distribution and the subdirectory.
+    add_as: Option<(String, String)>,
+}
+
+/// The [`Edit`] of each entry that has one, by id.
+pub(crate) type Specs = BTreeMap<String, Edit>;
 
 /// The id of a status row's entry.
 fn row_id(row: &Row) -> String {
@@ -120,11 +131,18 @@ fn row_id(row: &Row) -> String {
 /// The pinned and droppable sections, from `odx status`.
 fn pinned(status: &[Row], specs: &mut Specs) -> [Section; 2] {
     for row in status {
-        let spec = row.dist.clone().map_or_else(
+        let (spec, package) = row.dist.clone().map_or_else(
             || (format!("{}#{}", row.url, row.pr), false),
             |dist| (dist, true),
         );
-        specs.insert(row_id(row), spec);
+        specs.insert(
+            row_id(row),
+            Edit {
+                spec,
+                package,
+                add_as: None,
+            },
+        );
     }
     let (merged, open): (Vec<&Row>, Vec<&Row>) = status.iter().partition(|row| {
         row.upstream
@@ -292,7 +310,14 @@ fn new_upstream(
             let new = u32::try_from(pr.number).is_ok_and(|n| !merged.contains(&n));
             if let Some(addon) = named.filter(|_| new) {
                 let id = format!("new:{}#{}", repository_name(&repo.url), pr.number);
-                specs.insert(id.clone(), (format!("{}#{}", repo.url, pr.number), false));
+                specs.insert(
+                    id.clone(),
+                    Edit {
+                        spec: format!("{}#{}", repo.url, pr.number),
+                        package: false,
+                        add_as: None,
+                    },
+                );
                 entries.push(Entry {
                     id,
                     addon: Some((*addon).to_owned()),
@@ -348,6 +373,46 @@ fn auto_update(ctx: &Context<'_>, prepared: &Prepared, warnings: &mut Vec<Proble
         .collect();
     Section {
         kind: SectionKind::AutoUpdate,
+        fetched_at: now(),
+        entries,
+    }
+}
+
+/// The glue section: the glue addons `odx glue` finds, to add or to
+/// ignore.
+fn glue(prepared: &Prepared, specs: &mut Specs) -> Section {
+    let series = &prepared.project.config.odoo_version;
+    let found = super::glue::glue(prepared);
+    let entries = found
+        .candidates
+        .iter()
+        .map(|candidate| {
+            let offered = &candidate.offered;
+            let id = format!("glue:{}", offered.addon);
+            let (spec, dist, path) = super::glue::add_spec(candidate, series);
+            specs.insert(
+                id.clone(),
+                Edit {
+                    spec,
+                    package: false,
+                    add_as: Some((dist, path)),
+                },
+            );
+            Entry {
+                id,
+                addon: Some(offered.addon.clone()),
+                subject: format!("{} from {}", offered.addon, repository_name(&offered.url)),
+                state: format!("with {}", offered.triggers.join(", ")),
+                actions: vec![Action::Include, Action::Mute],
+                notes: (!candidate.missing.is_empty())
+                    .then(|| format!("also needs {}", candidate.missing.join(", ")))
+                    .into_iter()
+                    .collect(),
+            }
+        })
+        .collect();
+    Section {
+        kind: SectionKind::Glue,
         fetched_at: now(),
         entries,
     }
@@ -515,6 +580,7 @@ pub(crate) fn build(
         sections.extend(suggestions(&judged, &target));
         if own {
             sections.push(auto_update(ctx, prepared, warnings));
+            sections.push(glue(prepared, &mut specs));
             sections.extend(drift(prepared, warnings));
         }
         sections.sort_by_key(|section| {
@@ -732,9 +798,16 @@ pub(crate) fn run_act(
     }
     let rest = act.id.split_once(':').map_or("", |(_, rest)| rest);
     let reference = rest.split_once("->").map_or(rest, |(change, _)| change);
-    let (spec, package) = specs.get(&act.id).cloned().unwrap_or_default();
+    let Edit {
+        spec,
+        package,
+        add_as,
+    } = specs.get(&act.id).cloned().unwrap_or_default();
     match action {
         Action::Port => act_port(act, dashboard, entry, reference, global, ctx, prepared),
+        Action::Mute if act.id.starts_with("glue:") => {
+            super::glue::ignore(prepared, rest, act.reason.as_deref())
+        }
         Action::Mute => {
             let reason = act
                 .reason
@@ -772,10 +845,11 @@ pub(crate) fn run_act(
             Ok(super::edit::run_drop(&drop, ctx))
         }
         Action::Include => {
+            let (package, subdirectory) = add_as.unzip();
             let add = AddArgs {
                 spec,
-                package: None,
-                subdirectory: None,
+                package,
+                subdirectory,
                 group: None,
                 odoo_version: None,
             };

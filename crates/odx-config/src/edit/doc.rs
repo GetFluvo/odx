@@ -191,6 +191,28 @@ impl PyprojectEdit {
         Ok(Added::Merge)
     }
 
+    /// Record in `[tool.odx.glue] ignore` that glue addon `addon` is not
+    /// wanted, and why.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::NoOdxTable`] without `[tool.odx]`, and
+    /// [`EditError::Malformed`] when `glue` or its `ignore` is no table.
+    pub fn ignore_glue(&mut self, addon: &str, reason: &str) -> Result<(), EditError> {
+        let glue = self
+            .odx_table(None)?
+            .entry("glue")
+            .or_insert_with(|| Item::Table(Table::new()))
+            .as_table_like_mut()
+            .ok_or(EditError::Malformed("[tool.odx.glue]"))?;
+        glue.entry("ignore")
+            .or_insert(Item::Value(Value::InlineTable(InlineTable::new())))
+            .as_table_like_mut()
+            .ok_or(EditError::Malformed("[tool.odx.glue] ignore"))?
+            .insert(addon, Item::Value(Value::from(reason)));
+        Ok(())
+    }
+
     /// Remove the merge `spec` from its repository.
     ///
     /// # Errors

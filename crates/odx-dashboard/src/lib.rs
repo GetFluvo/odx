@@ -30,6 +30,9 @@ pub enum SectionKind {
     Backport,
     /// Index patch releases the auto-update policy would take.
     AutoUpdate,
+    /// Glue addons Odoo would install with what the project has, that it
+    /// does not have.
+    Glue,
     /// What differs between environments.
     Drift,
     /// What verdicts, mutes and blacklists hide.
@@ -38,13 +41,14 @@ pub enum SectionKind {
 
 impl SectionKind {
     /// Every section, in display order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Pinned,
         Self::Droppable,
         Self::NewUpstream,
         Self::ForwardPort,
         Self::Backport,
         Self::AutoUpdate,
+        Self::Glue,
         Self::Drift,
         Self::Suppressed,
     ];
@@ -59,6 +63,7 @@ impl SectionKind {
             Self::ForwardPort => "forward-port",
             Self::Backport => "backport",
             Self::AutoUpdate => "auto-update",
+            Self::Glue => "glue",
             Self::Drift => "drift",
             Self::Suppressed => "suppressed",
         }
@@ -74,6 +79,7 @@ impl SectionKind {
             Self::ForwardPort => "Forward-port suggestions",
             Self::Backport => "Backport candidates",
             Self::AutoUpdate => "Index updates",
+            Self::Glue => "Glue addons the project misses",
             Self::Drift => "Environment drift",
             Self::Suppressed => "Suppressed",
         }

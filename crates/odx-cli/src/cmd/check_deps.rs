@@ -83,7 +83,7 @@ fn name_of(dir: &Path) -> String {
 }
 
 /// The addon a distribution installs, if it is an addon package.
-fn addon_of(dist: &str) -> Option<String> {
+pub(crate) fn addon_of(dist: &str) -> Option<String> {
     let dist = normalize_name(dist);
     dist.strip_prefix("odoo-addon-")
         .or_else(|| dist.split_once("-addon-").map(|(_, addon)| addon))
