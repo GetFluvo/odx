@@ -466,12 +466,15 @@ Actions and Forgejo Actions the issue links the workflow run.
 
 ### Running the bot nightly
 
-The repository is also a composite action, for GitHub Actions and Forgejo
-Actions alike. It installs odx from PyPI (`version`, default `latest`;
-`none` keeps the odx on `PATH`), restores `~/.cache/odx` keyed on odx.lock
-and, with `bot: true`, runs `odx --json bot run`: with `--apply` on a
-schedule, as a plan on `pull_request` events (`apply: auto`). Its outputs
-are `plan-json`, the path of the run's JSON, and `dashboard-issue`.
+[`getfluvo/odx-action`](https://github.com/getfluvo/odx-action) is a
+composite action, for GitHub Actions and Forgejo Actions alike. It installs
+odx from PyPI (`version`, default `latest`; `none` keeps the odx on `PATH`),
+restores the odx cache keyed on odx.lock and, with `bot: true`, runs `odx
+--json bot run`: with `--apply` on a schedule, as a plan on `pull_request`
+events (`apply: auto`). Its outputs are `version`, `plan-json`, the path of
+the run's JSON, and `dashboard-issue`. The action at the root of this
+repository (`getfluvo/odx@v0.0.7`) still works, but new workflows use
+`getfluvo/odx-action@v1`.
 
 ```yaml
 # .github/workflows/odx-bot.yml
@@ -494,7 +497,7 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token }}
           fetch-depth: 0
-      - uses: getfluvo/odx@v0.0.7
+      - uses: getfluvo/odx-action@v1
         id: odx
         with:
           bot: true
@@ -507,7 +510,7 @@ jobs:
 ```
 
 On Forgejo the same workflow lives in `.forgejo/workflows`, uses
-`https://github.com/getfluvo/odx@v0.0.7` (actions hosted elsewhere need the
+`https://github.com/getfluvo/odx-action@v1` (actions hosted elsewhere need the
 full URL), and takes the token of a bot account from a secret instead of
 the app; Forgejo's `upload-artifact` stays at its v3-compatible version.
 
