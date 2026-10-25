@@ -33,6 +33,10 @@ $ cargo install odx-cli
 Binary wheels are published for Linux (glibc and musl, x86_64 and aarch64),
 macOS (Intel and Apple silicon) and Windows; no Rust toolchain needed.
 
+The [odx extension for VS Code](https://open-vsx.org/extension/getfluvo/odx)
+(Open VSX: VSCodium, Cursor, Windsurf and others) shows the dashboard and the
+project's pull requests, and downloads `odx` when it is not installed.
+
 ## Quick start
 
 ```console
@@ -50,7 +54,8 @@ $ odx lint --only-changed           # odoo-lint with the project's context
 | Aggregate and lock | `aggregate`, `lock`, `verify`, `add`, `drop`, `import`, `export` |
 | Packages and deployment | `vendor`, `build`, platform profiles (wheels, vendored source, Odoo.sh) |
 | Local development | `dev`, `doctor`, `auth`, `sync`, `cache`, `daemon` |
-| Upstream insight | `status`, `suggest`, `verdict`, `dashboard`, `check-deps`, `upgrade`, `sniff`, `stats` |
+| Upstream insight | `status`, `suggest`, `verdict`, `dashboard`, `check-deps`, `upgrade`, `sniff`, `stats`, `glue`, `changelog`, `diff` |
+| Environments and automation | `env`, `promote`, `bot` |
 | Porting and migration | `port pr/addon/sweep`, `migrate plan/addon/pr/update/pin/unpin/own` |
 | Linting | `lint`, with odoo-lint built in and project rules on top |
 
@@ -64,8 +69,7 @@ git-aggregator's `gitaggregate`: `odx git-aggregate`, or the standalone
 ## Status
 
 Pre-alpha (0.0.x): the configuration and the CLI may still change between
-releases. Environment promotion (`odx promote`, `odx env`) and the CI bot
-(`odx bot`) are planned.
+releases.
 
 <!-- github-only -->
 
