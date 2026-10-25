@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "git-aggregate-rs"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "odx-aggregate"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-config",
  "odx-core",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "odx-analyze"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "tempfile",
@@ -2682,7 +2682,7 @@ dependencies = [
 
 [[package]]
 name = "odx-bot"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-dashboard",
  "odx-forge",
@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "odx-cli"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2725,7 +2725,7 @@ dependencies = [
 
 [[package]]
 name = "odx-config"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "insta",
  "odx-core",
@@ -2740,14 +2740,14 @@ dependencies = [
 
 [[package]]
 name = "odx-core"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "odx-dashboard"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "ratatui",
  "serde",
@@ -2756,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "odx-dev"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-config",
  "serde",
@@ -2766,7 +2766,7 @@ dependencies = [
 
 [[package]]
 name = "odx-env"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-config",
  "pep440_rs",
@@ -2775,7 +2775,7 @@ dependencies = [
 
 [[package]]
 name = "odx-forge"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -2791,7 +2791,7 @@ dependencies = [
 
 [[package]]
 name = "odx-git"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "futures-util",
  "odx-core",
@@ -2803,7 +2803,7 @@ dependencies = [
 
 [[package]]
 name = "odx-index"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-analyze",
  "odx-core",
@@ -2816,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "odx-lint"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odoo-lint",
  "tempfile",
@@ -2824,7 +2824,7 @@ dependencies = [
 
 [[package]]
 name = "odx-platform"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-analyze",
  "odx-config",
@@ -2839,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "odx-port"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-core",
  "regex",
@@ -2850,7 +2850,7 @@ dependencies = [
 
 [[package]]
 name = "odx-sync"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -2860,7 +2860,7 @@ dependencies = [
 
 [[package]]
 name = "odx-vendor"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-analyze",
  "odx-config",
@@ -2877,7 +2877,7 @@ dependencies = [
 
 [[package]]
 name = "odx-verdicts"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "odx-core",
  "serde",
