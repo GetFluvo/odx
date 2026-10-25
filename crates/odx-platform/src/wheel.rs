@@ -28,14 +28,22 @@ pub struct Retagged {
 /// `METADATA` version.
 pub fn retag(wheel: &[u8], local: &str) -> Result<Retagged, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(wheel)).map_err(|e| e.to_string())?;
+    // An entry that cannot be read fails the wheel rather than leaving it
+    // out of the retagged one.
     let entries: Vec<(String, Vec<u8>)> = (0..archive.len())
-        .filter_map(|index| {
-            archive.by_index(index).ok().and_then(|mut file| {
-                let name = String::from_utf8_lossy(file.name_raw()).into_owned();
-                let mut bytes = Vec::new();
-                (!file.is_dir() && file.read_to_end(&mut bytes).is_ok()).then_some((name, bytes))
-            })
+        .map(|index| {
+            let mut file = archive.by_index(index).map_err(|e| e.to_string())?;
+            let name = String::from_utf8_lossy(file.name_raw()).into_owned();
+            let mut bytes = Vec::new();
+            if !file.is_dir() {
+                file.read_to_end(&mut bytes)
+                    .map_err(|e| format!("{name}: {e}"))?;
+            }
+            Ok((!file.is_dir()).then_some((name, bytes)))
         })
+        .collect::<Result<Vec<_>, String>>()?
+        .into_iter()
+        .flatten()
         .collect();
     let (dist_info, metadata) = entries
         .iter()
@@ -192,6 +200,24 @@ mod tests {
     #[test]
     fn broken_wheels() {
         assert!(retag(b"no zip", "x").is_err());
+        // A damaged entry, or entry header, fails the wheel.
+        let mut damaged = {
+            let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            let stored = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            writer.start_file("a.py", stored).unwrap();
+            writer.write_all(b"print(1)\n").unwrap();
+            writer.finish().unwrap().into_inner()
+        };
+        let at = damaged
+            .windows(9)
+            .position(|bytes| bytes == b"print(1)\n")
+            .unwrap();
+        damaged[at] = b'P';
+        assert!(retag(&damaged, "x").unwrap_err().starts_with("a.py: "));
+        let mut headless = wheel(&[("a.py", "")]);
+        headless[0] = b'X';
+        assert!(retag(&headless, "x").is_err());
         assert_eq!(
             retag(&wheel(&[("a.py", "")]), "x").unwrap_err(),
             "the wheel has no .dist-info/METADATA"

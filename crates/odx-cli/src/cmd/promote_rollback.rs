@@ -49,6 +49,8 @@ fn carrying(root: &Path, target: &str, merged: &Merged) -> Vec<String> {
         .map(|sha| patch_id(root, &format!("{sha}^"), sha))
         .collect();
     wanted.push(patch_id(root, &format!("{first}^"), &merged.head));
+    // An id git could not compute matches every other one it could not.
+    wanted.retain(|id| !id.is_empty());
     let fork = git(root, &["merge-base", target, &merged.head]).unwrap_or_default();
     git(
         root,

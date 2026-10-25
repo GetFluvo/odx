@@ -102,7 +102,7 @@ impl Worktree<'_> {
     /// When a port or a migration is already in progress, the worktree has
     /// uncommitted changes, the target cannot be fetched, or git fails.
     pub fn port(&self, plan: PortPlan, tools: &Tools) -> Result<PortOutcome, String> {
-        if self.port_state().is_some() || self.state().is_some() {
+        if self.has(STATE_FILE) || self.migrating() {
             return Err(format!(
                 "a port or migration is in progress: run `{PORT} --continue` or `{PORT} --abort` (`odx migrate` for a migration)"
             ));
@@ -138,7 +138,7 @@ impl Worktree<'_> {
     /// uncommitted changes, the series cannot be fetched, or the branch
     /// cannot be created.
     pub fn branch_from(&self, remote: &str, to: &str, branch: &str) -> Result<(), String> {
-        if self.port_state().is_some() || self.state().is_some() {
+        if self.has(STATE_FILE) || self.migrating() {
             return Err(format!(
                 "a port or migration is in progress: finish it with `{PORT} --continue` or `{PORT} --abort` first"
             ));
@@ -164,10 +164,22 @@ impl Worktree<'_> {
         let root = self.root()?;
         let relative = blacklist::path(addon);
         let file = root.join(&relative);
-        let mut list = std::fs::read_to_string(&file)
-            .ok()
-            .and_then(|text| Blacklist::parse(&text).ok())
-            .unwrap_or_default();
+        // A blacklist that cannot be read is not replaced by the new entries
+        // alone.
+        let mut list = match std::fs::read_to_string(&file) {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                Ok(Blacklist::default())
+            }
+            read => read
+                .map_err(|e| e.to_string())
+                .and_then(|text| Blacklist::parse(&text)),
+        }
+        .map_err(|e| format!("{}: {e}", file.display()))?;
         for (key, reason) in entries {
             list.add(key, reason)?;
         }
@@ -621,6 +633,15 @@ mod tests {
                 .unwrap_err()
                 .contains("needs a reason")
         );
+        // A blacklist that is not one is left as it is.
+        let corrupt = work.join(".oca/oca-port/blacklist/corrupt.json");
+        std::fs::write(&corrupt, "{ not json").unwrap();
+        assert!(
+            tree.blacklist("corrupt", &[entry("OCA/x#3", "r")])
+                .unwrap_err()
+                .contains("corrupt.json")
+        );
+        assert_eq!(std::fs::read_to_string(&corrupt).unwrap(), "{ not json");
         std::fs::create_dir_all(work.join(".oca/oca-port/blacklist/dir.json")).unwrap();
         assert!(
             tree.blacklist("dir", &[entry("OCA/x#3", "r")])

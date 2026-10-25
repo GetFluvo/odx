@@ -51,7 +51,7 @@ impl Worktree<'_> {
         since: Option<&str>,
         tools: &Tools,
     ) -> Result<Outcome, String> {
-        if self.state().is_some() {
+        if self.migrating() {
             return Err(
                 "a migration is in progress: run `odx migrate --continue` or `odx migrate --abort`"
                     .to_owned(),
@@ -122,8 +122,10 @@ impl Worktree<'_> {
         let began = Instant::now();
         let mut patches = Vec::new();
         for sha in &new {
+            // A commit that cannot be exported would be left out for good:
+            // the next update starts after the newest one the branch has.
             let patch = self
-                .run(&self.command().args([
+                .bytes(&self.command().args([
                     "format-patch",
                     "--keep-subject",
                     "--stdout",
@@ -132,8 +134,7 @@ impl Worktree<'_> {
                     "--",
                     addon,
                 ]))
-                .map(|output| output.stdout)
-                .unwrap_or_default();
+                .map_err(|e| format!("cannot export {sha}: {e}"))?;
             patches.extend(patch);
         }
         if !patches.is_empty() {

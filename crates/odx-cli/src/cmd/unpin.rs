@@ -168,8 +168,10 @@ enum Dropped {
 /// Remove `pins` from the branch: drop the pin commit when it holds them
 /// and nothing after it conflicts, else remove the lines in a commit.
 fn drop_pins(ctx: &Context<'_>, pins: &[Pinned]) -> Result<Dropped, Report> {
+    // The guard in front of `rebase` and `reset --hard`: when git cannot
+    // tell, nothing is changed.
     let status = output_of(&git(ctx).args(["status", "--porcelain", "--untracked-files=no"]))
-        .unwrap_or_default();
+        .map_err(failed)?;
     if !status.is_empty() {
         return Err(failed(
             "the worktree has uncommitted changes: commit or stash them first".to_owned(),

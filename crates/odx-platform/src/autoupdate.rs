@@ -117,26 +117,30 @@ pub fn candidate(current: &str, series: &str, releases: &Releases) -> Candidate 
 /// When `wheel` is not a zip archive.
 pub fn addon_files(wheel: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(wheel)).map_err(|e| e.to_string())?;
+    // A file that cannot be read fails the comparison rather than counting
+    // as removed.
     let files = (0..archive.len())
-        .filter_map(|index| {
-            archive.by_index(index).ok().and_then(|mut file| {
-                let name = String::from_utf8_lossy(file.name_raw()).into_owned();
-                let path = name
-                    .strip_prefix("odoo/addons/")
-                    .and_then(|rest| rest.split_once('/'))
-                    .map(|(_, path)| path.to_owned())
-                    .filter(|path| !path.is_empty())?;
-                let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).ok().map(|_| {
-                    if path == "__manifest__.py" {
-                        bytes = blank_version(&String::from_utf8_lossy(&bytes)).into_bytes();
-                    }
-                    (path, bytes)
-                })
-            })
+        .map(|index| {
+            let mut file = archive.by_index(index).map_err(|e| e.to_string())?;
+            let name = String::from_utf8_lossy(file.name_raw()).into_owned();
+            let Some(path) = name
+                .strip_prefix("odoo/addons/")
+                .and_then(|rest| rest.split_once('/'))
+                .map(|(_, path)| path.to_owned())
+                .filter(|path| !path.is_empty())
+            else {
+                return Ok(None);
+            };
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)
+                .map_err(|e| format!("{name}: {e}"))?;
+            if path == "__manifest__.py" {
+                bytes = blank_version(&String::from_utf8_lossy(&bytes)).into_bytes();
+            }
+            Ok(Some((path, bytes)))
         })
-        .collect();
-    Ok(files)
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(files.into_iter().flatten().collect())
 }
 
 fn blank_version(manifest: &str) -> String {
@@ -303,5 +307,25 @@ mod tests {
         );
         assert_eq!(blank_version("{'name': 'x'}"), "{'name': 'x'}");
         assert!(addon_files(b"no zip").is_err());
+        // A damaged file, or file header, fails the comparison.
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let stored = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("odoo/addons/x/a.py", stored).unwrap();
+        writer.write_all(b"print(1)\n").unwrap();
+        let mut damaged = writer.finish().unwrap().into_inner();
+        let at = damaged
+            .windows(9)
+            .position(|bytes| bytes == b"print(1)\n")
+            .unwrap();
+        damaged[at] = b'P';
+        assert!(
+            addon_files(&damaged)
+                .unwrap_err()
+                .starts_with("odoo/addons/x/a.py: ")
+        );
+        let mut headless = wheel(&[("odoo/addons/x/a.py", "")]);
+        headless[0] = b'X';
+        assert!(addon_files(&headless).is_err());
     }
 }
