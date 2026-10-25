@@ -1,4 +1,5 @@
-//! `odx sniff` and the migration report at the end of `odx aggregate`.
+//! `odx sniff`, the migration report at the end of `odx aggregate`, and
+//! `odx changelog`.
 
 #![expect(clippy::unwrap_used, reason = "test helpers should fail loudly")]
 
@@ -330,4 +331,92 @@ fn sniff_failures() {
     assert!(err.contains("odoo-addon-pos-y: cannot compare"), "{err}");
     assert!(err.contains("pos: cannot compare"), "{err}");
     drop(project.tmp);
+}
+
+#[test]
+fn changelog_between_lockfile_states() {
+    let project = Project::new("");
+    project.odx(&["aggregate"]);
+    let (exit, _, err) = project.odx(&["changelog"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("cannot read odx.lock at HEAD"), "{err}");
+    project.commit();
+    let committed = std::fs::read_to_string(project.root.join("odx.lock")).unwrap();
+
+    project.configure("", "{ pr = 1 }, { pr = 2 }");
+    let (exit, out, _) = project.odx(&["aggregate"]);
+    assert_eq!(exit, Exit::Success, "{out}");
+    let pr2 = git(
+        &project.tmp.path().join("up"),
+        &["rev-parse", "refs/pull/2/head"],
+    );
+    let (exit, out, err) = project.odx(&["changelog"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    assert!(
+        out.starts_with(&format!(
+            "# Changelog: HEAD → working tree\n\n## pos (repository)\n\n- added #2 at `{}`\n\n## Migrations\n\n```text\nmigrations in pos (repository):\n",
+            &pr2[..7]
+        )),
+        "{out}"
+    );
+    assert!(out.ends_with("post-y.py\n```\n"), "{out}");
+    let (_, out, _) = project.odx(&["--json", "changelog"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["to"], "working tree");
+    let item = &value["sections"][0]["items"][0];
+    assert_eq!(
+        (&item["change"], &item["source"]["pr"]),
+        (&"added".into(), &2.into())
+    );
+    assert_eq!(value["migrations"][0]["name"], "pos");
+
+    // The same pull request at a newer commit, counted in the cache.
+    let updated = committed.replace(&project.pr1, &pr2);
+    write(&project.root.join("odx.lock"), &updated);
+    let (_, out, _) = project.odx(&["changelog"]);
+    assert!(
+        out.contains(&format!(
+            "- updated #1: `{}` → `{}` (1 commit)\n",
+            &project.pr1[..7],
+            &pr2[..7]
+        )),
+        "{out}"
+    );
+    let (_, out, _) = project.odx(&["--json", "changelog"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["sections"][0]["items"][0]["commits"], 1);
+
+    // A result the cache does not have: migrations are not compared.
+    let tree = committed
+        .lines()
+        .find_map(|line| line.strip_prefix("result_tree = \""))
+        .unwrap()
+        .trim_end_matches('"')
+        .to_owned();
+    write(
+        &project.root.join("odx.lock"),
+        &committed.replace(&tree, &"d".repeat(40)),
+    );
+    let (exit, _, err) = project.odx(&["changelog"]);
+    assert_eq!(exit, Exit::Success);
+    assert!(
+        err.starts_with("warning: migrations: pos: cannot compare"),
+        "{err}"
+    );
+
+    let (exit, out, _) = project.odx(&["changelog", "--to", "HEAD"]);
+    assert_eq!(
+        (exit, out.as_str()),
+        (Exit::Success, "# Changelog: HEAD → HEAD\n\nNo changes.\n")
+    );
+    let (exit, _, err) = project.odx(&["changelog", "--to", "nope"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("cannot read odx.lock at nope"), "{err}");
+    std::fs::remove_file(project.root.join("odx.lock")).unwrap();
+    let (exit, _, err) = project.odx(&["changelog"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("odx.lock is missing; run `odx lock`"), "{err}");
+    let elsewhere = project.tmp.path().join("up").display().to_string();
+    let (exit, _, err) = project.odx(&["-C", &elsewhere, "changelog"]);
+    assert_eq!(exit, Exit::Usage, "{err}");
 }

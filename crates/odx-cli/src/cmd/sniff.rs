@@ -242,7 +242,7 @@ fn sniff(args: &SniffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Rep
 }
 
 /// The lockfile as committed at `rev`.
-fn previous_lock(root: &Path, lock_path: &Path, rev: &str) -> Result<Lockfile, Report> {
+pub(crate) fn previous_lock(root: &Path, lock_path: &Path, rev: &str) -> Result<Lockfile, Report> {
     let relative = lock_path
         .strip_prefix(root)
         .unwrap_or(lock_path)
@@ -271,7 +271,7 @@ fn previous_lock(root: &Path, lock_path: &Path, rev: &str) -> Result<Lockfile, R
 /// The migrations between two lockfile states: per repository from the
 /// previous result to the current one (from the base for a new
 /// repository), per package from the previous commit to the current one.
-fn since(
+pub(crate) fn since(
     merger: &Merger,
     cache: &odx_git::Cache,
     previous: &Lockfile,

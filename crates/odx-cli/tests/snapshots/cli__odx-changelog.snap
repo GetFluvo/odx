@@ -1,0 +1,52 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Release notes between two states of odx.lock: merges, packages, Odoo and migrations
+
+Usage: odx changelog [OPTIONS]
+
+Options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --since <REV>
+          The earlier state: odx.lock as committed at this git revision
+          
+          [default: HEAD]
+
+  -c, --config <FILE>
+          The pyproject.toml or repos.yaml to use
+
+      --to <REV>
+          The later state: odx.lock as committed at this git revision instead of the file in the working tree
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

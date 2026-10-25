@@ -26,6 +26,7 @@ Commands:
   verdict        Record, list, revoke and share decisions about upstream changes
   check-deps     Compare __manifest__.py dependencies with pyproject.toml
   sniff          List database migration scripts introduced by merges
+  changelog      Release notes between two states of odx.lock: merges, packages, Odoo and migrations
   stats          Lines of code per language
   upgrade        Module availability and code readiness for the next Odoo series
   port           Port PRs or missing commits to another series; maintainer sweeps; blacklists
