@@ -215,7 +215,16 @@ pub(crate) fn commit(
     let committed = if staged {
         git(
             wt,
-            &["commit", "--quiet", "--no-verify", "-m", title, "-m", body],
+            &[
+                "commit",
+                "--quiet",
+                "--no-verify",
+                "--cleanup=whitespace",
+                "-m",
+                title,
+                "-m",
+                body,
+            ],
         )
         .map(drop)
     } else {

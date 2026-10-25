@@ -89,8 +89,12 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     } else {
         args.workspace.iter().map(|dir| ctx.dir.join(dir)).collect()
     };
-    let Ok(_lock) = RepoLock::acquire(&cache.join("locks").join("sync.lock"), Duration::ZERO)
-    else {
+    // A moment's grace: a git child forked by another thread can hold a lock
+    // just released for the few milliseconds before it execs.
+    let Ok(_lock) = RepoLock::acquire(
+        &cache.join("locks").join("sync.lock"),
+        Duration::from_millis(500),
+    ) else {
         return Ok(Report {
             out: "another odx sync is running; nothing to do\n".to_owned(),
             ..Report::default()
