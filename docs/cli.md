@@ -150,7 +150,7 @@ $ odx daemon install --dry-run        # show the job files and commands
 $ odx daemon install --interval 30m   # schedule `odx sync --all`
 $ odx daemon status
 $ odx daemon uninstall
-$ odx daemon run                      # the same loop in the foreground
+$ odx daemon run                      # the same loop in the foreground, woken by changes
 ```
 
 `odx daemon install` schedules `odx sync --all` as a user-level job, so it
@@ -165,6 +165,13 @@ sets `[sync] enabled = true` and the interval in the user configuration;
 `odx daemon uninstall` stops the job, removes its files and sets `enabled =
 false`. `odx daemon status` shows whether the job is installed and active,
 the interval, the last sync and the cache size; `odx doctor` reports it too.
+
+`odx daemon run` syncs on the same interval and watches the registered
+workspaces in between: when a `pyproject.toml` or `odx.lock` of one changes
+(or a workspace is registered or unregistered), the next sync starts once
+the change has settled, a few seconds later. It looks at the files' times
+every two seconds rather than through the operating system's file events,
+so it works the same on every platform and on network drives.
 
 ### Inspecting and trimming the cache
 
