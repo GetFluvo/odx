@@ -58,5 +58,5 @@ mirrors cached between runs), then comments the difference per scenario on
 the pull request
 ([`scripts/bench_compare.py`](https://github.com/getfluvo/odx/blob/main/scripts/bench_compare.py)).
 It is not a gate: GitHub runners vary by about 10% between cold runs and
-20% between the short warm and no-op runs, so only larger changes are shown
-in bold.
+20% between the short warm and no-op runs, so only larger changes, and
+only those of more than 0.05 s, are shown in bold.

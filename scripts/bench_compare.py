@@ -22,6 +22,8 @@ SCENARIOS = ["cold", "warm", "no-op"]
 # GitHub runners vary by about this much between runs of the same binary;
 # the short warm and no-op runs vary most.
 NOISE = {"cold": 0.10, "warm": 0.20, "no-op": 0.20}
+# A tenth of a second run varies by a few hundredths, whatever the change.
+FLOOR = 0.05
 
 
 def cell(base: float | None, head: float | None, noise: float) -> str:
@@ -29,7 +31,7 @@ def cell(base: float | None, head: float | None, noise: float) -> str:
         return "-" if head is None else f"{head:.2f} s"
     change = (head - base) / base if base else 0.0
     text = f"{base:.2f} s → {head:.2f} s ({change:+.0%})"
-    return f"**{text}**" if abs(change) > noise else text
+    return f"**{text}**" if abs(change) > noise and abs(head - base) > FLOOR else text
 
 
 def main() -> None:
@@ -59,8 +61,8 @@ def main() -> None:
             f"Base against this pull request, median of {args.runs} runs on a GitHub "
             f"runner ({os.cpu_count()} CPUs), the fixture of docs/benchmarks.md from "
             f"local mirrors. Not a gate: changes within ±{NOISE['cold']:.0%} (cold) "
-            f"and ±{NOISE['warm']:.0%} (warm, no-op) are runner noise; larger "
-            "ones are in bold."
+            f"and ±{NOISE['warm']:.0%} (warm, no-op), or of {FLOOR:.2f} s at most, "
+            "are runner noise; larger ones are in bold."
         ),
     ]
     print("\n".join(lines))
