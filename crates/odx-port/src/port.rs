@@ -642,6 +642,19 @@ mod tests {
                 .unwrap_err()
                 .contains("dir.json")
         );
+        std::fs::remove_dir_all(work.join(".oca/oca-port/blacklist/dir.json")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let dir = work.join(".oca/oca-port/blacklist");
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+            assert!(
+                tree.blacklist("readonly", &[entry("OCA/x#3", "r")])
+                    .unwrap_err()
+                    .contains("readonly.json")
+            );
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         std::fs::remove_dir_all(work.join(".oca")).unwrap();
         std::fs::write(work.join(".oca"), "").unwrap();
         assert!(
