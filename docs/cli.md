@@ -168,6 +168,7 @@ the interval, the last sync and the cache size; `odx doctor` reports it too.
 
 `odx daemon run` syncs on the same interval and watches the registered
 workspaces in between: when a `pyproject.toml` or `odx.lock` of one changes
+(the lockfile at its default path, not a `lockfile` set elsewhere)
 (or a workspace is registered or unregistered), the next sync starts once
 the change has settled, a few seconds later. It looks at the files' times
 every two seconds rather than through the operating system's file events,
@@ -1141,7 +1142,9 @@ per path, and the output and the commit message say so loudly.
 `repo`, else `--remote`) and opens a pull request into the environment's
 branch, with every addon and its pin on both sides in the description. The
 description and the commit message end with the changelog of the target's
-`odx.lock`, as `odx changelog` writes it (*Release notes*). The
+`odx.lock`, as `odx changelog` writes it (*Release notes*), when the
+promotion changes it (a package or the core; addons alone leave it as it
+is). The
 branch is odx's: writing it again replaces it. Approvals stay with the
 forge's branch protection.
 
