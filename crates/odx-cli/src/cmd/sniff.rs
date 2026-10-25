@@ -45,6 +45,19 @@ pub(crate) fn sniff_range(
     new: &str,
     path: Option<&str>,
 ) -> Result<Vec<AddonChange>, GitError> {
+    let files = merger.changed_files(repo, old, new, path)?;
+    Ok(sniff_files(merger, repo, old, new, &files))
+}
+
+/// The migration scripts and manifest version changes among `files`, the
+/// files that differ between `old` and `new` in `repo`.
+pub(crate) fn sniff_files(
+    merger: &Merger,
+    repo: &Path,
+    old: &str,
+    new: &str,
+    files: &[(char, String)],
+) -> Vec<AddonChange> {
     let mut scripts = Vec::new();
     let mut versions = BTreeMap::new();
     let version = |rev: &str, path: &str| {
@@ -53,16 +66,16 @@ pub(crate) fn sniff_range(
             .as_deref()
             .and_then(manifest_version)
     };
-    for (status, file) in merger.changed_files(repo, old, new, path)? {
+    for (status, file) in files {
         let change = match status {
             'A' => Change::Added,
             'M' => Change::Modified,
             _ => continue,
         };
-        if let Some(addon) = manifest_addon(&file) {
-            versions.insert(addon.to_owned(), (version(old, &file), version(new, &file)));
+        if let Some(addon) = manifest_addon(file) {
+            versions.insert(addon.to_owned(), (version(old, file), version(new, file)));
         }
-        scripts.extend(script(&file, change));
+        scripts.extend(script(file, change));
     }
     // Addons that gained scripts without a manifest change: show their
     // (unchanged) version.
@@ -72,7 +85,7 @@ pub(crate) fn sniff_range(
             versions.insert(found.addon.clone(), (current.clone(), current));
         }
     }
-    Ok(addon_changes(scripts, &versions))
+    addon_changes(scripts, &versions)
 }
 
 /// The text block of `sniffed`: one line per addon and per script.

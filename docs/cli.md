@@ -1584,6 +1584,35 @@ the notes are still written.
 `--since` defaults to `HEAD`; without `--to`, the later state is the file in
 the working tree.
 
+## Schema changes
+
+```console
+$ odx diff                               # odx.lock in the working tree against HEAD
+$ odx diff --since v1.4 --to v1.5        # between two committed states
+```
+
+`odx diff` takes the same two states of `odx.lock` as `odx changelog` and
+reports, per repository and package and per addon, what is likely to touch
+the database on the next update: models created or no longer created,
+fields added, removed or of another type (`Many2one(res.partner)` to
+`Many2one(res.users)`), new or dropped `_inherit` and `_inherits` parents,
+and access rights (`ir.model.access`) added or removed. The addon's version
+change and the migration scripts it brings in are listed with it, and new
+or removed addons are named as such:
+
+```text
+schema changes in pos (repository):
+  pos_new: new addon (1 models, 1 fields)
+  pos_x 17.0.1.1.0 (was 17.0.1.0.0)
+    + field pos.order.total: Float
+    pre  added    pos_x/migrations/17.0.1.1.0/pre-migrate.py
+```
+
+The models are read with odoo-lint's index from both versions of each
+changed addon, extracted from the cache; this is static analysis, so a
+field built dynamically is not seen. A repository or package the cache
+cannot compare is a warning. `--json` gives the same per addon.
+
 ## Checking the setup
 
 ```console
