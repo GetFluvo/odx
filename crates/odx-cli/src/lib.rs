@@ -150,6 +150,9 @@ fn execute(
         Command::Build(args) => cmd::build::run_build(args, &cli.global, ctx).emit(out, err),
         Command::Vendor(args) => cmd::vendor::run_vendor(args, &cli.global, ctx).emit(out, err),
         Command::Sniff(args) => cmd::sniff::run_sniff(args, &cli.global, ctx).emit(out, err),
+        Command::Changelog(args) => {
+            cmd::changelog::run_changelog(args, &cli.global, ctx).emit(out, err)
+        }
         Command::Stats(args) => cmd::stats::run_stats(args, &cli.global, ctx).emit(out, err),
         Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),
         Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),

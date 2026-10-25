@@ -1561,6 +1561,29 @@ every repository it builds; `[tool.odx.sniff] fail_on_new = true` (or
 `--fail-on-new`) turns any script into a failure. The commits must be in the
 cache, which `odx aggregate` and `odx lock` take care of.
 
+## Release notes
+
+```console
+$ odx changelog                          # odx.lock in the working tree against HEAD
+$ odx changelog --since v1.4             # what changed since a release
+$ odx changelog --since v1.4 --to v1.5   # between two committed states
+$ odx --json changelog --since main      # the same, for scripts
+```
+
+`odx changelog` compares two states of `odx.lock` and writes Markdown
+release notes: the Odoo core revision, then per repository its URL, its base
+and its merges, then per package its source and commit. A merge or package
+is added, removed or updated (another commit of the same pull request,
+branch, commit or tag, with the number of commits when the cache has both);
+a merge whose lock-time status changed (merged, skipped, pinned) says so.
+Pull requests link to their page on the forge. The migration scripts the
+change brings in follow under *Migrations*, as `odx sniff --since` reports
+them; when the cache lacks a commit, that part is a warning and the rest of
+the notes are still written.
+
+`--since` defaults to `HEAD`; without `--to`, the later state is the file in
+the working tree.
+
 ## Checking the setup
 
 ```console
