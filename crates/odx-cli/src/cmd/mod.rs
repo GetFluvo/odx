@@ -28,6 +28,7 @@ pub(crate) mod daemon;
 pub(crate) mod dashboard;
 pub(crate) mod deps;
 pub(crate) mod dev;
+pub(crate) mod diff;
 pub(crate) mod doctor;
 pub(crate) mod edit;
 pub(crate) mod env;

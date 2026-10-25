@@ -126,6 +126,8 @@ pub enum Command {
     Sniff(SniffArgs),
     /// Release notes between two states of odx.lock: merges, packages, Odoo and migrations.
     Changelog(ChangelogArgs),
+    /// Changes between two states of odx.lock likely to affect the database schema.
+    Diff(DiffArgs),
     /// Lines of code per language.
     Stats(StatsArgs),
     /// Module availability and code readiness for the next Odoo series.
@@ -319,6 +321,18 @@ pub struct SniffArgs {
 /// Arguments of `odx changelog`.
 #[derive(Debug, Args)]
 pub struct ChangelogArgs {
+    /// The earlier state: odx.lock as committed at this git revision.
+    #[arg(long, value_name = "REV", default_value = "HEAD")]
+    pub since: String,
+    /// The later state: odx.lock as committed at this git revision instead
+    /// of the file in the working tree.
+    #[arg(long, value_name = "REV")]
+    pub to: Option<String>,
+}
+
+/// Arguments of `odx diff`.
+#[derive(Debug, Args)]
+pub struct DiffArgs {
     /// The earlier state: odx.lock as committed at this git revision.
     #[arg(long, value_name = "REV", default_value = "HEAD")]
     pub since: String,
@@ -1283,6 +1297,7 @@ impl Command {
             Self::CheckDeps(_) => "check-deps",
             Self::Sniff(_) => "sniff",
             Self::Changelog(_) => "changelog",
+            Self::Diff(_) => "diff",
             Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
             Self::Port(_) => "port",
@@ -1324,7 +1339,7 @@ impl Command {
             Self::Lint(_) => 9,
             Self::Promote(_) | Self::Env(_) => 10,
             Self::Bot(_) => 11,
-            Self::Changelog(_) => 12,
+            Self::Changelog(_) | Self::Diff(_) => 12,
         }
     }
 }

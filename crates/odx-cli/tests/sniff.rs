@@ -1,5 +1,5 @@
-//! `odx sniff`, the migration report at the end of `odx aggregate`, and
-//! `odx changelog`.
+//! `odx sniff`, the migration report at the end of `odx aggregate`,
+//! `odx changelog` and `odx diff`.
 
 #![expect(clippy::unwrap_used, reason = "test helpers should fail loudly")]
 
@@ -418,5 +418,65 @@ fn changelog_between_lockfile_states() {
     assert!(err.contains("odx.lock is missing; run `odx lock`"), "{err}");
     let elsewhere = project.tmp.path().join("up").display().to_string();
     let (exit, _, err) = project.odx(&["-C", &elsewhere, "changelog"]);
+    assert_eq!(exit, Exit::Usage, "{err}");
+}
+
+#[test]
+fn diff_between_lockfile_states() {
+    let project = Project::new("");
+    project.odx(&["aggregate"]);
+    project.commit();
+    let committed = std::fs::read_to_string(project.root.join("odx.lock")).unwrap();
+    project.configure("", "{ pr = 1 }, { pr = 2 }");
+    let (exit, out, _) = project.odx(&["aggregate"]);
+    assert_eq!(exit, Exit::Success, "{out}");
+    let (exit, out, err) = project.odx(&["diff"]);
+    assert_eq!(
+        (exit, out.as_str(), err.as_str()),
+        (
+            Exit::Success,
+            "schema changes in pos (repository):\n  \
+             pos_x 17.0.1.1.0\n    pre  modified pos_x/migrations/17.0.1.1.0/pre-migrate.py\n  \
+             pos_y 17.0.1.0.1\n    post added    pos_y/migrations/17.0.1.0.1/post-y.py\n",
+            ""
+        )
+    );
+    let (_, out, _) = project.odx(&["--json", "diff"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["to"], "working tree");
+    assert_eq!(value["sources"][0]["addons"][1]["addon"], "pos_y");
+    let (exit, out, _) = project.odx(&["diff", "--to", "HEAD"]);
+    assert_eq!((exit, out.as_str()), (Exit::Success, "no schema changes\n"));
+
+    // A result the cache does not have.
+    let tree = committed
+        .lines()
+        .find_map(|line| line.strip_prefix("result_tree = \""))
+        .unwrap()
+        .trim_end_matches('"')
+        .to_owned();
+    write(
+        &project.root.join("odx.lock"),
+        &committed.replace(&tree, &"d".repeat(40)),
+    );
+    let (exit, out, err) = project.odx(&["diff"]);
+    assert_eq!((exit, out.as_str()), (Exit::Success, "no schema changes\n"));
+    assert!(
+        err.starts_with("warning: diff: pos: cannot compare"),
+        "{err}"
+    );
+
+    // No scratch folder in the cache.
+    let scratch = project.tmp.path().join("cache/scratch");
+    std::fs::remove_dir_all(&scratch).unwrap();
+    write(&scratch, "");
+    let (exit, _, err) = project.odx(&["diff"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("scratch"), "{err}");
+    let (exit, _, err) = project.odx(&["diff", "--since", "nope"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(err.contains("cannot read odx.lock at nope"), "{err}");
+    let elsewhere = project.tmp.path().join("up").display().to_string();
+    let (exit, _, err) = project.odx(&["-C", &elsewhere, "diff"]);
     assert_eq!(exit, Exit::Usage, "{err}");
 }

@@ -13,7 +13,7 @@ use odx_forge::{ForgeKind, RepoUrl};
 use odx_git::Merger;
 
 use super::Report;
-use super::aggregate::prepare;
+use super::aggregate::{Prepared, prepare};
 use super::sniff::{describe, previous_lock, since, to_json};
 use crate::Context;
 use crate::cli::{ChangelogArgs, GlobalArgs};
@@ -403,6 +403,34 @@ fn markdown(title: &str, sections: &[Section], migrations: &str) -> String {
     out
 }
 
+/// `odx.lock` as committed at `since`, and at `to` or in the working tree,
+/// with the name of the later state.
+pub(crate) fn states(
+    prepared: &mut Prepared,
+    since: &str,
+    to: Option<&str>,
+) -> Result<(Lockfile, Lockfile, String), Report> {
+    let root = &prepared.project.root;
+    let old = previous_lock(root, &prepared.lock_path, since)?;
+    if let Some(rev) = to {
+        return Ok((
+            old,
+            previous_lock(root, &prepared.lock_path, rev)?,
+            rev.to_owned(),
+        ));
+    }
+    let lock = prepared.lock.take().ok_or_else(|| {
+        Report::error(
+            Exit::Failure,
+            format!(
+                "{} is missing; run `odx lock`",
+                prepared.lock_path.display()
+            ),
+        )
+    })?;
+    Ok((old, lock, "working tree".to_owned()))
+}
+
 /// `odx changelog [--since REV] [--to REV]`.
 pub(crate) fn run_changelog(
     args: &ChangelogArgs,
@@ -417,23 +445,8 @@ fn changelog(
     global: &GlobalArgs,
     ctx: &Context<'_>,
 ) -> Result<Report, Report> {
-    let prepared = prepare(global, ctx)?;
-    let root = &prepared.project.root;
-    let old = previous_lock(root, &prepared.lock_path, &args.since)?;
-    let (new, to) = if let Some(rev) = &args.to {
-        (previous_lock(root, &prepared.lock_path, rev)?, rev.clone())
-    } else {
-        let lock = prepared.lock.ok_or_else(|| {
-            Report::error(
-                Exit::Failure,
-                format!(
-                    "{} is missing; run `odx lock`",
-                    prepared.lock_path.display()
-                ),
-            )
-        })?;
-        (lock, "working tree".to_owned())
-    };
+    let mut prepared = prepare(global, ctx)?;
+    let (old, new, to) = states(&mut prepared, &args.since, args.to.as_deref())?;
     let merger = Merger::new(Arc::new(OsRunner));
     let cache = &prepared.cache;
     let count = |url: &str, from: &str, to: &str| merger.count(&cache.repo_dir(url), from, to);
