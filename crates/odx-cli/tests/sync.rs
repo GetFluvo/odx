@@ -198,7 +198,7 @@ fn sync_failures() {
     let a = machine.workspace("a");
     // Not a workspace.
     let (exit, out, _) = machine.odx(&a, &["sync", "--workspace", "../nowhere"]);
-    assert_eq!(exit, Exit::Failure);
+    assert_eq!(exit, Exit::Failure, "{out}");
     assert!(out.starts_with("failed "), "{out}");
     let (exit, _, err) = machine.odx(&a, &["sync", "--max-duration", "soon"]);
     assert_eq!(exit, Exit::Usage);
@@ -226,7 +226,7 @@ fn sync_failures() {
     let b = machine.workspace("b");
     std::fs::remove_dir_all(machine.tmp.path().join("up-b")).unwrap();
     let (exit, out, _) = machine.odx(&b, &["sync"]);
-    assert_eq!(exit, Exit::Failure);
+    assert_eq!(exit, Exit::Failure, "{out}");
     assert!(out.starts_with("failed "), "{out}");
     let pyproject = std::fs::read_to_string(a.join("pyproject.toml")).unwrap();
     std::fs::write(
@@ -239,7 +239,7 @@ fn sync_failures() {
     )
     .unwrap();
     let (exit, out, _) = machine.odx(&a, &["sync"]);
-    assert_eq!(exit, Exit::Failure);
+    assert_eq!(exit, Exit::Failure, "{out}");
     assert!(
         out.contains("; dashboard: migration_commit_patterns"),
         "{out}"
@@ -401,7 +401,7 @@ fn sync_prefetches_the_wheels_vendor_installs() {
     std::fs::write(a.join("pyproject.toml"), &with_groups).unwrap();
     // No uv.lock yet: the wheels cannot be planned.
     let (exit, out, _) = machine.odx(&a, &["sync"]);
-    assert_eq!(exit, Exit::Failure);
+    assert_eq!(exit, Exit::Failure, "{out}");
     assert!(out.contains("; wheels: "), "{out}");
     // One package from an index, one from git (which odx fetches as a
     // repository, not as a wheel).
@@ -414,7 +414,7 @@ fn sync_prefetches_the_wheels_vendor_installs() {
     };
     std::fs::write(a.join("uv.lock"), uv_lock("00")).unwrap();
     let (exit, out, _) = machine.odx(&a, &["sync"]);
-    assert_eq!(exit, Exit::Failure);
+    assert_eq!(exit, Exit::Failure, "{out}");
     assert!(out.contains("; wheels: "), "{out}");
     std::fs::write(a.join("uv.lock"), uv_lock(&hash)).unwrap();
     let (exit, out, _) = machine.odx(&a, &["sync"]);

@@ -313,20 +313,27 @@ pub(crate) fn run_forever(
     };
     // The registered workspaces, `[workspaces]` of the user configuration.
     let registered = || {
-        load_user_config(ctx.fs, ctx.env)
-            .map(|user| {
-                user.workspaces
-                    .keys()
-                    .map(PathBuf::from)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+        load_user_config(ctx.fs, ctx.env).map(|user| {
+            user.workspaces
+                .keys()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        })
     };
-    let mut seen = stamps(&registered());
+    let mut seen = stamps(&registered().unwrap_or_default());
+    // A configuration read while it is being written is not a change: the
+    // stamps stay those of the last configuration read.
+    let mut last = seen.clone();
+    let mut look = || {
+        if let Ok(workspaces) = registered() {
+            last = stamps(&workspaces);
+        }
+        last.clone()
+    };
     loop {
         run_sync(&all, global, ctx).emit(out, err)?;
         out.flush()?;
-        if wait(pause, TICK, &mut seen, &mut || stamps(&registered())) {
+        if wait(pause, TICK, &mut seen, &mut look) {
             writeln!(out, "a workspace changed: syncing early")?;
         }
     }
