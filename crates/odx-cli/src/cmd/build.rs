@@ -168,7 +168,7 @@ fn targets(
             .repositories
             .iter()
             .find(|configured| configured.name.as_deref().unwrap_or(&configured.url) == entry.name)
-            .and_then(|configured| configured.addons.clone())
+            .and_then(|configured| configured.addons.as_deref())
             .unwrap_or_default();
         let Ok(dirs) = merger.dirs(&repo, &entry.result_tree) else {
             failures.push(format!(

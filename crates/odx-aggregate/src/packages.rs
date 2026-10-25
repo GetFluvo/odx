@@ -83,7 +83,7 @@ pub fn package_fetch_plans(
 /// Packages that were not fetched are returned by name.
 pub fn package_entries(
     specs: &[PackageSpec],
-    fetched: &[(String, Vec<Fetched>)],
+    fetched: &[(&str, &[Fetched])],
     locked: &BTreeMap<String, LockedPackage>,
 ) -> (BTreeMap<String, LockedPackage>, Vec<String>) {
     let mut entries = BTreeMap::new();
@@ -98,7 +98,7 @@ pub fn package_entries(
         let sha = fetched
             .iter()
             .filter(|(url, _)| repo_key(url) == key)
-            .flat_map(|(_, commits)| commits)
+            .flat_map(|(_, commits)| commits.iter())
             .find(|f| f.remote.is_none() && f.source == wanted)
             .map(|f| f.sha.clone());
         let Some(sha) = sha else {
@@ -292,7 +292,7 @@ mod tests {
                 fetched(Source::Commit("b".repeat(40)), &"b".repeat(40)),
             ],
         )];
-        let (entries, missing) = package_entries(&specs[..3], &commits, &locked);
+        let (entries, missing) = package_entries(&specs[..3], &crate::borrowed(&commits), &locked);
         assert_eq!(missing, ["odoo-addon-c"]);
         assert_eq!(entries["odoo-addon-a"].sha, "a1");
         assert_eq!(entries["odoo-addon-a"].mirror_ref, None);

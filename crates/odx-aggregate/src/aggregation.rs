@@ -44,7 +44,7 @@ fn sha_of<'a>(fetched: &'a [Fetched], wanted: &PlannedSource) -> Option<&'a str>
 pub fn aggregations(
     planned: &[Planned],
     cache: &Cache,
-    fetched: &[(String, Vec<Fetched>)],
+    fetched: &[(&str, &[Fetched])],
     options: &BuildOptions,
 ) -> Vec<Result<RepoAggregation, PlanError>> {
     planned
@@ -55,7 +55,7 @@ pub fn aggregations(
             let commits = fetched
                 .iter()
                 .find(|(url, _)| repo_key(url) == key)
-                .map(|(_, commits)| commits.as_slice())
+                .map(|(_, commits)| *commits)
                 .ok_or_else(not_fetched)?;
             let base = sha_of(commits, &repo.base).ok_or_else(not_fetched)?;
             let steps = repo
@@ -146,7 +146,7 @@ mod tests {
         let result = aggregations(
             &plan_config(&config, Path::new("/p"), None).unwrap(),
             &cache,
-            &commits(),
+            &crate::borrowed(&commits()),
             &options,
         );
         let repo = result[0].as_ref().unwrap();
@@ -183,7 +183,7 @@ mod tests {
         let result = aggregations(
             &plan_config(&config, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
-            &commits(),
+            &crate::borrowed(&commits()),
             &BuildOptions::default(),
         );
         let pos = result[0].as_ref().unwrap();
@@ -198,7 +198,7 @@ mod tests {
         let only = aggregations(
             &plan_config(&config, Path::new("/p"), Some("web")).unwrap(),
             &Cache::new("/c"),
-            &commits(),
+            &crate::borrowed(&commits()),
             &BuildOptions::default(),
         );
         assert_eq!(only.len(), 1);
@@ -212,7 +212,7 @@ mod tests {
         let result = aggregations(
             &plan_config(&config, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
-            &commits(),
+            &crate::borrowed(&commits()),
             &BuildOptions::default(),
         );
         assert_eq!(
@@ -229,7 +229,7 @@ mod tests {
         let result = aggregations(
             &plan_config(&missing, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
-            &commits(),
+            &crate::borrowed(&commits()),
             &BuildOptions::default(),
         );
         assert_eq!(result[0], Err(PlanError::NotFetched("pos".into())));
@@ -239,7 +239,7 @@ mod tests {
         let result = aggregations(
             &plan_config(&no_base, Path::new("/p"), None).unwrap(),
             &Cache::new("/c"),
-            &commits(),
+            &crate::borrowed(&commits()),
             &BuildOptions::default(),
         );
         assert_eq!(result[0], Err(PlanError::NotFetched("pos".into())));

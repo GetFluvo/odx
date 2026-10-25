@@ -4,8 +4,6 @@
 //! booleans, `None`, lists, tuples and nested dicts, with comments and
 //! implicit string concatenation.
 
-use std::collections::BTreeMap;
-
 /// A Python literal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
@@ -31,7 +29,7 @@ impl Value {
         };
         items
             .iter()
-            .find(|(k, _)| *k == Self::Str(key.to_owned()))
+            .find(|(k, _)| matches!(k, Self::Str(name) if name == key))
             .map(|(_, value)| value)
     }
 
@@ -432,8 +430,10 @@ pub fn python_requirement(entry: &str) -> (String, String) {
         .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
         .unwrap_or(entry.len());
     let (name, rest) = entry.split_at(end);
-    let mapped: BTreeMap<&str, &str> = IMPORT_TO_DISTRIBUTION.iter().copied().collect();
-    let name = mapped.get(name).copied().unwrap_or(name);
+    let name = IMPORT_TO_DISTRIBUTION
+        .iter()
+        .find(|(import, _)| *import == name)
+        .map_or(name, |(_, distribution)| distribution);
     let specifier = rest
         .split(';')
         .next()

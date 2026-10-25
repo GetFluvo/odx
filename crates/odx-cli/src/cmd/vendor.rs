@@ -185,7 +185,7 @@ fn vendor_items(
             ),
         )
     })?;
-    let lock = prepared.lock.clone().unwrap_or_default();
+    let lock = prepared.lock_or_default();
     let git_source = |dist: &str| {
         lock.packages
             .iter()
@@ -602,7 +602,7 @@ fn shipped_addon_dirs(prepared: &Prepared) -> Vec<PathBuf> {
     // The configuration was validated when it was loaded.
     let planned = plan_config(config, root, None).unwrap_or_default();
     for (repo, configured) in planned.iter().zip(&config.repositories) {
-        let patterns = configured.addons.clone().unwrap_or_default();
+        let patterns = configured.addons.as_deref().unwrap_or_default();
         dirs.extend(addon_dirs(&repo.target_dir).into_iter().filter(|addon| {
             let name = addon
                 .file_name()

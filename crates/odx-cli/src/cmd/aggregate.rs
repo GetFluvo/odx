@@ -1,6 +1,7 @@
 //! `odx aggregate` and `odx lock`: fill the git cache, build the working
 //! trees and keep `odx.lock` current.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -87,6 +88,13 @@ pub(crate) struct Prepared {
 impl Prepared {
     pub(crate) fn locked(&self) -> &[LockedRepository] {
         self.lock.as_ref().map_or(&[], |lock| &lock.repositories)
+    }
+
+    /// The lockfile, empty when there is none, borrowed when there is.
+    pub(crate) fn lock_or_default(&self) -> Cow<'_, Lockfile> {
+        self.lock
+            .as_ref()
+            .map_or_else(|| Cow::Owned(Lockfile::default()), Cow::Borrowed)
     }
 }
 
@@ -235,9 +243,14 @@ fn build(
     let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::new(OsRunner)));
     let aggregated = std::cell::RefCell::new(Vec::new());
     let plan_builds = |outcomes: &[Outcome]| {
-        let fetched: Vec<(String, Vec<Fetched>)> = outcomes
+        let fetched: Vec<(&str, &[Fetched])> = outcomes
             .iter()
-            .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+            .filter_map(|o| {
+                o.result
+                    .as_ref()
+                    .ok()
+                    .map(|f| (o.url.as_str(), f.as_slice()))
+            })
             .collect();
         let repos = aggregations(planned, &prepared.cache, &fetched, options);
         let runnable: Vec<Aggregation> = repos
@@ -439,15 +452,15 @@ fn aggregate(
             )
         })
         .collect();
-    let mut locked = prepared.locked().to_vec();
+    let mut locked = Cow::Borrowed(prepared.locked());
     if !args.fetch_only && !args.locked {
         let (entries, failures) = lock_entries(&planned, &built, &merger);
         summary.failures.extend(failures);
-        locked.clone_from(&entries);
+        locked = Cow::Owned(entries.clone());
         let lock = next_lock(&prepared, entries, args.repo.as_deref());
-        let previous = prepared.lock.clone().unwrap_or_default();
+        let previous = prepared.lock_or_default();
         summary.changes = lock_changes(&previous, &lock);
-        if previous != lock {
+        if *previous != lock {
             write_lock(ctx, &prepared, &lock)?;
         }
     }
@@ -522,10 +535,15 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     let kept = if args.update && prepared.lock.is_some() {
         // Resolve the heads first: the guard rail decides which to adopt.
         let resolved = build(&prepared, &planned, &options, None, true, None);
-        let fetched: Vec<(String, Vec<Fetched>)> = resolved
+        let fetched: Vec<(&str, &[Fetched])> = resolved
             .outcomes
             .iter()
-            .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+            .filter_map(|o| {
+                o.result
+                    .as_ref()
+                    .ok()
+                    .map(|f| (o.url.as_str(), f.as_slice()))
+            })
             .collect();
         guard(
             ctx,
@@ -559,9 +577,9 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     } else {
         None
     };
-    let previous = prepared.lock.clone().unwrap_or_default();
+    let previous = prepared.lock_or_default();
     summary.changes = lock_changes(&previous, &lock);
-    let outdated = previous != lock;
+    let outdated = *previous != lock;
     if args.check {
         if outdated {
             summary.failures.push(format!(
@@ -587,7 +605,7 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         if let Some(dir) = &args.bundle {
             bundle_lock(&prepared, &lock, &ctx.dir.join(dir), &mut summary);
         }
-        if previous != lock {
+        if *previous != lock {
             write_lock(ctx, &prepared, &lock)?;
         }
         return Ok(summary.report(global.json, false, warnings));
@@ -699,12 +717,9 @@ fn lock_packages(
     // The text was read and validated when the project was loaded.
     let edit = PyprojectEdit::parse(&prepared.project.text).unwrap_or_default();
     let doc = edit.document();
-    let previous = prepared.lock.clone().unwrap_or_default();
-    let pinned = if update {
-        BTreeMap::new()
-    } else {
-        previous.packages.clone()
-    };
+    let previous = prepared.lock_or_default();
+    let none = BTreeMap::new();
+    let pinned = if update { &none } else { &previous.packages };
     let (specs, problems) = package_specs(doc, &prepared.project.config, &previous.packages);
     warnings.extend(problems);
     let vault = prepared
@@ -713,15 +728,20 @@ fn lock_packages(
         .mirror
         .as_ref()
         .map(|m| m.url.as_str());
-    let mut plans = package_fetch_plans(&specs, &pinned, vault);
+    let mut plans = package_fetch_plans(&specs, pinned, vault);
     for plan in &mut plans {
         plan.clone = prepared.clones.find(&plan.url).cloned();
     }
     let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::new(OsRunner)));
     let outcomes = run_fetches(&prepared.cache, &backend, plans, prepared.limits);
-    let fetched: Vec<(String, Vec<Fetched>)> = outcomes
+    let fetched: Vec<(&str, &[Fetched])> = outcomes
         .iter()
-        .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+        .filter_map(|o| {
+            o.result
+                .as_ref()
+                .ok()
+                .map(|f| (o.url.as_str(), f.as_slice()))
+        })
         .collect();
     summary.failures.extend(outcomes.iter().filter_map(|o| {
         o.result
@@ -729,7 +749,7 @@ fn lock_packages(
             .err()
             .map(|e| format!("packages from {}: {e}", o.url))
     }));
-    let (entries, missing) = package_entries(&specs, &fetched, &pinned);
+    let (entries, missing) = package_entries(&specs, &fetched, pinned);
     summary
         .failures
         .extend(missing.iter().map(|dist| format!("{dist}: not resolved")));
@@ -854,7 +874,7 @@ fn guard(
     ctx: &Context<'_>,
     prepared: &Prepared,
     planned: &mut [Planned],
-    fetched: &[(String, Vec<Fetched>)],
+    fetched: &[(&str, &[Fetched])],
     follow: &[String],
     merger: &Merger,
     warnings: &mut Vec<odx_config::Problem>,
@@ -867,14 +887,12 @@ fn guard(
         fetched
             .iter()
             .find(|(url, _)| repo_key(url) == key)
-            .and_then(|(_, commits)| {
-                sha_of(commits, &repo.base).map(|base| (repo, commits.as_slice(), base))
-            })
+            .and_then(|(_, commits)| sha_of(commits, &repo.base).map(|base| (repo, *commits, base)))
     });
     for (repo, commits, base) in resolved {
-        let entry = locked_entry(repo, prepared.locked()).cloned();
+        let entry = locked_entry(repo, prepared.locked());
         let cache = prepared.cache.repo_dir(&repo.url);
-        let locked_merges = entry.as_ref().map_or(&[][..], |e| e.merges.as_slice());
+        let locked_merges = entry.map_or(&[][..], |e| e.merges.as_slice());
         repo.base.source = odx_git::Source::Commit(base.clone());
         let steps = repo
             .steps

@@ -186,7 +186,7 @@ pub(crate) fn run_sniff(args: &SniffArgs, global: &GlobalArgs, ctx: &Context<'_>
 
 fn sniff(args: &SniffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
-    let Some(lock) = prepared.lock.clone() else {
+    let Some(lock) = &prepared.lock else {
         return Err(Report::error(
             Exit::Failure,
             format!(
@@ -204,7 +204,7 @@ fn sniff(args: &SniffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Rep
         }
         Some(rev) => {
             let previous = previous_lock(&prepared.project.root, &prepared.lock_path, rev)?;
-            since(&merger, &prepared.cache, &previous, &lock, &mut problems)
+            since(&merger, &prepared.cache, &previous, lock, &mut problems)
         }
     };
     let scripts = script_count(&sniffed);

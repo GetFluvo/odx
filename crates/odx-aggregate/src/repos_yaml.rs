@@ -191,7 +191,7 @@ mod tests {
         let built = crate::aggregations(
             &plan_yaml(&file.repos, Path::new("/w")),
             &cache,
-            &fetched,
+            &crate::borrowed(&fetched),
             &options,
         );
         let pos = built[0].as_ref().unwrap();

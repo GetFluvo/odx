@@ -257,9 +257,14 @@ fn prepare_and_run(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<Vec<Bu
     let merger = Arc::new(Merger::new(runner));
     let planned = RefCell::new(Vec::new());
     let build = |outcomes: &[Outcome]| {
-        let fetched: Vec<(String, Vec<Fetched>)> = outcomes
+        let fetched: Vec<(&str, &[Fetched])> = outcomes
             .iter()
-            .filter_map(|o| o.result.as_ref().ok().map(|f| (o.url.clone(), f.clone())))
+            .filter_map(|o| {
+                o.result
+                    .as_ref()
+                    .ok()
+                    .map(|f| (o.url.as_str(), f.as_slice()))
+            })
             .collect();
         let repos = aggregations(&to_build, &cache, &fetched, &options);
         let runnable: Vec<Aggregation> = repos

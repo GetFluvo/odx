@@ -145,6 +145,17 @@ pub fn fetch_plans(
     plans
 }
 
+/// `fetched` as the builders take it.
+#[cfg(test)]
+pub(crate) fn borrowed(
+    fetched: &[(String, Vec<odx_git::Fetched>)],
+) -> Vec<(&str, &[odx_git::Fetched])> {
+    fetched
+        .iter()
+        .map(|(url, commits)| (url.as_str(), commits.as_slice()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

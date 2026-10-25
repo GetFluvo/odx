@@ -118,6 +118,9 @@ pub(crate) fn candidates(
         .var("ODX_PYPI_URL")
         .unwrap_or_else(|| "https://pypi.org/pypi".to_owned());
     let (mut updated, mut review) = (Vec::new(), Vec::new());
+    // One client for every package: each new one starts a runtime and
+    // shakes hands anew.
+    let http = ReqwestHttp::new();
     for package in uv_lock.packages.iter().filter(|package| {
         let name = normalize_name(&package.name);
         package.source.registry.is_some()
@@ -126,9 +129,11 @@ pub(crate) fn candidates(
             && matches_any(&name, &policy.allow)
             && !matches_any(&name, &policy.deny)
     }) {
-        let checked = ReqwestHttp::new()
+        let checked = http
+            .as_ref()
+            .map_err(Clone::clone)
             .map_err(download_error(&index))
-            .and_then(|http| check(&http, &index, prepared, package, &policy));
+            .and_then(|http| check(http, &index, prepared, package, &policy));
         match checked {
             Ok(Some(update)) if update.reason.is_empty() => updated.push(update),
             Ok(Some(update)) => review.push(update),

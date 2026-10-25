@@ -1,3 +1,4 @@
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use odx_core::{Env, Invocation, ProcessRunner};
@@ -149,6 +150,9 @@ pub struct ForgeClient<'a> {
     env: &'a dyn Env,
     runner: &'a dyn ProcessRunner,
     sleep: &'a dyn Fn(Duration),
+    /// The token of each host and kind, looked up once: a lookup may run
+    /// `gh auth token` or open the keyring.
+    tokens: Mutex<Vec<(String, ForgeKind, Option<String>)>>,
 }
 
 impl std::fmt::Debug for ForgeClient<'_> {
@@ -172,14 +176,29 @@ impl<'a> ForgeClient<'a> {
             env,
             runner,
             sleep,
+            tokens: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The token for `repo`, looked up on first use.
+    fn token(&self, repo: &RepoUrl, kind: ForgeKind) -> Option<String> {
+        let mut known = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, _, token)) = known
+            .iter()
+            .find(|(host, of, _)| *host == repo.host && *of == kind)
+        {
+            return token.clone();
+        }
+        let found = token(&repo.host, kind, self.env, self.runner);
+        known.push((repo.host.clone(), kind, found.clone()));
+        found
     }
 
     /// GET with the forge's authentication, waiting out rate limits.
     /// The forge's authentication and API headers for `repo`.
     pub(crate) fn headers(&self, repo: &RepoUrl, kind: ForgeKind) -> Vec<(&'static str, String)> {
         let mut headers: Vec<(&str, String)> = Vec::new();
-        if let Some(token) = token(&repo.host, kind, self.env, self.runner) {
+        if let Some(token) = self.token(repo, kind) {
             headers.push((
                 "authorization",
                 match kind {
@@ -345,7 +364,6 @@ mod tests {
     use crate::testing::{Scripted, reply};
     use odx_core::Output;
     use odx_core::fake::{MapEnv, ScriptedRunner};
-    use std::sync::Mutex;
 
     fn limited(status: u16, headers: &[(&str, &str)]) -> HttpResponse {
         HttpResponse {
@@ -428,6 +446,28 @@ mod tests {
         );
         assert_eq!(token("gitlab.com", ForgeKind::Gitlab, &empty, &gh), None);
         assert_eq!(gh.invocations().len(), 4, "gh is only asked for GitHub");
+    }
+
+    #[test]
+    fn a_client_looks_a_token_up_once() {
+        let empty = MapEnv::default();
+        let gh = ScriptedRunner::default();
+        gh.push(Ok(Output {
+            status: Some(0),
+            stdout: b"from-gh\n".to_vec(),
+            ..Output::default()
+        }));
+        let http = Scripted::new(Vec::new());
+        let client = ForgeClient::new(&http, &empty, &gh, &no_sleep);
+        let github = repo("https://github.com/OCA/pos.git");
+        for _ in 0..3 {
+            assert!(
+                client
+                    .headers(&github, ForgeKind::Github)
+                    .contains(&("authorization", "Bearer from-gh".to_owned()))
+            );
+        }
+        assert_eq!(gh.invocations().len(), 1);
     }
 
     #[test]
