@@ -87,6 +87,8 @@ pub struct OdxConfig {
     pub sniff: Option<Sniff>,
     /// `odx check-deps`.
     pub check_deps: Option<CheckDeps>,
+    /// `odx glue`.
+    pub glue: Option<Glue>,
 }
 
 impl OdxConfig {
@@ -797,6 +799,15 @@ pub struct CheckDeps {
     /// Addons the platform provides beyond Odoo's community addons (for
     /// example enterprise addons), counted as available.
     pub provided: Option<Vec<String>>,
+}
+
+/// `[tool.odx.glue]`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Glue {
+    /// Glue addons the project does not want, each with why.
+    #[serde(default)]
+    pub ignore: BTreeMap<String, String>,
 }
 
 #[cfg(test)]

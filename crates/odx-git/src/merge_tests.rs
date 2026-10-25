@@ -932,3 +932,46 @@ fn addons_are_directories_with_a_manifest() {
     );
     assert!(merger().addons(&fx.cache, "nope").is_err());
 }
+
+#[test]
+fn manifests_are_read_in_one_go() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    git(repo, &["init", "--quiet", "--initial-branch=main"]);
+    for (dir, text) in [
+        ("pos_a", "{'name': 'A'}\n"),
+        ("pos_b", "{'name': 'B'}"),
+        ("addons/sale", "{'name': 'Sale'}\n"),
+        ("addons/sale/tests/x", "{}"),
+    ] {
+        fs::create_dir_all(repo.join(dir)).unwrap();
+        fs::write(repo.join(dir).join("__manifest__.py"), text).unwrap();
+    }
+    fs::write(repo.join("README.md"), "r").unwrap();
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "--quiet", "-m", "base"]);
+    let m = merger();
+    assert_eq!(
+        m.manifests(repo, "main", None).unwrap(),
+        [
+            ("pos_a".to_owned(), "{'name': 'A'}\n".to_owned()),
+            ("pos_b".to_owned(), "{'name': 'B'}".to_owned()),
+        ]
+    );
+    assert_eq!(
+        m.manifests(repo, "main", Some("/addons/")).unwrap(),
+        [("addons/sale".to_owned(), "{'name': 'Sale'}\n".to_owned())]
+    );
+    assert!(m.manifests(repo, "nope", None).is_err());
+    assert!(
+        FailOn::merger("--batch", 1)
+            .manifests(repo, "main", None)
+            .is_err()
+    );
+    // Missing objects and cut-off output read as empty.
+    assert_eq!(
+        blobs(b"main:x missing\nabc blob 10\nshort"),
+        [String::new(), String::new()]
+    );
+    assert_eq!(blobs(b"abc blob 3\nxyz"), [String::new()]);
+}

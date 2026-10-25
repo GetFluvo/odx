@@ -33,6 +33,7 @@ pub(crate) mod doctor;
 pub(crate) mod edit;
 pub(crate) mod env;
 pub(crate) mod env_diff;
+pub(crate) mod glue;
 pub(crate) mod hooks;
 pub(crate) mod lint;
 pub(crate) mod migrate;

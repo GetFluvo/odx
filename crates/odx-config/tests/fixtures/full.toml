@@ -183,3 +183,6 @@ only_changed = false
 
 [tool.odx.sniff]
 fail_on_new = false
+
+[tool.odx.glue]
+ignore = { pos_sale_extra = "the customer sells no POS orders on credit" }

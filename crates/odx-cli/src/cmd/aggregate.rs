@@ -86,6 +86,11 @@ pub(crate) struct Prepared {
 }
 
 impl Prepared {
+    /// The local clones of `[clones]` in the user configuration.
+    pub(crate) const fn clones(&self) -> &Clones {
+        &self.clones
+    }
+
     pub(crate) fn locked(&self) -> &[LockedRepository] {
         self.lock.as_ref().map_or(&[], |lock| &lock.repositories)
     }
@@ -608,7 +613,7 @@ fn lock(args: &LockArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         if *previous != lock {
             write_lock(ctx, &prepared, &lock)?;
         }
-        return Ok(summary.report(global.json, false, warnings));
+        warnings.extend(super::glue::hint(&prepared));
     }
     Ok(summary.report(global.json, false, warnings))
 }

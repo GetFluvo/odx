@@ -10,6 +10,8 @@ pub struct LocalClone {
     pub git_dir: PathBuf,
     /// The clone's remote whose URL matches.
     pub remote: String,
+    /// That remote's URL.
+    pub url: String,
     /// Also fetch base branches into the clone's remote-tracking refs.
     pub update: bool,
 }
@@ -80,6 +82,7 @@ impl Clones {
                         LocalClone {
                             git_dir: git_dir.clone(),
                             remote,
+                            url,
                             update,
                         },
                     ));
@@ -97,6 +100,11 @@ impl Clones {
             .iter()
             .find(|(known, _)| *known == key)
             .map(|(_, clone)| clone)
+    }
+
+    /// Every indexed clone remote, in scan order.
+    pub fn iter(&self) -> impl Iterator<Item = &LocalClone> {
+        self.entries.iter().map(|(_, clone)| clone)
     }
 
     /// How many remotes are indexed.

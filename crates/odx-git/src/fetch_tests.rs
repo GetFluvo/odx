@@ -586,6 +586,7 @@ fn clone_of(root: &Path, up: &Upstream, update: bool) -> LocalClone {
     LocalClone {
         git_dir: clones.join("pos").join(".git"),
         remote: "origin".into(),
+        url: file_url(&up.dir),
         update,
     }
 }
@@ -749,6 +750,7 @@ fn a_clone_path_that_is_not_a_repository_is_an_error() {
     let bogus = LocalClone {
         git_dir: tmp.path().join("nope"),
         remote: "origin".into(),
+        url: String::new(),
         update: false,
     };
     let err = fetch(

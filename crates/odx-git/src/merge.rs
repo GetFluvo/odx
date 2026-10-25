@@ -393,6 +393,53 @@ impl Merger {
             .collect())
     }
 
+    /// The manifests of the addons in the tree (or commit) `rev` of `repo`:
+    /// the folders right under `prefix` (the top level without one) with a
+    /// `__manifest__.py`, each with its text, sorted, read in one go.
+    ///
+    /// # Errors
+    ///
+    /// When git cannot read `rev`.
+    pub fn manifests(
+        &self,
+        repo: &Path,
+        rev: &str,
+        prefix: Option<&str>,
+    ) -> Result<Vec<(String, String)>, GitError> {
+        let base = prefix
+            .map(|prefix| format!("{}/", prefix.trim_matches('/')))
+            .unwrap_or_default();
+        let listing = self.stdout(
+            "ls-tree",
+            &self
+                .git(repo)
+                .args(["ls-tree", "-r", "--name-only", rev, "--"])
+                .args((!base.is_empty()).then_some(&base)),
+        )?;
+        let dirs: Vec<&str> = listing
+            .lines()
+            .filter_map(|file| file.strip_suffix("/__manifest__.py"))
+            .filter(|dir| {
+                dir.strip_prefix(base.as_str())
+                    .is_some_and(|name| !name.contains('/'))
+            })
+            .collect();
+        let input: String = dirs
+            .iter()
+            .flat_map(|dir| [rev, ":", dir, "/__manifest__.py\n"])
+            .collect();
+        self.run(
+            "cat-file",
+            &self.git(repo).args(["cat-file", "--batch"]).stdin(input),
+        )
+        .map(|output| {
+            dirs.iter()
+                .map(|dir| (*dir).to_owned())
+                .zip(blobs(&output.stdout))
+                .collect()
+        })
+    }
+
     /// Whether commit `ancestor` is reachable from `rev` in `repo`.
     pub fn contains(&self, repo: &Path, rev: &str, ancestor: &str) -> bool {
         self.run(
@@ -837,6 +884,26 @@ fn mergiraf_attributes(cache: &Path) -> Result<PathBuf, GitError> {
     fs::write(&file, "* merge=mergiraf\n")?;
     Ok(file)
 }
+/// The contents of the objects in `git cat-file --batch` output, in order;
+/// a missing object is an empty text.
+fn blobs(output: &[u8]) -> Vec<String> {
+    let mut blobs = Vec::new();
+    let mut rest = output;
+    while let Some(end) = rest.iter().position(|&b| b == b'\n') {
+        let (header, tail) = rest.split_at(end);
+        let tail = tail.get(1..).unwrap_or_default();
+        let blob = String::from_utf8_lossy(header)
+            .rsplit(' ')
+            .next()
+            .and_then(|size| size.parse::<usize>().ok())
+            .and_then(|size| tail.get(..size).zip(tail.get(size + 1..)));
+        let (text, next) = blob.unwrap_or((&[], tail));
+        blobs.push(String::from_utf8_lossy(text).into_owned());
+        rest = next;
+    }
+    blobs
+}
+
 #[cfg(test)]
 #[path = "merge_tests.rs"]
 mod tests;

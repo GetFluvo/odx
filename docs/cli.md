@@ -614,6 +614,50 @@ of for the series to `[tool.odx.groups] default`; run `uv lock` afterwards.
 provided = ["account_accountant"]   # available on the platform, not in the project
 ```
 
+## Glue addons
+
+```console
+$ odx glue                        # glue addons the project misses
+$ odx glue --fail                 # exit 1 when there are any, for CI
+$ odx --json glue
+```
+
+A glue addon joins two others (`sale_x_pos_y`) and has `auto_install`:
+Odoo installs it on its own as soon as the addons it joins are installed.
+A project that adds whole repositories gets glue along with the rest; one
+that names its addons one by one does not, since nothing depends on glue
+to pull it in. `odx glue` finds the glue addons Odoo would install with
+what the project installs:
+
+- what the project installs is its own addons and its addon packages, and
+  everything they depend on, as far as the manifests odx can read tell;
+  Odoo's own addons are followed too when Odoo is a git source
+  (`[tool.uv.sources] odoo`, locked in `odx.lock`) or a clone of Odoo or
+  OCB is among the local clones;
+- the glue is looked for on the series branch of every repository in the
+  cache and of every local clone of `[clones] dirs` in the user
+  configuration (for example all of `~/git/OCA`), without the network;
+  `odx sync` and the clones keep that current;
+- a glue addon is reported when every addon that triggers it (its
+  `depends` for `auto_install: True`, the listed ones for a list) is
+  installed, at least one of them is not Odoo's own, and the project does
+  not have it yet. Its other dependencies the project lacks are listed as
+  well.
+
+```text
+glue addons Odoo would install with what the project has (18.0):
+  sale_automatic_workflow_payment_mode (git@github.com:OCA/sale-workflow.git, with sale_automatic_workflow, account_payment_sale)
+    odx add OCA/sale-workflow@18.0 --package odoo-addon-sale-automatic-workflow-payment-mode --subdirectory sale_automatic_workflow_payment_mode
+```
+
+`odx lock` names missing glue addons in a warning. Glue the project does not
+want is listed with why, and no longer reported:
+
+```toml
+[tool.odx.glue]
+ignore = { pos_sale_extra = "the customer sells no POS orders on credit" }
+```
+
 ## Linting
 
 ```console
