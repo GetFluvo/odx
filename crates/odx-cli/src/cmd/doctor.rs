@@ -12,7 +12,7 @@ use odx_forge::{
 use odx_platform::{profile, profile_name, provided_set};
 
 use super::aggregate::{Prepared, prepare, uv_program};
-use super::{Report, human, size};
+use super::{Report, human, in_project, size};
 use crate::Context;
 use crate::cli::GlobalArgs;
 
@@ -58,11 +58,18 @@ fn check(level: Level, item: &str, detail: impl Into<String>) -> Check {
 
 /// `odx doctor`.
 pub(crate) fn run_doctor(global: &GlobalArgs, ctx: &Context<'_>) -> Report {
-    let prepared = prepare(global, ctx).ok();
-    let mut checks = tools(ctx, prepared.as_ref());
-    match &prepared {
-        Some(prepared) => checks.extend(project(ctx, global, prepared)),
-        None => checks.push(check(
+    let loaded = prepare(global, ctx);
+    let prepared = loaded.as_ref().ok();
+    let mut checks = tools(ctx, prepared);
+    match (prepared, loaded.as_ref().err()) {
+        (Some(prepared), _) => checks.extend(project(ctx, global, prepared)),
+        // A project that is there but does not load is what doctor is for.
+        (None, Some(report)) if in_project(global, ctx) => checks.push(check(
+            Level::Fail,
+            "project",
+            report.error.as_deref().unwrap_or_default().trim_end(),
+        )),
+        (None, _) => checks.push(check(
             Level::Info,
             "project",
             "no pyproject.toml with [tool.odx] here; only the machine was checked",

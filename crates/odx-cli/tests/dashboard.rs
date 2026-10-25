@@ -333,8 +333,9 @@ fn sections_and_renderers() {
     );
     // A host that answers like no forge has no new pull requests.
     setup.route("/api/v3/meta", 404, "");
-    let (_, out, _) = setup.odx(&["--fresh", "dashboard", "--section", "new-upstream"]);
+    let (_, out, err) = setup.odx(&["--fresh", "dashboard", "--section", "new-upstream"]);
     assert!(!out.contains("new:"), "{out}");
+    assert!(err.contains("new upstream pos: "), "{err}");
     let (code, _, _) = setup.odx(&["-C", "..", "dashboard"]);
     assert_eq!(code, 2);
     // Without uv.lock the index section is a warning.

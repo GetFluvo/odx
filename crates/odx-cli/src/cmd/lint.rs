@@ -60,6 +60,9 @@ struct Facts {
     series: String,
     sources: BTreeMap<String, Vec<String>>,
     known: BTreeSet<String>,
+    /// Whether odx knows Odoo's own addons of the series; without them
+    /// every dependency would look unavailable.
+    core_listed: bool,
 }
 
 fn scope(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Scope, Report> {
@@ -98,7 +101,9 @@ fn scope(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Scope, Report> {
         .collect();
     let series = config.odoo_version.clone();
     let sources = super::check_deps::inventory(&prepared).sources;
-    let known = odx_analyze::core::core_addons(&series)
+    let core = odx_analyze::core::core_addons(&series);
+    let core_listed = core.is_some();
+    let known = core
         .unwrap_or_default()
         .into_iter()
         .map(str::to_owned)
@@ -126,6 +131,7 @@ fn scope(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Scope, Report> {
             series,
             sources,
             known,
+            core_listed,
         }),
     })
 }
@@ -260,7 +266,7 @@ fn project_rules(
         if on(project::VERSION_SERIES) {
             found.extend(project::version_series(&addon, &facts.series));
         }
-        if on(project::DEPENDS_UNAVAILABLE) {
+        if on(project::DEPENDS_UNAVAILABLE) && facts.core_listed {
             found.extend(project::depends_unavailable(&addon, &|dep| {
                 facts.known.contains(dep)
             }));
@@ -342,6 +348,22 @@ fn lint(args: &LintArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
             message: message.clone(),
         })
         .collect();
+    if let Some(facts) = scope.facts.as_ref().filter(|facts| !facts.core_listed)
+        && project::enabled(
+            project::DEPENDS_UNAVAILABLE,
+            args.select.as_deref(),
+            &args.ignore,
+        )
+    {
+        report.warnings.push(Problem {
+            key: "odoo_version".to_owned(),
+            message: format!(
+                "no list of Odoo's own addons for {}: {} is skipped",
+                facts.series,
+                project::DEPENDS_UNAVAILABLE.code
+            ),
+        });
+    }
     let mut violations: Vec<Violation> = std::mem::take(&mut outcome.violations)
         .into_iter()
         .chain(rules)

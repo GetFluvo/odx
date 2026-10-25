@@ -435,6 +435,16 @@ fn project_mutes_without_a_verdict_repository_and_failures() {
         &["verdict", "list"],
     );
     assert_eq!(exit, Exit::Usage);
+    // A mutes file that cannot be read fails what needs it, rather than
+    // missing an id or handing one out twice.
+    let saved = std::fs::read_to_string(a.join(".odx/mutes.toml")).unwrap();
+    std::fs::write(a.join(".odx/mutes.toml"), "[[mute]\n").unwrap();
+    let (exit, _, err) = odx(&local, &a, &["verdict", "revoke", "nope", "--reason", "x"]);
+    assert_eq!(exit, Exit::Failure, "{err}");
+    assert!(err.contains("mutes.toml"), "{err}");
+    let (exit, out, _) = add(&["--kind", "not-wanted", "--no-recheck"]);
+    assert_eq!(exit, Exit::Failure, "{out}");
+    std::fs::write(a.join(".odx/mutes.toml"), saved).unwrap();
     // A mute recorded without a re-check cannot be confirmed.
     let mutes = odx_verdicts::read(&a.join(".odx/mutes.toml")).unwrap();
     let (exit, _, err) = odx(&local, &a, &["verdict", "confirm", &mutes[1].id]);
