@@ -26,7 +26,7 @@ pub mod system;
 pub use clock::Clock;
 pub use env::Env;
 pub use exit::Exit;
-pub use fs::FileSystem;
+pub use fs::{FileSystem, read_if_exists};
 pub use process::{Invocation, Output, ProcessRunner};
 pub use redact::redact;
 pub use url::repo_key;

@@ -166,20 +166,12 @@ impl Worktree<'_> {
         let file = root.join(&relative);
         // A blacklist that cannot be read is not replaced by the new entries
         // alone.
-        let mut list = match std::fs::read_to_string(&file) {
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                ) =>
-            {
-                Ok(Blacklist::default())
-            }
-            read => read
-                .map_err(|e| e.to_string())
-                .and_then(|text| Blacklist::parse(&text)),
-        }
-        .map_err(|e| format!("{}: {e}", file.display()))?;
+        let mut list = odx_core::read_if_exists(&file)
+            .map_err(|e| e.to_string())
+            .and_then(|text| {
+                text.map_or_else(|| Ok(Blacklist::default()), |text| Blacklist::parse(&text))
+            })
+            .map_err(|e| format!("{}: {e}", file.display()))?;
         for (key, reason) in entries {
             list.add(key, reason)?;
         }
