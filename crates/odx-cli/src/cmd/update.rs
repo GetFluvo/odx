@@ -120,11 +120,19 @@ fn check_out(
     })
 }
 
-/// `odx migrate update --json`.
-#[derive(serde::Serialize)]
-struct Updated<'a> {
+/// What `odx --json migrate update` prints.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[schemars(title = "odx migrate update")]
+pub(crate) struct Updated<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Always `updated`.
+    #[schemars(extend("const" = "updated"))]
     status: &'static str,
+    /// Where `--push` sent the branch: `<remote> <branch>`.
     pushed_to: Option<&'a str>,
+    /// The update.
     #[serde(flatten)]
     summary: &'a Summary,
 }
@@ -181,12 +189,12 @@ pub(crate) fn run(
         None
     };
     report.out = if global.json {
-        let value = Updated {
+        super::to_json(&Updated {
+            schema: 1,
             status: "updated",
             pushed_to: pushed.as_deref(),
             summary: &summary,
-        };
-        format!("{}\n", serde_json::to_string(&value).unwrap_or_default())
+        })
     } else {
         text(&summary, pushed.as_deref())
     };

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx port sweep",
+  "description": "What `odx --json port sweep` prints.",
+  "type": "object",
+  "properties": {
+    "addons": {
+      "description": "What the sweep found, addon by addon.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Row"
+      }
+    },
+    "branch": {
+      "description": "The branch the blacklist was written on, with `--write-blacklist`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commits": {
+      "description": "The subjects of the blacklist commits.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pull_request": {
+      "description": "The pull request opened, with `--open-pr`."
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "addons",
+    "commits"
+  ],
+  "$defs": {
+    "Row": {
+      "description": "What a sweep found for one addon on one source series.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "class": {
+          "description": "`portable`, `migration commit`, `repo-wide change`, `translations`,\n`reverted` or `blacklisted`.",
+          "type": "string"
+        },
+        "key": {
+          "description": "The blacklist key: `<owner>/<repo>#<n>` or `orphaned_commits`.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it is blacklisted, or would be as a false positive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "series": {
+          "description": "The source series.",
+          "type": "string"
+        },
+        "title": {
+          "description": "The subject of its oldest commit.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "series",
+        "key",
+        "title",
+        "class"
+      ]
+    }
+  }
+}

@@ -19,6 +19,8 @@ use odx_forge::{CachedHttp, ForgeClient, Http, PullRequest, RepoUrl, ReqwestHttp
 use odx_git::{Forge, Merger};
 use odx_index::sources::openupgrade;
 use odx_index::{AddonIndex, Build, Listing, Renames, SeriesIndex, build, series_key};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -67,11 +69,15 @@ struct Row {
 }
 
 /// odoo-lint's counts for one module.
-#[derive(Debug, Default, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Default, Clone, Copy, serde::Deserialize, Serialize, JsonSchema)]
 struct Effort {
+    /// Changes the upgrade needs.
     changes: usize,
+    /// Changes odoo-lint makes by itself.
     automatic: usize,
+    /// Changes odoo-lint makes that need a review.
     review: usize,
+    /// Changes to make by hand.
     manual: usize,
 }
 
@@ -547,7 +553,7 @@ fn upgrade(args: &UpgradeArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         rows.retain(|row| matches!(row.status, "missing" | "migration PR"));
     }
     report.out = if global.json {
-        format!("{}\n", json(&current, &target, &rows))
+        json(&current, &target, &rows)
     } else {
         text(&current, &target, &rows)
     };
@@ -646,7 +652,7 @@ fn repository(
         rows.retain(|row| matches!(row.status, "missing" | "migration PR"));
     }
     report.out = if global.json {
-        format!("{}\n", json(&current, &target, &rows))
+        json(&current, &target, &rows)
     } else {
         text(&current, &target, &rows)
     };
@@ -772,7 +778,7 @@ struct ProjectPlan<'a> {
     waits: &'a BTreeMap<String, Vec<super::deps::Waiting>>,
 }
 
-impl ProjectPlan<'_> {
+impl<'a> ProjectPlan<'a> {
     fn url_of(&self, name: &str) -> Option<String> {
         self.missing
             .iter()
@@ -781,20 +787,34 @@ impl ProjectPlan<'_> {
     }
 
     fn json(&self) -> String {
-        let value = serde_json::json!({
-            "current": self.current,
-            "target": self.to,
-            "available": self.ready.iter().map(|row| &row.name).collect::<Vec<_>>(),
-            "pull_requests": self.prs.iter().map(|row| serde_json::json!({
-                "addon": row.name, "number": row.pull_request, "url": row.url,
-            })).collect::<Vec<_>>(),
-            "to_migrate": self.order.iter().map(|name| serde_json::json!({
-                "addon": name, "url": self.url_of(name),
-            })).collect::<Vec<_>>(),
-            "own": self.own.iter().map(|row| &row.name).collect::<Vec<_>>(),
-            "waits_on": self.waits,
-        });
-        format!("{value}\n")
+        let names = |rows: &[&'a Row]| -> Vec<&'a str> {
+            rows.iter().map(|row| row.name.as_str()).collect()
+        };
+        super::to_json(&MigratePlanJson {
+            schema: 1,
+            current: self.current,
+            target: self.to,
+            available: names(self.ready),
+            pull_requests: self
+                .prs
+                .iter()
+                .map(|row| PlanPullRequestJson {
+                    addon: &row.name,
+                    number: row.pull_request,
+                    url: row.url.as_deref(),
+                })
+                .collect(),
+            to_migrate: self
+                .order
+                .iter()
+                .map(|name| ToMigrateJson {
+                    addon: name,
+                    url: self.url_of(name),
+                })
+                .collect(),
+            own: names(self.own),
+            waits_on: self.waits,
+        })
     }
 
     fn waiting(&self, out: &mut String, name: &str) {
@@ -1027,21 +1047,106 @@ fn text(current: &str, target: &str, rows: &[Row]) -> String {
     out
 }
 
-fn json(current: &str, target: &str, rows: &[Row]) -> serde_json::Value {
-    serde_json::json!({
-        "schema": 1,
-        "current": current,
-        "target": target,
-        "addons": rows.iter().map(|row| serde_json::json!({
-            "name": row.name,
-            "kind": row.kind,
-            "status": row.status,
-            "url": row.url,
-            "moved_from": row.moved_from,
-            "renamed_to": row.renamed_to,
-            "pull_request": row.pull_request,
-            "effort": row.effort,
-        })).collect::<Vec<_>>(),
+/// What `odx --json upgrade` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx upgrade")]
+pub(crate) struct UpgradeJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The project's series.
+    current: &'a str,
+    /// The series to upgrade to.
+    target: &'a str,
+    /// Every addon of the project, with its dependencies outside the
+    /// repository in a plain addons repository.
+    addons: Vec<UpgradeAddonJson<'a>>,
+}
+
+/// Where one addon stands on the target series.
+#[derive(Debug, Serialize, JsonSchema)]
+struct UpgradeAddonJson<'a> {
+    /// The addon.
+    name: &'a str,
+    /// `own`, `aggregated`, `package` or `dependency`.
+    kind: &'a str,
+    /// `released`, `available`, `migration PR`, `missing`, `own` or
+    /// `not checked`.
+    status: &'a str,
+    /// Its repository on the target series, or of its migration pull
+    /// request.
+    url: Option<&'a str>,
+    /// The repository it lived in before, when it moved.
+    moved_from: Option<&'a str>,
+    /// Its name on the target series, when renamed.
+    renamed_to: Option<&'a str>,
+    /// Its open migration pull request.
+    pull_request: Option<u64>,
+    /// odoo-lint's counts of the changes its upgrade needs.
+    effort: Option<Effort>,
+}
+
+/// What `odx --json migrate plan` prints in a project.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx migrate plan")]
+pub(crate) struct MigratePlanJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The project's series.
+    current: &'a str,
+    /// The series to migrate to.
+    target: &'a str,
+    /// Addons already available on the target series.
+    available: Vec<&'a str>,
+    /// Addons with an open migration pull request.
+    pull_requests: Vec<PlanPullRequestJson<'a>>,
+    /// Addons to migrate, dependencies first.
+    to_migrate: Vec<ToMigrateJson<'a>>,
+    /// The project's own addons.
+    own: Vec<&'a str>,
+    /// What each addon to migrate (or of the project's own) waits for.
+    waits_on: &'a BTreeMap<String, Vec<super::deps::Waiting>>,
+}
+
+/// An addon with an open migration pull request.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PlanPullRequestJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The pull request's number.
+    number: Option<u64>,
+    /// Its repository.
+    url: Option<&'a str>,
+}
+
+/// An addon to migrate.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ToMigrateJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// Its repository on the current series, when known.
+    url: Option<String>,
+}
+
+fn json(current: &str, target: &str, rows: &[Row]) -> String {
+    super::to_json(&UpgradeJson {
+        schema: 1,
+        current,
+        target,
+        addons: rows
+            .iter()
+            .map(|row| UpgradeAddonJson {
+                name: &row.name,
+                kind: row.kind,
+                status: row.status,
+                url: row.url.as_deref(),
+                moved_from: row.moved_from.as_deref(),
+                renamed_to: row.renamed_to.as_deref(),
+                pull_request: row.pull_request,
+                effort: row.effort,
+            })
+            .collect(),
     })
 }
 

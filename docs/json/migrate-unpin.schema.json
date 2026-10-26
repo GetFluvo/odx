@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx migrate unpin",
+  "description": "What `odx --json migrate unpin` prints: what it found and did.",
+  "type": "object",
+  "properties": {
+    "ci": {
+      "description": "Its checks: `green`, `red`, `pending` or `unknown`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dropped": {
+      "description": "How the pins went: `commit` (the pin commit dropped) or `lines`\n(removed in a commit).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "failing": {
+      "description": "Its failing checks.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "merged": {
+      "description": "Whether `--merge` merged it.",
+      "type": "boolean"
+    },
+    "pins": {
+      "description": "The pins in `test-requirements.txt`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PinJson"
+      }
+    },
+    "pull_request": {
+      "description": "The page of the branch's pull request.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pushed_to": {
+      "description": "Where `--push` sent the branch.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "status": {
+      "description": "`no pins`, `waiting`, `ready` or `unpinned`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "pins",
+    "failing",
+    "merged"
+  ],
+  "$defs": {
+    "PinJson": {
+      "description": "A dependency pinned to its migration pull request.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "number": {
+          "description": "The pull request's number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "repository": {
+          "description": "The repository's URL.",
+          "type": "string"
+        },
+        "state": {
+          "description": "Where it stands upstream: `open`, `closed`, `merged`, `released`\nor `unknown`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "repository",
+        "number",
+        "state"
+      ]
+    }
+  }
+}

@@ -11,10 +11,12 @@ use odx_core::Exit;
 use odx_core::system::OsRunner;
 use odx_forge::{ForgeKind, RepoUrl};
 use odx_git::{Cache, Merger};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
-use super::sniff::{describe, previous_lock, since, to_json};
+use super::sniff::{SniffedJson, describe, previous_lock, since, sniffed_json};
 use crate::Context;
 use crate::cli::{ChangelogArgs, GlobalArgs};
 
@@ -61,17 +63,114 @@ impl Source {
         format!("commit `{}`", short(source.sha.as_deref().unwrap_or("?")))
     }
 
-    fn json(&self) -> serde_json::Value {
+    fn json(&self) -> SourceJson<'_> {
         let source = &self.source;
-        serde_json::json!({
-            "pr": source.pr,
-            "sha": source.sha,
-            "branch": source.branch,
-            "remote": source.remote,
-            "tag": source.tag,
-            "link": self.link,
-        })
+        SourceJson {
+            pr: source.pr,
+            sha: source.sha.as_deref(),
+            branch: source.branch.as_deref(),
+            remote: source.remote.as_deref(),
+            tag: source.tag.as_deref(),
+            link: self.link.as_deref(),
+        }
     }
+}
+
+/// What `odx --json changelog` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx changelog")]
+pub(crate) struct ChangelogJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The revision of `odx.lock` compared from.
+    since: &'a str,
+    /// The revision compared to, or `working tree`.
+    to: &'a str,
+    /// Odoo, then repositories, then packages, each by name.
+    sections: Vec<SectionJson<'a>>,
+    /// The migration scripts and version changes the changes bring in.
+    migrations: Vec<SniffedJson<'a>>,
+    /// Repositories or packages whose migrations could not be compared.
+    errors: &'a [String],
+}
+
+/// Odoo, a repository or a package, and what changed in it.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SectionJson<'a> {
+    /// `odoo`, `repository` or `package`.
+    kind: &'a str,
+    /// The repository name or distribution; `odoo` for Odoo.
+    name: &'a str,
+    /// `added`, `removed` or `changed`.
+    state: &'a str,
+    /// What changed.
+    items: Vec<ItemJson<'a>>,
+}
+
+/// One change in a section.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "change", rename_all = "kebab-case")]
+enum ItemJson<'a> {
+    /// A merge or package that is new.
+    Added {
+        /// Where it comes from; null for a package.
+        source: Option<SourceJson<'a>>,
+        /// The commit it is at.
+        to: &'a str,
+    },
+    /// A merge or package that is gone.
+    Removed {
+        /// Where it came from; null for a package.
+        source: Option<SourceJson<'a>>,
+    },
+    /// A commit that moved.
+    Updated(MovedJson<'a>),
+    /// A base that moved.
+    Base(MovedJson<'a>),
+    /// A URL that changed.
+    Url(MovedJson<'a>),
+    /// A merge whose lock-time status changed.
+    Status {
+        /// Where it comes from.
+        source: SourceJson<'a>,
+        /// The status before: `merged`, `skipped` or `pinned`.
+        from: &'a str,
+        /// The status now.
+        to: &'a str,
+        /// Since when it is pinned.
+        since: Option<&'a str>,
+    },
+}
+
+/// A commit, base or URL that moved.
+#[derive(Debug, Serialize, JsonSchema)]
+struct MovedJson<'a> {
+    /// The merge it belongs to; null for the repository or package itself.
+    source: Option<SourceJson<'a>>,
+    /// Before.
+    from: &'a str,
+    /// After.
+    to: &'a str,
+    /// Commits between the two, when known.
+    commits: Option<usize>,
+}
+
+/// Where a merge or package comes from, as configured.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SourceJson<'a> {
+    /// The pull request number.
+    pr: Option<u32>,
+    /// The configured commit.
+    sha: Option<&'a str>,
+    /// The configured branch.
+    branch: Option<&'a str>,
+    /// The remote of the branch.
+    remote: Option<&'a str>,
+    /// The configured tag.
+    tag: Option<&'a str>,
+    /// The pull request's page on the forge.
+    link: Option<&'a str>,
 }
 
 /// One change in a section.
@@ -137,40 +236,45 @@ impl Item {
         }
     }
 
-    fn json(&self) -> serde_json::Value {
-        let source = |source: &Option<Source>| source.as_ref().map(Source::json);
+    fn json(&self) -> ItemJson<'_> {
         match self {
-            Self::Added { source: s, at } => {
-                serde_json::json!({"change": "added", "source": source(s), "to": at})
-            }
-            Self::Removed { source: s } => {
-                serde_json::json!({"change": "removed", "source": source(s)})
-            }
+            Self::Added { source: s, at } => ItemJson::Added {
+                source: s.as_ref().map(Source::json),
+                to: at,
+            },
+            Self::Removed { source: s } => ItemJson::Removed {
+                source: s.as_ref().map(Source::json),
+            },
             Self::Moved {
                 what,
                 source: s,
                 from,
                 to,
                 commits,
-            } => serde_json::json!({
-                "change": what,
-                "source": source(s),
-                "from": from,
-                "to": to,
-                "commits": commits,
-            }),
+            } => {
+                let moved = MovedJson {
+                    source: s.as_ref().map(Source::json),
+                    from,
+                    to,
+                    commits: *commits,
+                };
+                match *what {
+                    "base" => ItemJson::Base(moved),
+                    "url" => ItemJson::Url(moved),
+                    _ => ItemJson::Updated(moved),
+                }
+            }
             Self::Status {
                 source: s,
                 from,
                 to,
                 since,
-            } => serde_json::json!({
-                "change": "status",
-                "source": s.json(),
-                "from": from,
-                "to": to,
-                "since": since,
-            }),
+            } => ItemJson::Status {
+                source: s.json(),
+                from,
+                to,
+                since: since.as_deref(),
+            },
         }
     }
 }
@@ -478,26 +582,22 @@ fn changelog(
     let sniffed = since(&merger, cache, &old, &new, &mut problems);
     let title = format!("{} → {to}", args.since);
     let out = if global.json {
-        let sections: Vec<serde_json::Value> = sections
-            .iter()
-            .map(|section| {
-                serde_json::json!({
-                    "kind": section.kind,
-                    "name": section.name,
-                    "state": section.state,
-                    "items": section.items.iter().map(Item::json).collect::<Vec<_>>(),
+        super::to_json(&ChangelogJson {
+            schema: 1,
+            since: &args.since,
+            to: &to,
+            sections: sections
+                .iter()
+                .map(|section| SectionJson {
+                    kind: section.kind,
+                    name: &section.name,
+                    state: section.state,
+                    items: section.items.iter().map(Item::json).collect(),
                 })
-            })
-            .collect();
-        let value = serde_json::json!({
-            "schema": 1,
-            "since": args.since,
-            "to": to,
-            "sections": sections,
-            "migrations": to_json(&sniffed),
-            "errors": problems,
-        });
-        format!("{value:#}\n")
+                .collect(),
+            migrations: sniffed_json(&sniffed),
+            errors: &problems,
+        })
     } else {
         markdown(&title, &sections, &describe(&sniffed))
     };
@@ -678,7 +778,22 @@ mod tests {
             pinned.markdown(),
             "- #7: pinned since 2026-10-01 (was merged)"
         );
-        assert_eq!(pinned.json()["since"], "2026-10-01");
+        assert_eq!(
+            serde_json::to_value(pinned.json()).unwrap()["since"],
+            "2026-10-01"
+        );
+        assert_eq!(
+            serde_json::to_value(item.json()).unwrap()["change"],
+            "updated"
+        );
+        let url = Item::Moved {
+            what: "url",
+            source: None,
+            from: "a".to_owned(),
+            to: "b".to_owned(),
+            commits: None,
+        };
+        assert_eq!(serde_json::to_value(url.json()).unwrap()["change"], "url");
         let none = Source::of(
             &LockSource {
                 pr: None,
@@ -703,7 +818,7 @@ mod tests {
         let items: Vec<serde_json::Value> = compare(&old, &new, &|_, _, _| None)[0]
             .items
             .iter()
-            .map(Item::json)
+            .map(|item| serde_json::to_value(item.json()).unwrap())
             .collect();
         assert_eq!(
             serde_json::Value::Array(items),

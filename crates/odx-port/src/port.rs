@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::blacklist::{self, Blacklist};
@@ -51,7 +52,7 @@ pub struct PortState {
 }
 
 /// A finished port.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Ported {
     /// The branch.
     pub branch: String,

@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx upgrade",
+  "description": "What `odx --json upgrade` prints.",
+  "type": "object",
+  "properties": {
+    "addons": {
+      "description": "Every addon of the project, with its dependencies outside the\nrepository in a plain addons repository.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UpgradeAddonJson"
+      }
+    },
+    "current": {
+      "description": "The project's series.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "target": {
+      "description": "The series to upgrade to.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "current",
+    "target",
+    "addons"
+  ],
+  "$defs": {
+    "Effort": {
+      "description": "odoo-lint's counts for one module.",
+      "type": "object",
+      "properties": {
+        "automatic": {
+          "description": "Changes odoo-lint makes by itself.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "changes": {
+          "description": "Changes the upgrade needs.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "manual": {
+          "description": "Changes to make by hand.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "review": {
+          "description": "Changes odoo-lint makes that need a review.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "changes",
+        "automatic",
+        "review",
+        "manual"
+      ]
+    },
+    "UpgradeAddonJson": {
+      "description": "Where one addon stands on the target series.",
+      "type": "object",
+      "properties": {
+        "effort": {
+          "description": "odoo-lint's counts of the changes its upgrade needs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "description": "`own`, `aggregated`, `package` or `dependency`.",
+          "type": "string"
+        },
+        "moved_from": {
+          "description": "The repository it lived in before, when it moved.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "pull_request": {
+          "description": "Its open migration pull request.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "renamed_to": {
+          "description": "Its name on the target series, when renamed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "description": "`released`, `available`, `migration PR`, `missing`, `own` or\n`not checked`.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Its repository on the target series, or of its migration pull\nrequest.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "status"
+      ]
+    }
+  }
+}

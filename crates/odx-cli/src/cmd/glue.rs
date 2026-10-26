@@ -17,6 +17,8 @@ use odx_core::{Exit, repo_key};
 use odx_forge::RepoUrl;
 use odx_git::{LocalClone, Merger};
 use odx_index::sources::distribution;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -314,36 +316,78 @@ fn text(glue: &Glue, series: &str) -> String {
     out
 }
 
+/// What `odx --json glue` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx glue")]
+pub(crate) struct GlueJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The project's Odoo series.
+    series: &'a str,
+    /// Repositories looked in.
+    scanned: usize,
+    /// Glue addons the project does not have.
+    candidates: Vec<CandidateJson<'a>>,
+    /// Glue addons left out, and why.
+    ignored: Vec<IgnoredJson<'a>>,
+}
+
+/// A glue addon the project does not have.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CandidateJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The repository it lives in.
+    url: &'a str,
+    /// Its directory in the repository.
+    path: &'a str,
+    /// Its dependencies.
+    depends: &'a [String],
+    /// The dependencies the project installs that make Odoo install it.
+    triggers: &'a [String],
+    /// Its dependencies the project does not have.
+    missing: &'a [String],
+    /// The `odx add` command that adds it.
+    add: String,
+}
+
+/// A glue addon left out.
+#[derive(Debug, Serialize, JsonSchema)]
+struct IgnoredJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// Why.
+    reason: &'a str,
+}
+
 fn json(glue: &Glue, series: &str) -> String {
-    let candidates: Vec<serde_json::Value> = glue
-        .candidates
-        .iter()
-        .map(|candidate| {
-            let offered = &candidate.offered;
-            serde_json::json!({
-                "addon": offered.addon,
-                "url": offered.url,
-                "path": offered.path,
-                "depends": offered.depends,
-                "triggers": offered.triggers,
-                "missing": candidate.missing,
-                "add": add_command(candidate, series),
+    super::to_json(&GlueJson {
+        schema: 1,
+        series,
+        scanned: glue.scanned,
+        candidates: glue
+            .candidates
+            .iter()
+            .map(|candidate| {
+                let offered = &candidate.offered;
+                CandidateJson {
+                    addon: &offered.addon,
+                    url: &offered.url,
+                    path: &offered.path,
+                    depends: &offered.depends,
+                    triggers: &offered.triggers,
+                    missing: &candidate.missing,
+                    add: add_command(candidate, series),
+                }
             })
-        })
-        .collect();
-    let ignored: Vec<serde_json::Value> = glue
-        .ignored
-        .iter()
-        .map(|(addon, why)| serde_json::json!({"addon": addon, "reason": why}))
-        .collect();
-    let value = serde_json::json!({
-        "schema": 1,
-        "series": series,
-        "scanned": glue.scanned,
-        "candidates": candidates,
-        "ignored": ignored,
-    });
-    format!("{value:#}\n")
+            .collect(),
+        ignored: glue
+            .ignored
+            .iter()
+            .map(|(addon, reason)| IgnoredJson { addon, reason })
+            .collect(),
+    })
 }
 
 /// `odx glue [--fail]`.

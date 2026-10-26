@@ -16,6 +16,8 @@ use odx_port::blacklist::{self, Blacklist};
 use odx_port::git::Repo;
 use odx_port::migrate::{Finding, Tools, Worktree};
 use odx_port::port::{PortOutcome, PortPlan, Ported};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::aggregate::Prepared;
 use super::propose::{
@@ -86,7 +88,10 @@ fn port(args: &PortArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
             let Some(plan) = addon_plan(ctx, addon, from, options, &mut out)? else {
                 return Ok(Report {
                     out: if global.json {
-                        format!("{}\n", serde_json::json!({"status": "nothing to port"}))
+                        super::to_json(&PortJson {
+                            schema: 1,
+                            outcome: PortJsonOutcome::NothingToPort,
+                        })
                     } else {
                         out
                     },
@@ -119,10 +124,10 @@ fn port(args: &PortArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         PortOutcome::Stopped(message) => Ok(Report {
             exit: Exit::Failure,
             out: if global.json {
-                format!(
-                    "{}\n",
-                    serde_json::json!({"status": "stopped", "message": message})
-                )
+                super::to_json(&PortJson {
+                    schema: 1,
+                    outcome: PortJsonOutcome::Stopped { message: &message },
+                })
             } else {
                 out
             },
@@ -136,10 +141,12 @@ fn port(args: &PortArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
 fn aborted(tree: &Worktree<'_>, global: &GlobalArgs) -> Result<Report, Report> {
     let state = tree.port_abort().map_err(failed)?;
     let out = if global.json {
-        format!(
-            "{}\n",
-            serde_json::json!({"status": "aborted", "branch": state.plan.branch})
-        )
+        super::to_json(&PortJson {
+            schema: 1,
+            outcome: PortJsonOutcome::Aborted {
+                branch: &state.plan.branch,
+            },
+        })
     } else {
         format!(
             "aborted the port: deleted {}, back on {}\n",
@@ -206,7 +213,13 @@ fn finished(
         None => (None, None),
     };
     if global.json {
-        out = format!("{}\n", json(ported, opened.as_ref()));
+        out = super::to_json(&PortJson {
+            schema: 1,
+            outcome: PortJsonOutcome::Done {
+                ported,
+                pull_request: opened.as_ref().map(opened_json),
+            },
+        });
     } else {
         out.push_str(&text(ported));
         if let Some(opened) = &opened {
@@ -670,21 +683,45 @@ fn text(ported: &Ported) -> String {
     out
 }
 
-fn json(ported: &Ported, opened: Option<&Pushed>) -> String {
-    #[derive(serde::Serialize)]
-    struct Done<'a> {
-        status: &'static str,
+/// What `odx --json port pr`, `port addon`, `--continue` and `--abort`
+/// print.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx port")]
+pub(crate) struct PortJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// How the port ended.
+    #[serde(flatten)]
+    outcome: PortJsonOutcome<'a>,
+}
+
+/// How a port ended, by its `status`.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+enum PortJsonOutcome<'a> {
+    /// The port branch is ready for review.
+    Done {
+        /// The port.
         #[serde(flatten)]
         ported: &'a Ported,
+        /// The pull request opened, with `--open-pr`.
         #[serde(skip_serializing_if = "Option::is_none")]
         pull_request: Option<serde_json::Value>,
-    }
-    let done = Done {
-        status: "done",
-        ported,
-        pull_request: opened.map(opened_json),
-    };
-    serde_json::to_string(&done).unwrap_or_default()
+    },
+    /// `port addon` found nothing portable.
+    #[serde(rename = "nothing to port")]
+    NothingToPort,
+    /// A conflict stopped the port.
+    Stopped {
+        /// What happened and how to go on.
+        message: &'a str,
+    },
+    /// `--abort` put the repository back.
+    Aborted {
+        /// The port branch.
+        branch: &'a str,
+    },
 }
 
 #[cfg(test)]

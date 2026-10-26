@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use odx_core::{Invocation, ProcessRunner};
 use std::time::{Duration, Instant};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::squash::Rules;
@@ -97,7 +98,7 @@ pub struct Tools {
 }
 
 /// A finding odoo-lint leaves to fix by hand.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Finding {
     /// The file, relative to the repository.
     #[serde(rename = "file_path")]
@@ -111,7 +112,7 @@ pub struct Finding {
 }
 
 /// A finished migration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Summary {
     /// The migration branch.
     pub branch: String,
@@ -136,7 +137,7 @@ pub struct Summary {
 }
 
 /// An addon migrated in place by [`Worktree::migrate_in_place`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct InPlace {
     /// The addon's directory, as given.
     pub addon: String,

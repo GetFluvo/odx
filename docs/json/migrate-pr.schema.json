@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx migrate pr",
+  "description": "What `odx --json migrate pr` prints.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true,
+  "required": [
+    "schema"
+  ]
+}

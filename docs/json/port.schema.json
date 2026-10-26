@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx port",
+  "description": "What `odx --json port pr`, `port addon`, `--continue` and `--abort`\nprint.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "oneOf": [
+    {
+      "description": "The port branch is ready for review.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "commits": {
+          "description": "The subjects of the commits the fixes made.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "findings": {
+          "description": "What odoo-lint leaves to fix by hand in the addons.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          }
+        },
+        "picked": {
+          "description": "The commits cherry-picked.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "pull_request": {
+          "description": "The pull request opened, with `--open-pr`."
+        },
+        "status": {
+          "type": "string",
+          "const": "done"
+        },
+        "warnings": {
+          "description": "Steps that could not run, and why.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "branch",
+        "picked",
+        "commits",
+        "findings",
+        "warnings"
+      ]
+    },
+    {
+      "description": "`port addon` found nothing portable.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "nothing to port"
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    {
+      "description": "A conflict stopped the port.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "description": "What happened and how to go on.",
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "const": "stopped"
+        }
+      },
+      "required": [
+        "status",
+        "message"
+      ]
+    },
+    {
+      "description": "`--abort` put the repository back.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "The port branch.",
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "const": "aborted"
+        }
+      },
+      "required": [
+        "status",
+        "branch"
+      ]
+    }
+  ],
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "Finding": {
+      "description": "A finding odoo-lint leaves to fix by hand.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "The rule's code, e.g. `U1908`.",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "The file, relative to the repository.",
+          "type": "string"
+        },
+        "line": {
+          "description": "The line.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "message": {
+          "description": "What to do.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "line",
+        "code",
+        "message"
+      ]
+    }
+  }
+}

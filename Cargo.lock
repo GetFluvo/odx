@@ -2681,6 +2681,7 @@ dependencies = [
 name = "odx-analyze"
 version = "0.0.9"
 dependencies = [
+ "schemars",
  "serde",
  "tempfile",
  "tokei",
@@ -2851,6 +2852,7 @@ version = "0.0.9"
 dependencies = [
  "odx-core",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",

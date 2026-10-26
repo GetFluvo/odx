@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx glue",
+  "description": "What `odx --json glue` prints.",
+  "type": "object",
+  "properties": {
+    "candidates": {
+      "description": "Glue addons the project does not have.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CandidateJson"
+      }
+    },
+    "ignored": {
+      "description": "Glue addons left out, and why.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IgnoredJson"
+      }
+    },
+    "scanned": {
+      "description": "Repositories looked in.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "series": {
+      "description": "The project's Odoo series.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "series",
+    "scanned",
+    "candidates",
+    "ignored"
+  ],
+  "$defs": {
+    "CandidateJson": {
+      "description": "A glue addon the project does not have.",
+      "type": "object",
+      "properties": {
+        "add": {
+          "description": "The `odx add` command that adds it.",
+          "type": "string"
+        },
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "depends": {
+          "description": "Its dependencies.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing": {
+          "description": "Its dependencies the project does not have.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "path": {
+          "description": "Its directory in the repository.",
+          "type": "string"
+        },
+        "triggers": {
+          "description": "The dependencies the project installs that make Odoo install it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "description": "The repository it lives in.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "url",
+        "path",
+        "depends",
+        "triggers",
+        "missing",
+        "add"
+      ]
+    },
+    "IgnoredJson": {
+      "description": "A glue addon left out.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "reason"
+      ]
+    }
+  }
+}
