@@ -215,10 +215,6 @@ pub enum RefStyle {
 pub struct Http {
     /// In-flight requests and fetches per host. Default: 6.
     pub per_host_concurrency: Option<u16>,
-    /// HTTP cache TTL before revalidation. Not used yet.
-    pub cache_ttl: Option<Span>,
-    /// Serve from the cache only. Not used yet.
-    pub offline: Option<bool>,
 }
 
 /// `[tool.odx.cache]`: cache staleness and prefetching.
@@ -227,8 +223,6 @@ pub struct Http {
 pub struct Cache {
     /// Staleness thresholds per kind of cached data.
     pub ttl: Option<CacheTtl>,
-    /// Let `odx sync` warm clean worktrees. Not used yet.
-    pub warm_worktrees: Option<bool>,
     /// Let `odx sync` prefetch wheels. Default: on.
     pub prefetch_wheels: Option<bool>,
 }
@@ -242,27 +236,17 @@ pub struct CacheTtl {
     /// How long a kept dashboard (pull request states) is shown before it is rebuilt. Default:
     /// `"30m"`.
     pub pr_state: Option<Span>,
-    /// How long the addon index is used. Not used yet.
-    pub index: Option<Span>,
-    /// How long cached wheels are used. Not used yet.
-    pub wheels: Option<Span>,
-    /// How long upstream suggestions are used. Not used yet.
-    pub suggest: Option<Span>,
-    /// How long environment drift is used. Not used yet.
-    pub drift: Option<Span>,
 }
 
 /// `[tool.odx.dashboard]`: what `odx dashboard` shows.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dashboard {
-    /// Sections shown, in order. Not used yet.
+    /// The sections `odx dashboard` shows when `--section` is not given. Default: all.
     pub sections: Option<Vec<DashboardSection>>,
     /// Environment pairs compared in the drift section. Default: every promotion edge between
     /// environments that are not disposable.
     pub environment_pairs: Option<Vec<[String; 2]>>,
-    /// Show suggestions from higher series expanded. Not used yet.
-    pub show_backports: Option<bool>,
 }
 
 /// A dashboard section.
@@ -277,10 +261,39 @@ pub enum DashboardSection {
     NewUpstream,
     /// Forward-port suggestions.
     ForwardPort,
+    /// Backport candidates.
+    Backport,
     /// Auto-update candidates.
     AutoUpdate,
+    /// Glue addons the project misses.
+    Glue,
     /// Environment drift.
     Drift,
+    /// What verdicts, mutes and blacklists hide.
+    Suppressed,
+}
+
+impl DashboardSection {
+    /// The section's name, as `--section` takes it.
+    ///
+    /// ```
+    /// use odx_config::schema::DashboardSection;
+    ///
+    /// assert_eq!(DashboardSection::NewUpstream.name(), "new-upstream");
+    /// ```
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Pinned => "pinned",
+            Self::Droppable => "droppable",
+            Self::NewUpstream => "new-upstream",
+            Self::ForwardPort => "forward-port",
+            Self::Backport => "backport",
+            Self::AutoUpdate => "auto-update",
+            Self::Glue => "glue",
+            Self::Drift => "drift",
+            Self::Suppressed => "suppressed",
+        }
+    }
 }
 
 /// `[tool.odx.groups]`: dependency group name → vendor directory.
@@ -472,10 +485,6 @@ pub enum AutoUpdatePolicy {
 pub struct Upgrade {
     /// Target Odoo series. Default: none (pass `--target`).
     pub target_odoo_version: Option<String>,
-    /// Query the package index. Not used yet.
-    pub check_pypi: Option<bool>,
-    /// Organizations searched on GitHub. Not used yet.
-    pub github_orgs: Option<Vec<String>>,
 }
 
 /// `[tool.odx.index]`: the addon index that maps addons to repositories.
@@ -518,8 +527,6 @@ pub enum IndexSource {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Port {
-    /// Where declined suggestions are recorded. Not used yet.
-    pub blacklist: Option<BlacklistMode>,
     /// Default source series. Default: the series just below and just above the target.
     pub default_from: Option<Vec<String>>,
     /// Commits touching more addons are repo-wide. Default: 5.
@@ -527,53 +534,19 @@ pub struct Port {
     /// Commit subjects that are never proposed, as case-insensitive regular expressions. Default:
     /// `^\[MIG\]` and `^\[ADD\].*\bmigration\b`.
     pub migration_commit_patterns: Option<Vec<String>>,
-    /// Migration step after cherry-picking. Not used yet.
-    pub migrate: Option<MigrateTool>,
-    /// Path prefix rewrites between series. Not used yet.
-    #[serde(default)]
-    pub rewrites: BTreeMap<String, String>,
     /// Author e-mails of bots whose commits `odx migrate` squashes. Default: the OCA bots.
     pub squash_authors: Option<Vec<String>>,
     /// Text in a subject that marks a bot commit to squash. Default: the OCA bots' commits.
     pub squash_subjects: Option<Vec<String>>,
 }
 
-/// Where porting decisions are recorded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BlacklistMode {
-    /// oca-port files when the repository has `.oca/`, otherwise mutes.
-    #[default]
-    Auto,
-    /// oca-port blacklist files.
-    OcaPort,
-    /// odx mutes.
-    Mutes,
-    /// Both.
-    Both,
-}
-
-/// Code migration tool used after a port.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum MigrateTool {
-    /// odoo-lint upgrade fixes.
-    #[default]
-    OdooLint,
-    /// odoo-module-migrator.
-    OdooModuleMigrator,
-    /// No migration step.
-    None,
-}
-
 /// `[tool.odx.suggest]`: upstream suggestions.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Suggest {
-    /// Series scanned for suggestions. Not used yet.
+    /// The series `odx suggest` looks on when `--from` is not given. Default:
+    /// `[tool.odx.port] default_from`, else the series just below and just above.
     pub series: Option<Vec<String>>,
-    /// Project mutes file. Not used yet.
-    pub mutes_file: Option<PathBuf>,
 }
 
 /// `[tool.odx.features.<name>]`: a named set of addons promoted together.
@@ -618,8 +591,6 @@ pub struct Platform {
     pub provided_remove: Option<Vec<String>>,
     /// Package index name for publishing. Default: `private`.
     pub index: Option<String>,
-    /// Emit SBOMs from `odx build`. Not used yet.
-    pub sbom: Option<bool>,
     /// Hooks of the `custom` profile.
     pub custom: Option<CustomHooks>,
 }
@@ -723,7 +694,7 @@ pub enum Role {
 pub struct Promote {
     /// Allow copying an older pin over a newer one. Default: off.
     pub allow_downgrade: Option<bool>,
-    /// Cherry-pick project addon commits by default. Not used yet.
+    /// Cherry-pick project addon commits unless `--no-with-code`. Default: off.
     pub with_code: Option<bool>,
     /// Promote the Odoo core revision together with the pins. Default: on.
     pub with_odoo: Option<bool>,
@@ -740,8 +711,6 @@ pub struct Bot {
     pub environment: Option<String>,
     /// Maintain the dashboard issue. Default: on.
     pub dashboard: Option<bool>,
-    /// One pull request per kind per run. Not used yet.
-    pub group_prs: Option<bool>,
     /// Maximum pull requests per run. Default: 10.
     pub max_prs_per_run: Option<u16>,
     /// Extra labels on every bot pull request, besides odx's own. Default: none.
@@ -929,14 +898,31 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_section_names_are_their_values() {
+        let names = [
+            "pinned",
+            "droppable",
+            "new-upstream",
+            "forward-port",
+            "backport",
+            "auto-update",
+            "glue",
+            "drift",
+            "suppressed",
+        ];
+        for name in names {
+            let parsed: DashboardSection = toml::Value::String(name.to_owned()).try_into().unwrap();
+            assert_eq!(parsed.name(), name);
+        }
+    }
+
+    #[test]
     fn enum_defaults() {
         assert_eq!(MergeStrategy::default(), MergeStrategy::Rebase);
         assert_eq!(MergirafMode::default(), MergirafMode::Auto);
         assert_eq!(OnConflict::default(), OnConflict::Abort);
         assert_eq!(OnHeadChange::default(), OnHeadChange::FollowIfGreen);
         assert_eq!(RefStyle::default(), RefStyle::Refs);
-        assert_eq!(BlacklistMode::default(), BlacklistMode::Auto);
-        assert_eq!(MigrateTool::default(), MigrateTool::OdooLint);
         assert_eq!(PlatformProfile::default(), PlatformProfile::GenericWheels);
         assert_eq!(Preset::default(), Preset::MajorBranches);
     }

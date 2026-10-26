@@ -560,7 +560,7 @@ pub struct SuggestArgs {
     /// Target series instead of the environments' (for example `18.0`).
     #[arg(long, value_name = "SERIES", conflicts_with = "env")]
     pub series: Option<String>,
-    /// Series to look on (default: `[tool.odx.port] default_from`, else the series below and above).
+    /// Series to look on (default: `[tool.odx.suggest] series`, else `[tool.odx.port] default_from`, else the series below and above).
     #[arg(long, value_name = "SERIES", value_delimiter = ',')]
     pub from: Vec<String>,
     /// Only addons matching this glob.
@@ -991,7 +991,7 @@ pub enum PortCommand {
 }
 
 /// Arguments of `odx promote`.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "command-line flags are independent switches"
@@ -1007,7 +1007,7 @@ pub struct PromoteArgs {
     #[arg(
         long,
         value_name = "N",
-        conflicts_with_all = ["modules", "feature", "search", "from_pr", "from", "with_code", "include_branch_specific"]
+        conflicts_with_all = ["modules", "feature", "search", "from_pr", "from", "with_code", "no_with_code", "include_branch_specific"]
     )]
     pub rollback: Option<u64>,
     /// Promote a feature set from [tool.odx.features].
@@ -1037,9 +1037,13 @@ pub struct PromoteArgs {
     /// Leave the Odoo core revision of the target as it is.
     #[arg(long)]
     pub no_with_odoo: bool,
-    /// Cherry-pick the source's commits on the closure's project addons that the target lacks.
-    #[arg(long)]
+    /// Cherry-pick the source's commits on the closure's project addons that the target lacks
+    /// (default: `[tool.odx.promote] with_code`).
+    #[arg(long, conflicts_with = "no_with_code")]
     pub with_code: bool,
+    /// Copy pins only, whatever `[tool.odx.promote] with_code` says.
+    #[arg(long)]
+    pub no_with_code: bool,
     /// Keep what `uv lock` re-resolves outside the closure.
     #[arg(long)]
     pub allow_transitive: bool,

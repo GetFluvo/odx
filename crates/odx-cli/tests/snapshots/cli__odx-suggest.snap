@@ -14,7 +14,7 @@ Options:
           Target series instead of the environments' (for example `18.0`)
 
       --from <SERIES>
-          Series to look on (default: `[tool.odx.port] default_from`, else the series below and above)
+          Series to look on (default: `[tool.odx.suggest] series`, else `[tool.odx.port] default_from`, else the series below and above)
 
       --addon <GLOB>
           Only addons matching this glob

@@ -49,8 +49,6 @@ How odx talks to forges over HTTP.
 | Key | Type | Description |
 | --- | --- | --- |
 | `per_host_concurrency` | integer | In-flight requests and fetches per host. Default: 6. |
-| `cache_ttl` | duration | HTTP cache TTL before revalidation. Not used yet. |
-| `offline` | boolean | Serve from the cache only. Not used yet. |
 
 ## `[tool.odx.cache]`
 
@@ -58,7 +56,6 @@ Cache staleness and prefetching.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `warm_worktrees` | boolean | Let `odx sync` warm clean worktrees. Not used yet. |
 | `prefetch_wheels` | boolean | Let `odx sync` prefetch wheels. Default: on. |
 
 ## `[tool.odx.cache.ttl]`
@@ -69,10 +66,6 @@ How long cached data is used before it is refreshed.
 | --- | --- | --- |
 | `refs` | duration | How long fetched git refs are used before fetching again. Default: `"15m"`. |
 | `pr_state` | duration | How long a kept dashboard (pull request states) is shown before it is rebuilt. Default: `"30m"`. |
-| `index` | duration | How long the addon index is used. Not used yet. |
-| `wheels` | duration | How long cached wheels are used. Not used yet. |
-| `suggest` | duration | How long upstream suggestions are used. Not used yet. |
-| `drift` | duration | How long environment drift is used. Not used yet. |
 
 ## `[tool.odx.dashboard]`
 
@@ -80,9 +73,8 @@ What `odx dashboard` shows.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `sections` | list of `"pinned"` \| `"droppable"` \| `"new-upstream"` \| `"forward-port"` \| `"auto-update"` \| `"drift"` | Sections shown, in order. Not used yet. |
+| `sections` | list of `"pinned"` \| `"droppable"` \| `"new-upstream"` \| `"forward-port"` \| `"backport"` \| `"auto-update"` \| `"glue"` \| `"drift"` \| `"suppressed"` | The sections `odx dashboard` shows when `--section` is not given. Default: all. |
 | `environment_pairs` | list of pair of strings | Environment pairs compared in the drift section. Default: every promotion edge between environments that are not disposable. |
-| `show_backports` | boolean | Show suggestions from higher series expanded. Not used yet. |
 
 ## `[tool.odx.groups]`
 
@@ -170,8 +162,6 @@ Upgrade analysis (`odx migrate plan`).
 | Key | Type | Description |
 | --- | --- | --- |
 | `target_odoo_version` | string | Target Odoo series. Default: none (pass `--target`). |
-| `check_pypi` | boolean | Query the package index. Not used yet. |
-| `github_orgs` | list of strings | Organizations searched on GitHub. Not used yet. |
 
 ## `[tool.odx.index]`
 
@@ -191,12 +181,9 @@ Porting commits between series.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `blacklist` | `"auto"` \| `"oca-port"` \| `"mutes"` \| `"both"` | Where declined suggestions are recorded. Not used yet. |
 | `default_from` | list of strings | Default source series. Default: the series just below and just above the target. |
 | `repo_wide_threshold` | integer | Commits touching more addons are repo-wide. Default: 5. |
 | `migration_commit_patterns` | list of strings | Commit subjects that are never proposed, as case-insensitive regular expressions. Default: `^\[MIG\]` and `^\[ADD\].*\bmigration\b`. |
-| `migrate` | `"odoo-lint"` \| `"odoo-module-migrator"` \| `"none"` | Migration step after cherry-picking. Not used yet. |
-| `rewrites` | table of strings | Path prefix rewrites between series. Not used yet. |
 | `squash_authors` | list of strings | Author e-mails of bots whose commits `odx migrate` squashes. Default: the OCA bots. |
 | `squash_subjects` | list of strings | Text in a subject that marks a bot commit to squash. Default: the OCA bots' commits. |
 
@@ -206,8 +193,7 @@ Upstream suggestions.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `series` | list of strings | Series scanned for suggestions. Not used yet. |
-| `mutes_file` | path | Project mutes file. Not used yet. |
+| `series` | list of strings | The series `odx suggest` looks on when `--from` is not given. Default: `[tool.odx.port] default_from`, else the series just below and just above. |
 
 ## `[tool.odx.features.<name>]`
 
@@ -241,7 +227,6 @@ The deployment platform.
 | `provided_extra` | list of strings | Extra provided requirements. Default: none. |
 | `provided_remove` | list of strings | Packages removed from the provided set. Default: none. |
 | `index` | string | Package index name for publishing. Default: `private`. |
-| `sbom` | boolean | Emit SBOMs from `odx build`. Not used yet. |
 
 ## `[tool.odx.platform.custom]`
 
@@ -282,7 +267,7 @@ Defaults of `odx promote`.
 | Key | Type | Description |
 | --- | --- | --- |
 | `allow_downgrade` | boolean | Allow copying an older pin over a newer one. Default: off. |
-| `with_code` | boolean | Cherry-pick project addon commits by default. Not used yet. |
+| `with_code` | boolean | Cherry-pick project addon commits unless `--no-with-code`. Default: off. |
 | `with_odoo` | boolean | Promote the Odoo core revision together with the pins. Default: on. |
 | `search_synonyms` | table of list of strings | Extra synonyms for `--search`. Default: none. |
 
@@ -294,7 +279,6 @@ The automation bot (`odx bot`).
 | --- | --- | --- |
 | `environment` | string | Environment that receives bot pull requests. Default: the branch checked out. |
 | `dashboard` | boolean | Maintain the dashboard issue. Default: on. |
-| `group_prs` | boolean | One pull request per kind per run. Not used yet. |
 | `max_prs_per_run` | integer | Maximum pull requests per run. Default: 10. |
 | `labels` | list of strings | Extra labels on every bot pull request, besides odx's own. Default: none. |
 | `mute_expiry` | duration | Expiry of mutes made from the dashboard. Default: `"180d"`. |

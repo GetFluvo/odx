@@ -643,12 +643,25 @@ fn dashboard(
     if let Some(DashboardAct::Act(act)) = &args.act {
         return run_act(act, &dashboards, &specs, global, ctx, &prepared);
     }
+    // --section, else `[tool.odx.dashboard] sections`, else every section.
+    let configured: Vec<String> = prepared
+        .project
+        .config
+        .dashboard
+        .as_ref()
+        .and_then(|dashboard| dashboard.sections.as_ref())
+        .map(|sections| sections.iter().map(|s| s.name().to_owned()).collect())
+        .unwrap_or_default();
+    let wanted = if args.section.is_empty() {
+        &configured
+    } else {
+        &args.section
+    };
     let dashboards: Vec<Dashboard> = dashboards
         .into_iter()
         .map(|mut dashboard| {
             dashboard.sections.retain(|section| {
-                args.section.is_empty()
-                    || args.section.iter().any(|name| name == section.kind.name())
+                wanted.is_empty() || wanted.iter().any(|name| name == section.kind.name())
             });
             dashboard
         })
@@ -739,6 +752,7 @@ fn act_promote(
         no_with_odoo: false,
         // A project addon's drift is its code.
         with_code: true,
+        no_with_code: false,
         allow_transitive: false,
         include_branch_specific: Vec::new(),
         commit: false,
