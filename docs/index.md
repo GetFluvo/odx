@@ -56,6 +56,7 @@ configuration
 user-config
 files
 json-output
+stability
 ```
 
 ```{toctree}

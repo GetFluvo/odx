@@ -5,6 +5,7 @@ use odx_core::FileSystem;
 use serde::Deserialize;
 
 use crate::error::line_column;
+use crate::removed;
 use crate::schema::{MergeSource, OdxConfig, RefStyle};
 use crate::{ConfigError, Problem};
 
@@ -83,12 +84,14 @@ struct ToolTable {
 /// every consistency problem found.
 pub fn parse_pyproject(text: &str, file: &Path) -> Result<Option<Project>, ConfigError> {
     let parsed: PyProject = toml::from_str(text).map_err(|error| {
-        let (line, column) = line_column(text, error.span().map_or(0, |span| span.start));
+        let offset = error.span().map_or(0, |span| span.start);
+        let (line, column) = line_column(text, offset);
+        let message = error.message();
         ConfigError::Syntax {
             file: file.to_path_buf(),
             line,
             column,
-            message: error.message().to_owned(),
+            message: removed::explain(text, offset, message).unwrap_or_else(|| message.to_owned()),
         }
     })?;
     let Some(mut config) = parsed.tool.and_then(|tool| tool.odx) else {
@@ -454,6 +457,22 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("p.toml:6:1: unknown field `push_on_lok`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn removed_keys_say_what_replaced_them() {
+        let text =
+            "[tool.odx]\nodoo_version = \"17.0\"\n\n[tool.odx.dashboard]\nshow_backports = true\n";
+        let err = parse_pyproject(text, Path::new("p.toml")).unwrap_err();
+        let err = err.to_string();
+        assert!(
+            err.starts_with("p.toml:5:1: unknown field `show_backports`"),
+            "{err}"
+        );
+        assert!(
+            err.ends_with("\n`dashboard.show_backports` was removed in odx 0.0.9, it had no effect; list `backport` in `sections`"),
             "{err}"
         );
     }

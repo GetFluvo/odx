@@ -16,6 +16,7 @@ mod load;
 pub mod lock;
 pub mod mutes;
 pub mod packages;
+mod removed;
 pub mod schema;
 pub mod user;
 pub mod uvlock;
