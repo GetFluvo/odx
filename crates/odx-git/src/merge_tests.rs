@@ -669,6 +669,15 @@ fn trees_and_patch_ids() {
     // Contained in the base: no changes.
     assert_eq!(m.patch_id(&fx.cache, &a, &fx.base).unwrap(), "0".repeat(40));
     assert!(m.patch_id(&fx.cache, &fx.base, &"0".repeat(40)).is_err());
+    // A commit without history in common with the base says so.
+    let orphan = git(&fx.cache, &["commit-tree", "a^{tree}", "-m", "orphan"]);
+    let error = m.patch_id(&fx.cache, &fx.base, &orphan).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .ends_with(&format!("{orphan} shares no history with {}", fx.base)),
+        "{error}"
+    );
     assert!(m.tree(&fx.cache, "nope").is_err());
     for needle in ["diff", "patch-id"] {
         assert!(

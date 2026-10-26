@@ -261,6 +261,22 @@ impl Merger {
             .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
+    /// The commit `base` and `sha` both descend from in `repo`. git says
+    /// nothing when there is none, so the error says it instead.
+    fn fork_point(&self, repo: &Path, base: &str, sha: &str) -> Result<String, GitError> {
+        self.stdout(
+            "merge-base",
+            &self.git(repo).args(["merge-base", base, sha]),
+        )
+        .map_err(|error| match error {
+            GitError::Failed { command, stderr } if stderr.is_empty() => GitError::Failed {
+                command,
+                stderr: format!("{sha} shares no history with {base}"),
+            },
+            other => other,
+        })
+    }
+
     /// Whether `target` is a clean working tree of `cache` whose checkout
     /// has tree `tree`: then there is nothing to build.
     pub fn is_current(&self, target: &Path, cache: &Path, tree: &str) -> bool {
@@ -283,10 +299,7 @@ impl Merger {
         base: &str,
         sha: &str,
     ) -> Result<Vec<String>, GitError> {
-        let fork_point = self.stdout(
-            "merge-base",
-            &self.git(repo).args(["merge-base", base, sha]),
-        )?;
+        let fork_point = self.fork_point(repo, base, sha)?;
         let paths = self.stdout(
             "diff",
             &self.git(repo).args([
@@ -540,10 +553,7 @@ impl Merger {
     ///
     /// When git fails.
     pub fn patch_id(&self, repo: &Path, base: &str, sha: &str) -> Result<String, GitError> {
-        let fork_point = self.stdout(
-            "merge-base",
-            &self.git(repo).args(["merge-base", base, sha]),
-        )?;
+        let fork_point = self.fork_point(repo, base, sha)?;
         let diff = self
             .run(
                 "diff",
@@ -788,10 +798,7 @@ impl Merger {
                 .arg(format!("Merge {}", step.label))
                 .arg(&step.sha),
             Strategy::Rebase => {
-                let fork_point = self.stdout(
-                    "merge-base",
-                    &self.git(target).args(["merge-base", "HEAD"]).arg(&step.sha),
-                )?;
+                let fork_point = self.fork_point(target, "HEAD", &step.sha)?;
                 invocation
                     .args([
                         "-c",
