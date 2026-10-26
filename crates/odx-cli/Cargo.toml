@@ -42,6 +42,7 @@ odx-port.workspace = true
 odx-lint.workspace = true
 odx-verdicts.workspace = true
 odx-vendor.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -14,6 +14,8 @@ use odx_forge::{
     CachedHttp, ForgeClient, ForgeError, ForgeKind, PrState, PullRequest, RepoUrl, ReqwestHttp,
 };
 use odx_git::{Forge, Merger, Source};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -263,7 +265,7 @@ fn status(args: &StatusArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
         })
         .count();
     report.out = if global.json {
-        format!("{}\n", json(&rows, &modified))
+        json(&rows, &modified)
     } else {
         text(&rows, &modified)
     };
@@ -362,24 +364,85 @@ fn text(rows: &[Row], modified: &[(String, String, usize)]) -> String {
     out
 }
 
-fn json(rows: &[Row], modified: &[(String, String, usize)]) -> serde_json::Value {
-    serde_json::json!({
-        "schema": 1,
-        "pull_requests": rows.iter().map(|row| serde_json::json!({
-            "name": row.name,
-            "url": row.url,
-            "pr": row.pr,
-            "state": row.upstream.as_ref().map(|pr| pr.state.name()),
-            "title": row.upstream.as_ref().map(|pr| pr.title.clone()),
-            "merged_at": row.upstream.as_ref().and_then(|pr| pr.merged_at.clone()),
-            "labels": row.upstream.as_ref().map(|pr| pr.labels.clone()).unwrap_or_default(),
-            "head": row.head,
-            "new_commits": row.new_commits,
-            "advice": row.advice,
-            "error": row.error,
-        })).collect::<Vec<_>>(),
-        "modified": modified.iter().map(|(name, dir, changes)| serde_json::json!({
-            "name": name, "dir": dir, "changes": changes,
-        })).collect::<Vec<_>>(),
-    })
+/// What `odx --json status` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx status")]
+pub(crate) struct StatusJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Every tracked pull request.
+    pull_requests: Vec<PullRequestJson<'a>>,
+    /// Aggregated working trees with local changes.
+    modified: Vec<ModifiedJson<'a>>,
+}
+
+/// A tracked pull request.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PullRequestJson<'a> {
+    /// `<repository> #<n>` or `<distribution> #<n>`.
+    name: &'a str,
+    /// The repository URL.
+    url: &'a str,
+    /// The pull request number.
+    pr: u32,
+    /// `open`, `merged` or `closed`; null when the forge could not be asked.
+    state: Option<&'a str>,
+    /// Its title upstream.
+    title: Option<&'a str>,
+    /// When it was merged.
+    merged_at: Option<&'a str>,
+    /// Its labels upstream.
+    labels: &'a [String],
+    /// How its head relates to the locked commit: `same`,
+    /// `rebased-same-patch`, `changed`, `orphaned` or `not locked`.
+    head: &'a str,
+    /// Commits on the head the lock does not have, when the cache knows.
+    new_commits: Option<usize>,
+    /// What to do about it; empty when nothing.
+    advice: &'a str,
+    /// Why the forge could not be asked.
+    error: Option<&'a str>,
+}
+
+/// A working tree with local changes.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ModifiedJson<'a> {
+    /// The repository.
+    name: &'a str,
+    /// Its working tree, relative to the project root.
+    dir: &'a str,
+    /// Changed files.
+    changes: usize,
+}
+
+fn json<'a>(rows: &'a [Row], modified: &'a [(String, String, usize)]) -> String {
+    let value = StatusJson {
+        schema: 1,
+        pull_requests: rows
+            .iter()
+            .map(|row| PullRequestJson {
+                name: &row.name,
+                url: &row.url,
+                pr: row.pr,
+                state: row.upstream.as_ref().map(|pr| pr.state.name()),
+                title: row.upstream.as_ref().map(|pr| pr.title.as_str()),
+                merged_at: row.upstream.as_ref().and_then(|pr| pr.merged_at.as_deref()),
+                labels: row.upstream.as_ref().map_or(&[], |pr| pr.labels.as_slice()),
+                head: row.head,
+                new_commits: row.new_commits,
+                advice: row.advice,
+                error: row.error.as_deref(),
+            })
+            .collect(),
+        modified: modified
+            .iter()
+            .map(|(name, dir, changes)| ModifiedJson {
+                name,
+                dir,
+                changes: *changes,
+            })
+            .collect(),
+    };
+    super::to_json(&value)
 }

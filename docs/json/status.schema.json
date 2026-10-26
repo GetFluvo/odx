@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx status",
+  "description": "What `odx --json status` prints.",
+  "type": "object",
+  "properties": {
+    "modified": {
+      "description": "Aggregated working trees with local changes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ModifiedJson"
+      }
+    },
+    "pull_requests": {
+      "description": "Every tracked pull request.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PullRequestJson"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "pull_requests",
+    "modified"
+  ],
+  "$defs": {
+    "ModifiedJson": {
+      "description": "A working tree with local changes.",
+      "type": "object",
+      "properties": {
+        "changes": {
+          "description": "Changed files.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "dir": {
+          "description": "Its working tree, relative to the project root.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The repository.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "dir",
+        "changes"
+      ]
+    },
+    "PullRequestJson": {
+      "description": "A tracked pull request.",
+      "type": "object",
+      "properties": {
+        "advice": {
+          "description": "What to do about it; empty when nothing.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the forge could not be asked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "head": {
+          "description": "How its head relates to the locked commit: `same`,\n`rebased-same-patch`, `changed`, `orphaned` or `not locked`.",
+          "type": "string"
+        },
+        "labels": {
+          "description": "Its labels upstream.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "merged_at": {
+          "description": "When it was merged.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "`<repository> #<n>` or `<distribution> #<n>`.",
+          "type": "string"
+        },
+        "new_commits": {
+          "description": "Commits on the head the lock does not have, when the cache knows.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "pr": {
+          "description": "The pull request number.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "state": {
+          "description": "`open`, `merged` or `closed`; null when the forge could not be asked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "Its title upstream.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "The repository URL.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url",
+        "pr",
+        "labels",
+        "head",
+        "advice"
+      ]
+    }
+  }
+}
