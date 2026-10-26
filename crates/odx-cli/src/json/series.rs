@@ -14,6 +14,7 @@ pub(super) fn schemas() -> Vec<(&'static str, Schema)> {
         ("diff", schema_for!(cmd::diff::DiffJson<'static>)),
         ("sniff", schema_for!(cmd::sniff::SniffJson<'static>)),
         ("glue", schema_for!(cmd::glue::GlueJson<'static>)),
+        ("wanted", schema_for!(cmd::wanted::WantedJson<'static>)),
         (
             "check-deps",
             schema_for!(cmd::check_deps::CheckDepsJson<'static>),

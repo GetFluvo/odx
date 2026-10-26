@@ -124,6 +124,29 @@
         "write"
       ]
     },
+    "NoticeJson": {
+      "description": "A wanted addon's milestone, announced on the dashboard issue.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The dashboard entry: `want:<addon>@<series>`.",
+          "type": "string"
+        },
+        "milestone": {
+          "description": "`migrating <owner>/<repo>#<n>` or `available`.",
+          "type": "string"
+        },
+        "write": {
+          "description": "`commented`, or `would comment` without `--apply`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "milestone",
+        "write"
+      ]
+    },
     "OutcomeJson": {
       "description": "What became of a box, a routine change or a promotion.",
       "oneOf": [
@@ -419,13 +442,21 @@
         "series": {
           "description": "The series.",
           "type": "string"
+        },
+        "wanted": {
+          "description": "Each wanted addon that reached a milestone, announced in a comment.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NoticeJson"
+          }
         }
       },
       "required": [
         "series",
         "issue",
         "requests",
-        "routine"
+        "routine",
+        "wanted"
       ]
     }
   }

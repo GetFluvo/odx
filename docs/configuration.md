@@ -73,7 +73,7 @@ What `odx dashboard` shows.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `sections` | list of `"pinned"` \| `"droppable"` \| `"new-upstream"` \| `"forward-port"` \| `"backport"` \| `"auto-update"` \| `"glue"` \| `"drift"` \| `"suppressed"` | The sections `odx dashboard` shows when `--section` is not given. Default: all. |
+| `sections` | list of `"pinned"` \| `"droppable"` \| `"new-upstream"` \| `"forward-port"` \| `"backport"` \| `"auto-update"` \| `"glue"` \| `"wanted"` \| `"drift"` \| `"suppressed"` | The sections `odx dashboard` shows when `--section` is not given. Default: all. |
 | `environment_pairs` | list of pair of strings | Environment pairs compared in the drift section. Default: every promotion edge between environments that are not disposable. |
 
 ## `[tool.odx.groups]`

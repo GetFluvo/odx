@@ -57,6 +57,7 @@ pub(crate) mod upgrade;
 pub(crate) mod vendor;
 pub(crate) mod verdict;
 pub(crate) mod verify;
+pub(crate) mod wanted;
 
 /// Run `invocation`; a failure carries its standard error.
 pub(crate) fn run_checked(invocation: &Invocation, what: &str) -> Result<(), String> {

@@ -34,6 +34,9 @@ pub enum SectionKind {
     /// Glue addons Odoo would install with what the project has, that it
     /// does not have.
     Glue,
+    /// Addons the project may need later, once they are there or being
+    /// migrated.
+    Wanted,
     /// What differs between environments.
     Drift,
     /// What verdicts, mutes and blacklists hide.
@@ -42,7 +45,7 @@ pub enum SectionKind {
 
 impl SectionKind {
     /// Every section, in display order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Pinned,
         Self::Droppable,
         Self::NewUpstream,
@@ -50,6 +53,7 @@ impl SectionKind {
         Self::Backport,
         Self::AutoUpdate,
         Self::Glue,
+        Self::Wanted,
         Self::Drift,
         Self::Suppressed,
     ];
@@ -65,6 +69,7 @@ impl SectionKind {
             Self::Backport => "backport",
             Self::AutoUpdate => "auto-update",
             Self::Glue => "glue",
+            Self::Wanted => "wanted",
             Self::Drift => "drift",
             Self::Suppressed => "suppressed",
         }
@@ -81,6 +86,7 @@ impl SectionKind {
             Self::Backport => "Backport candidates",
             Self::AutoUpdate => "Index updates",
             Self::Glue => "Glue addons the project misses",
+            Self::Wanted => "Wanted addons",
             Self::Drift => "Environment drift",
             Self::Suppressed => "Suppressed",
         }

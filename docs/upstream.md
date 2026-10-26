@@ -2,7 +2,7 @@
 
 What odx learns from the forges about the pull requests and branches a
 project depends on, and how it reports and acts on it: `status`, `suggest`,
-`dashboard`, `bot`, `verdict` and `glue`.
+`dashboard`, `bot`, `verdict`, `glue` and `wanted`.
 
 ## Upstream status
 
@@ -99,11 +99,12 @@ would copy offers `promote`. `--section` shows only the sections named;
 | `backport` | changes from higher series | `port`, `mute` |
 | `auto-update` | index releases the auto-update policy would take, or leaves for review | `follow` |
 | `glue` | glue addons Odoo would install with what the project has, that it does not have (`odx glue`) | `include`, `mute` |
+| `wanted` | wanted addons that are on their series or being migrated (`odx wanted`) | `include` |
 | `drift` | what differs between environments (`odx env diff`), per pair | `promote` |
 | `suppressed` | what blacklists, verdicts and mutes hide, with the reason | |
 
 Every entry has a stable id (`pr:`, `new:`, `fwd:`, `bwd:`, `pkg:`, `glue:`,
-`drift:`) that `odx dashboard act` takes: `--drop` and `--include` run `odx
+`want:`, `drift:`) that `odx dashboard act` takes: `--drop` and `--include` run `odx
 drop` and `odx add` (a glue addon is added as a package from its
 repository's series branch), `--follow` runs `odx lock --auto-update`,
 `--mute` records a mute (`--kind`, default `not-wanted`, a mandatory
@@ -325,3 +326,65 @@ Glue the project does not want is listed with why, and no longer reported:
 [tool.odx.glue]
 ignore = { pos_sale_extra = "the customer sells no POS orders on credit" }
 ```
+
+## Wanted addons
+
+```console
+$ odx wanted add contract --series 17.0,18.0 --note "customer asks in Q3"
+$ odx wanted                      # where every wanted addon stands
+$ odx --json wanted
+$ odx wanted remove contract
+```
+
+A customer will want an addon some day, but not yet; on the project's
+series, or on the next one, it may not even exist yet. `odx wanted add`
+records it in `pyproject.toml`, and `odx wanted` says per series where it
+stands:
+
+```toml
+[[tool.odx.wanted]]
+addon = "contract"
+series = ["17.0", "18.0"]        # default: odoo_version
+repository = "OCA/contract"      # default: where the addon index finds it
+note = "customer asks in Q3"
+```
+
+```text
+contract (customer asks in Q3)
+  17.0  migrating: OCA/contract#1234 by joe, opened 2026-05-06
+        https://github.com/OCA/contract/pull/1234
+        odx add OCA/contract#1234 --package odoo-addon-contract --subdirectory contract
+  18.0  not started; last on 17.0 in OCA/contract
+```
+
+| State | Means |
+| --- | --- |
+| `available`, `released` | on the series: in a repository the addon index knows, or released on the package index |
+| `migrating` | not on the series yet, but a `[MIG]` pull request naming the addon is open in its repository |
+| `not-started` | neither; odx says on which series it was last, up to three series back |
+| `unchecked` | offline, and the cache cannot tell |
+
+The repository is where the addon lived on an earlier series, unless
+`repository` names it. Only the open pull requests of that repository are
+read, and a title must name the addon as a whole word: `[17.0][MIG]
+contract_sale` does not count for `contract`. What the index learnt is kept
+for `[tool.odx.index] ttl`; `--fresh` asks again.
+
+On the project's series, a wanted addon that is there or being migrated is
+offered in the dashboard's `wanted` section: `odx dashboard act
+want:contract@17.0 --include` adds it as a package, from the migration pull
+request when it is not merged yet, so the project need not migrate it
+itself. The bot announces each step with a comment on the dashboard issue,
+once per step, since an edited issue notifies nobody; the people in
+`[tool.odx.bot] notify` are mentioned:
+
+```toml
+[tool.odx.bot]
+notify = ["jane"]
+```
+
+The comment for a new migration pull request reads `@jane Someone started
+migrating the wanted addon contract on 17.0: OCA/contract#1234 by joe,
+opened 2026-05-06.` A later pull request, or the addon arriving on the
+series, makes another. Outside the bot, `odx --json wanted` gives the same
+states to a scheduler of your own.

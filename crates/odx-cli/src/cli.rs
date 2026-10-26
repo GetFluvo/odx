@@ -145,6 +145,13 @@ Examples:
     CheckDeps(CheckDepsArgs),
     /// Glue addons Odoo would install with what the project has, that it does not have.
     Glue(GlueArgs),
+    /// Addons the project may need later: whether they are there, or someone is migrating them.
+    #[command(after_help = "\
+Examples:
+  odx wanted                              where every wanted addon stands
+  odx wanted add contract --series 17.0,18.0 --note \"customer asks in Q3\"
+  odx wanted remove contract")]
+    Wanted(WantedArgs),
     /// List database migration scripts introduced by merges.
     Sniff(SniffArgs),
     /// Release notes between two states of odx.lock: merges, packages, Odoo and migrations.
@@ -373,6 +380,38 @@ pub struct GlueArgs {
     pub fail: bool,
 }
 
+/// Arguments of `odx wanted`.
+#[derive(Debug, Args)]
+pub struct WantedArgs {
+    /// Add or remove a wanted addon; without one, where every wanted addon stands.
+    #[command(subcommand)]
+    pub command: Option<WantedCommand>,
+}
+
+/// `odx wanted` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum WantedCommand {
+    /// Watch an addon, or change how it is watched.
+    Add {
+        /// The addon's technical name.
+        addon: String,
+        /// Series to watch it on (default: the project's).
+        #[arg(long, value_name = "SERIES", value_delimiter = ',')]
+        series: Vec<String>,
+        /// Its repository, `owner/repo` on GitHub or a URL (default: where the addon index finds it).
+        #[arg(long, value_name = "REPO")]
+        repository: Option<String>,
+        /// Why it is wanted.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Stop watching an addon.
+    Remove {
+        /// The addon's technical name.
+        addon: String,
+    },
+}
+
 /// Arguments of `odx dev`.
 #[derive(Debug, Args)]
 #[expect(
@@ -489,7 +528,7 @@ pub struct DashboardArgs {
     /// Environment to show; defaults to all.
     #[arg(long, value_name = "ENV")]
     pub env: Option<String>,
-    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, drift, suppressed).
+    /// Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, wanted, drift, suppressed).
     #[arg(long, value_name = "SECTION")]
     pub section: Vec<String>,
     /// With `--format markdown`, a box per action for the bot to read back.
@@ -1334,6 +1373,7 @@ impl Command {
             Self::Changelog(_) => "changelog",
             Self::Diff(_) => "diff",
             Self::Glue(_) => "glue",
+            Self::Wanted(_) => "wanted",
             Self::Stats(_) => "stats",
             Self::Upgrade(_) => "upgrade",
             Self::Port(_) => "port",
@@ -1375,7 +1415,7 @@ impl Command {
             Self::Lint(_) => 9,
             Self::Promote(_) | Self::Env(_) => 10,
             Self::Bot(_) => 11,
-            Self::Changelog(_) | Self::Diff(_) | Self::Glue(_) => 12,
+            Self::Changelog(_) | Self::Diff(_) | Self::Glue(_) | Self::Wanted(_) => 12,
         }
     }
 }

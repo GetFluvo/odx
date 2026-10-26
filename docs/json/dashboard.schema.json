@@ -191,6 +191,11 @@
           "const": "glue"
         },
         {
+          "description": "Addons the project may need later, once they are there or being\nmigrated.",
+          "type": "string",
+          "const": "wanted"
+        },
+        {
           "description": "What differs between environments.",
           "type": "string",
           "const": "drift"

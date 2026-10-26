@@ -25,7 +25,7 @@ Options:
           Environment to show; defaults to all
 
       --section <SECTION>
-          Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, drift, suppressed)
+          Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, wanted, drift, suppressed)
 
       --checkboxes
           With `--format markdown`, a box per action for the bot to read back

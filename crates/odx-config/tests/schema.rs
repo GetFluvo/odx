@@ -171,7 +171,7 @@ fn list_enums() {
     let sections = with(
         "dashboard",
         "sections",
-        r#"["pinned", "droppable", "new-upstream", "forward-port", "backport", "auto-update", "glue", "drift", "suppressed"]"#,
+        r#"["pinned", "droppable", "new-upstream", "forward-port", "backport", "auto-update", "glue", "wanted", "drift", "suppressed"]"#,
     );
     assert_eq!(
         sections.dashboard.unwrap().sections.unwrap(),
@@ -183,6 +183,7 @@ fn list_enums() {
             DashboardSection::Backport,
             DashboardSection::AutoUpdate,
             DashboardSection::Glue,
+            DashboardSection::Wanted,
             DashboardSection::Drift,
             DashboardSection::Suppressed,
         ]

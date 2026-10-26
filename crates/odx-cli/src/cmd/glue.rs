@@ -130,14 +130,19 @@ impl Catalogue {
 /// subdirectory.
 pub(crate) fn add_spec(candidate: &Candidate, series: &str) -> (String, String, String) {
     let offered = &candidate.offered;
-    let repo = RepoUrl::parse(&offered.url)
-        .filter(|repo| repo.host == "github.com")
-        .map_or_else(|| offered.url.clone(), |repo| repo.path);
     (
-        format!("{repo}@{series}"),
+        format!("{}@{series}", repo_spec(&offered.url)),
         distribution(&offered.addon, series),
         offered.path.clone(),
     )
+}
+
+/// How `odx add` names the repository at `url`: `owner/repo` on GitHub,
+/// else the URL.
+pub(crate) fn repo_spec(url: &str) -> String {
+    RepoUrl::parse(url)
+        .filter(|repo| repo.host == "github.com")
+        .map_or_else(|| url.to_owned(), |repo| repo.path)
 }
 
 /// How to add `candidate`.

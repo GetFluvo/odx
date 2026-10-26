@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx wanted",
+  "description": "What `odx --json wanted` prints.",
+  "type": "object",
+  "properties": {
+    "addons": {
+      "description": "Every wanted addon on each series it is watched on.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WatchedJson"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "series": {
+      "description": "The project's Odoo series.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "series",
+    "addons"
+  ],
+  "$defs": {
+    "MigrationJson": {
+      "description": "A migration pull request.",
+      "type": "object",
+      "properties": {
+        "author": {
+          "description": "Who opened it.",
+          "type": "string"
+        },
+        "number": {
+          "description": "Its number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "opened": {
+          "description": "When it was opened, `YYYY-MM-DD`.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Its title.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Its page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "author",
+        "opened",
+        "url"
+      ]
+    },
+    "WatchedJson": {
+      "description": "A wanted addon on one series.",
+      "type": "object",
+      "properties": {
+        "add": {
+          "description": "The `odx add` command that adds it, on the project's series.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "last_series": {
+          "description": "The series it was last on, when it is not started.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "description": "Why it is wanted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pull_request": {
+          "description": "The migration pull request, when it is migrating.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MigrationJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repository": {
+          "description": "The repository it is in, is migrated in or was last in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "series": {
+          "description": "The series.",
+          "type": "string"
+        },
+        "state": {
+          "description": "`available`, `released`, `migrating`, `not-started` or `unchecked`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "series",
+        "state"
+      ]
+    }
+  }
+}
