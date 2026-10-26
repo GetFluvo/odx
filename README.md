@@ -40,7 +40,7 @@ project's pull requests, and downloads `odx` when it is not installed.
 ## Quick start
 
 ```console
-$ odx import repos.yaml --write     # start from an existing git-aggregator setup
+$ odx import repos.yaml --write     # from git-aggregator: pyproject.toml, created if missing
 $ odx aggregate                     # fetch and build every repository
 $ odx lock                          # pin and vault every merged commit
 $ odx status                        # what upstream merged, what changed
