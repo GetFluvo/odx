@@ -200,6 +200,7 @@ impl Scan<'_> {
                 fallback: None,
                 clone: None,
                 max_age: prepared.max_age,
+                offline: false,
             };
             let backend = SystemGit::new(Arc::new(OsRunner));
             fetch(

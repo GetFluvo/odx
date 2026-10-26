@@ -335,6 +335,18 @@ fn package_and_core_failures() {
         assert_eq!(exit, Exit::Failure, "{odoo}");
         assert!(err.contains(expected), "{err}");
     }
+    // Offline, a branch or tag cannot be asked of the remote.
+    let _ = std::fs::remove_file(project.root.join("odx.lock"));
+    project.write(
+        false,
+        &format!("odoo = {{ git = \"{}\", tag = \"v1\" }}", project.url),
+    );
+    let (exit, _, err) = project.run(&["--offline", "lock"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.contains("v1 of file://") && err.ends_with("run without --offline\n"),
+        "{err}"
+    );
     let base = git(&project.up, &["rev-parse", "17.0"]);
     for odoo in [
         format!("odoo = {{ git = \"{}\", rev = \"{base}\" }}", project.url),

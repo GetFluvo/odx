@@ -39,6 +39,7 @@ pub(crate) mod lint;
 pub(crate) mod migrate;
 pub(crate) mod pin;
 pub(crate) mod port;
+pub(crate) mod progress;
 pub(crate) mod promote;
 pub(crate) mod promote_apply;
 pub(crate) mod promote_forge;
@@ -142,6 +143,15 @@ impl Report {
             error: Some(message),
             ..Self::default()
         }
+    }
+
+    /// Without its warnings when `quiet` (`--quiet`).
+    #[must_use]
+    pub(crate) fn quiet(mut self, quiet: bool) -> Self {
+        if quiet {
+            self.warnings.clear();
+        }
+        self
     }
 
     /// Write the report: warnings and the error to `err`, output to `out`.

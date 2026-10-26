@@ -135,6 +135,27 @@ fn fetch_only_fills_the_cache() {
 }
 
 #[test]
+fn offline_needs_the_cache() {
+    let project = project("");
+    // Nothing cached: fails without trying the network.
+    let (exit, _, err) = run(&project, &["--offline", "aggregate", "--fetch-only"]);
+    assert_eq!(exit, Exit::Failure);
+    assert!(
+        err.ends_with("is not in the cache; fetch it once without --offline\n"),
+        "{err}"
+    );
+    let (exit, _, _) = run(&project, &["aggregate", "--fetch-only"]);
+    assert_eq!(exit, Exit::Success);
+    // Cached: even a lock, which always fetches, takes what the cache holds.
+    let (exit, out, err) = run(&project, &["--offline", "lock"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    assert!(
+        out.starts_with("fetched pos: 2 refs (2 already cached)\n"),
+        "{out}"
+    );
+}
+
+#[test]
 fn locked_commits_come_from_the_mirror() {
     let tmp = tempfile::tempdir().unwrap();
     let mirror = tmp.path().join("mirror.git");
@@ -307,6 +328,8 @@ fn warnings_are_shown() {
         err.starts_with("warning: tool.odx.mirror.ref_style: GitLab"),
         "{err}"
     );
+    let (exit, _, err) = run(&project, &["--quiet", "aggregate", "--fetch-only"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
 }
 
 #[test]

@@ -106,10 +106,10 @@ fn execute(
         | Command::Vendor(_) => cmd::sync::presence(ctx),
         _ => None,
     };
-    match &cli.command {
+    let report = match &cli.command {
         Command::Completions(args) => {
             clap_complete::generate(args.shell, &mut Cli::command(), "odx", out);
-            Ok(Exit::Success)
+            return Ok(Exit::Success);
         }
         Command::GitAggregate(args) => {
             let context = git_aggregate_rs::Context {
@@ -117,57 +117,44 @@ fn execute(
                 env: ctx.env,
                 dir: ctx.dir.clone(),
             };
-            git_aggregate_rs::execute(args, "odx git-aggregate", &context, out, err)
+            return git_aggregate_rs::execute(args, "odx git-aggregate", &context, out, err);
         }
-        Command::Aggregate(args) => {
-            cmd::aggregate::run_aggregate(args, &cli.global, ctx).emit(out, err)
-        }
-        Command::Lock(args) => cmd::aggregate::run_lock(args, &cli.global, ctx).emit(out, err),
-        Command::Verify(args) => cmd::verify::run_verify(args, &cli.global, ctx).emit(out, err),
-        Command::Auth(command) => cmd::auth::run_auth(command, &cli.global, ctx).emit(out, err),
-        Command::Sync(args) => cmd::sync::run_sync(args, &cli.global, ctx).emit(out, err),
-        Command::Cache(command) => cmd::sync::run_cache(command, &cli.global, ctx).emit(out, err),
+        Command::Aggregate(args) => cmd::aggregate::run_aggregate(args, &cli.global, ctx),
+        Command::Lock(args) => cmd::aggregate::run_lock(args, &cli.global, ctx),
+        Command::Verify(args) => cmd::verify::run_verify(args, &cli.global, ctx),
+        Command::Auth(command) => cmd::auth::run_auth(command, &cli.global, ctx),
+        Command::Sync(args) => cmd::sync::run_sync(args, &cli.global, ctx),
+        Command::Cache(command) => cmd::sync::run_cache(command, &cli.global, ctx),
         Command::Daemon(DaemonCommand::Run { interval }) => {
-            cmd::daemon::run_forever(interval.as_ref(), &cli.global, ctx, out, err)
+            return cmd::daemon::run_forever(interval.as_ref(), &cli.global, ctx, out, err);
         }
-        Command::Daemon(command) => {
-            cmd::daemon::run_daemon(command, &cli.global, ctx).emit(out, err)
-        }
-        Command::Status(args) => cmd::status::run_status(args, &cli.global, ctx).emit(out, err),
-        Command::Upgrade(args) => cmd::upgrade::run_upgrade(args, &cli.global, ctx).emit(out, err),
-        Command::CheckDeps(args) => {
-            cmd::check_deps::run_check_deps(args, &cli.global, ctx).emit(out, err)
-        }
-        Command::Suggest(args) => cmd::suggest::run_suggest(args, &cli.global, ctx).emit(out, err),
-        Command::Verdict(command) => {
-            cmd::verdict::run_verdict(command, &cli.global, ctx).emit(out, err)
-        }
-        Command::Dashboard(args) => {
-            cmd::dashboard::run_dashboard(args, &cli.global, ctx).emit(out, err)
-        }
-        Command::Doctor => cmd::doctor::run_doctor(&cli.global, ctx).emit(out, err),
-        Command::Dev(args) => cmd::dev::run_dev(args, &cli.global, ctx).emit(out, err),
-        Command::Build(args) => cmd::build::run_build(args, &cli.global, ctx).emit(out, err),
-        Command::Vendor(args) => cmd::vendor::run_vendor(args, &cli.global, ctx).emit(out, err),
-        Command::Sniff(args) => cmd::sniff::run_sniff(args, &cli.global, ctx).emit(out, err),
-        Command::Glue(args) => cmd::glue::run_glue(args, &cli.global, ctx).emit(out, err),
-        Command::Diff(args) => cmd::diff::run_diff(args, &cli.global, ctx).emit(out, err),
-        Command::Changelog(args) => {
-            cmd::changelog::run_changelog(args, &cli.global, ctx).emit(out, err)
-        }
-        Command::Stats(args) => cmd::stats::run_stats(args, &cli.global, ctx).emit(out, err),
-        Command::Import(args) => cmd::compat::run_import(args, ctx).emit(out, err),
-        Command::Export(args) => cmd::compat::run_export(args, ctx).emit(out, err),
-        Command::Port(args) => cmd::port::run_port(args, &cli.global, ctx).emit(out, err),
-        Command::Migrate(args) => cmd::migrate::run_migrate(args, &cli.global, ctx).emit(out, err),
-        Command::Lint(args) => cmd::lint::run_lint(args, &cli.global, ctx).emit(out, err),
-        Command::Add(args) => cmd::edit::run_add(args, ctx).emit(out, err),
-        Command::Drop(args) => cmd::edit::run_drop(args, ctx).emit(out, err),
-        Command::Promote(args) => cmd::promote::run_promote(args, &cli.global, ctx).emit(out, err),
-        Command::Bot(command) => cmd::bot::run_bot(command, &cli.global, ctx).emit(out, err),
-        Command::Env(EnvCommand::List) => cmd::env::run_list(&cli.global, ctx).emit(out, err),
-        Command::Env(EnvCommand::Diff(args)) => {
-            cmd::env_diff::run_diff(args, &cli.global, ctx).emit(out, err)
-        }
-    }
+        Command::Daemon(command) => cmd::daemon::run_daemon(command, &cli.global, ctx),
+        Command::Status(args) => cmd::status::run_status(args, &cli.global, ctx),
+        Command::Upgrade(args) => cmd::upgrade::run_upgrade(args, &cli.global, ctx),
+        Command::CheckDeps(args) => cmd::check_deps::run_check_deps(args, &cli.global, ctx),
+        Command::Suggest(args) => cmd::suggest::run_suggest(args, &cli.global, ctx),
+        Command::Verdict(command) => cmd::verdict::run_verdict(command, &cli.global, ctx),
+        Command::Dashboard(args) => cmd::dashboard::run_dashboard(args, &cli.global, ctx),
+        Command::Doctor => cmd::doctor::run_doctor(&cli.global, ctx),
+        Command::Dev(args) => cmd::dev::run_dev(args, &cli.global, ctx),
+        Command::Build(args) => cmd::build::run_build(args, &cli.global, ctx),
+        Command::Vendor(args) => cmd::vendor::run_vendor(args, &cli.global, ctx),
+        Command::Sniff(args) => cmd::sniff::run_sniff(args, &cli.global, ctx),
+        Command::Glue(args) => cmd::glue::run_glue(args, &cli.global, ctx),
+        Command::Diff(args) => cmd::diff::run_diff(args, &cli.global, ctx),
+        Command::Changelog(args) => cmd::changelog::run_changelog(args, &cli.global, ctx),
+        Command::Stats(args) => cmd::stats::run_stats(args, &cli.global, ctx),
+        Command::Import(args) => cmd::compat::run_import(args, ctx),
+        Command::Export(args) => cmd::compat::run_export(args, ctx),
+        Command::Port(args) => cmd::port::run_port(args, &cli.global, ctx),
+        Command::Migrate(args) => cmd::migrate::run_migrate(args, &cli.global, ctx),
+        Command::Lint(args) => cmd::lint::run_lint(args, &cli.global, ctx),
+        Command::Add(args) => cmd::edit::run_add(args, ctx),
+        Command::Drop(args) => cmd::edit::run_drop(args, ctx),
+        Command::Promote(args) => cmd::promote::run_promote(args, &cli.global, ctx),
+        Command::Bot(command) => cmd::bot::run_bot(command, &cli.global, ctx),
+        Command::Env(EnvCommand::List) => cmd::env::run_list(&cli.global, ctx),
+        Command::Env(EnvCommand::Diff(args)) => cmd::env_diff::run_diff(args, &cli.global, ctx),
+    };
+    report.quiet(cli.global.quiet).emit(out, err)
 }

@@ -67,6 +67,7 @@ pub fn package_fetch_plans(
                 fallback: vault.map(str::to_owned),
                 clone: None,
                 max_age: None,
+                offline: false,
             });
         }
         for plan in plans.iter_mut().filter(|plan| repo_key(&plan.url) == key) {

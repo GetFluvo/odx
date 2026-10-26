@@ -25,6 +25,9 @@ pub struct FetchPlan {
     /// repository was fetched within this long and holds them all; `None`
     /// always fetches.
     pub max_age: Option<Duration>,
+    /// Never use the network: serve every source from the cache, or fail
+    /// with [`GitError::NotCached`].
+    pub offline: bool,
 }
 
 /// Where a fetched source came from.
@@ -66,7 +69,8 @@ pub struct Fetched {
 /// [`GitError::Locked`] when another process keeps the repository locked
 /// past `lock_timeout`, [`GitError::Failed`] when git fails (unreachable
 /// remote, missing ref), and [`GitError::Failed`] with command `resolve`
-/// when a fetched source does not resolve to a commit.
+/// when a fetched source does not resolve to a commit. Offline,
+/// [`GitError::NotCached`] when a source is not in the cache.
 pub fn fetch(
     cache: &Cache,
     backend: &dyn GitBackend,
@@ -75,6 +79,10 @@ pub fn fetch(
 ) -> Result<Vec<Fetched>, GitError> {
     let dir = cache.repo_dir(&plan.url);
     let _lock = RepoLock::acquire(&cache.lock_file(&plan.url), lock_timeout)?;
+    if plan.offline {
+        check_alternates(&dir)?;
+        return offline(backend, &dir, plan);
+    }
     if !dir.join("HEAD").exists() {
         backend.init_bare(&dir)?;
         fs::write(cache.url_file(&plan.url), format!("{}\n", plan.url))?;
@@ -96,52 +104,9 @@ pub fn fetch(
         Some(clone) if clone.update => fetch_through_clone(backend, &dir, plan, clone)?,
         _ => Vec::new(),
     };
-    let mut vaulted: Vec<usize> = Vec::new();
-    let mut remotes: Vec<Option<&str>> = plan.sources.iter().map(|(r, _)| r.as_deref()).collect();
-    remotes.sort_unstable();
-    remotes.dedup();
-    for remote in remotes {
-        let mut refspecs: Vec<String> = plan
-            .sources
-            .iter()
-            .enumerate()
-            .filter(|(i, (r, _))| {
-                r.as_deref() == remote
-                    && !cached.contains(i)
-                    && !mirrored.contains(i)
-                    && !through_clone.contains(i)
-            })
-            .map(|(_, (_, source))| source.refspec(plan.forge, remote))
-            .collect();
-        refspecs.sort();
-        refspecs.dedup();
-        if refspecs.is_empty() {
-            continue;
-        }
-        if let Err(upstream) = backend.fetch(&dir, remote.unwrap_or(&plan.url), &refspecs) {
-            // Locked commits that are gone upstream are still in the vault.
-            let rescued = plan
-                .fallback
-                .as_deref()
-                .filter(|_| remote.is_none())
-                .is_some_and(|mirror| backend.fetch(&dir, mirror, &refspecs).is_ok());
-            if !rescued {
-                return Err(upstream);
-            }
-            vaulted.extend(
-                plan.sources
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, (r, _))| {
-                        r.is_none()
-                            && !cached.contains(i)
-                            && !mirrored.contains(i)
-                            && !through_clone.contains(i)
-                    })
-                    .map(|(i, _)| i),
-            );
-        }
-    }
+    let served =
+        |i: &usize| cached.contains(i) || mirrored.contains(i) || through_clone.contains(i);
+    let vaulted = fetch_remotes(backend, &dir, plan, &served)?;
     let fetched: Result<Vec<Fetched>, GitError> = plan
         .sources
         .iter()
@@ -172,6 +137,54 @@ pub fn fetch(
         })
         .collect();
     fetched.inspect(|_| stamp(cache, &plan.url))
+}
+
+/// Fetch the sources of `plan` that nothing `served` yet, with one fetch
+/// per remote URL; returns the indices of those the fallback mirror had to
+/// provide.
+fn fetch_remotes(
+    backend: &dyn GitBackend,
+    dir: &Path,
+    plan: &FetchPlan,
+    served: &dyn Fn(&usize) -> bool,
+) -> Result<Vec<usize>, GitError> {
+    let mut vaulted: Vec<usize> = Vec::new();
+    let mut remotes: Vec<Option<&str>> = plan.sources.iter().map(|(r, _)| r.as_deref()).collect();
+    remotes.sort_unstable();
+    remotes.dedup();
+    for remote in remotes {
+        let mut refspecs: Vec<String> = plan
+            .sources
+            .iter()
+            .enumerate()
+            .filter(|(i, (r, _))| r.as_deref() == remote && !served(i))
+            .map(|(_, (_, source))| source.refspec(plan.forge, remote))
+            .collect();
+        refspecs.sort();
+        refspecs.dedup();
+        if refspecs.is_empty() {
+            continue;
+        }
+        if let Err(upstream) = backend.fetch(dir, remote.unwrap_or(&plan.url), &refspecs) {
+            // Locked commits that are gone upstream are still in the vault.
+            let rescued = plan
+                .fallback
+                .as_deref()
+                .filter(|_| remote.is_none())
+                .is_some_and(|mirror| backend.fetch(dir, mirror, &refspecs).is_ok());
+            if !rescued {
+                return Err(upstream);
+            }
+            vaulted.extend(
+                plan.sources
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, (r, _))| r.is_none() && !served(i))
+                    .map(|(i, _)| i),
+            );
+        }
+    }
+    Ok(vaulted)
 }
 
 /// Record that the repository at `url` was just fetched. Without the stamp
@@ -206,6 +219,32 @@ fn from_cache(
                 remote: remote.clone(),
                 source: source.clone(),
                 sha: backend.resolve(dir, &local).ok().flatten()?,
+                via: Via::Cache,
+            })
+        })
+        .collect()
+}
+
+/// Every source of `plan` from the cache, whatever its age.
+fn offline(
+    backend: &dyn GitBackend,
+    dir: &Path,
+    plan: &FetchPlan,
+) -> Result<Vec<Fetched>, GitError> {
+    let cached = dir.join("HEAD").exists();
+    plan.sources
+        .iter()
+        .map(|(remote, source)| {
+            let local = source.local_ref(plan.forge, remote.as_deref());
+            let sha = if cached {
+                backend.resolve(dir, &local)?
+            } else {
+                None
+            };
+            Ok(Fetched {
+                remote: remote.clone(),
+                source: source.clone(),
+                sha: sha.ok_or_else(|| GitError::NotCached(format!("{source} of {}", plan.url)))?,
                 via: Via::Cache,
             })
         })

@@ -130,6 +130,7 @@ pub fn fetch_plans(
                     fallback: fallback.map(str::to_owned),
                     clone: None,
                     max_age: None,
+                    offline: false,
                 },
             });
         }
