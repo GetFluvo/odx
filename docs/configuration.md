@@ -2,8 +2,8 @@
 
 odx reads the `[tool.odx]` table of the project's `pyproject.toml`. Only
 `odoo_version` is required; every other key has a default. Unknown keys are
-errors, so a typo never goes unnoticed. Keys marked *not used yet* are
-accepted, so a configuration can name them already, but have no effect.
+errors, so a typo never goes unnoticed; [Stability](stability.md) says what
+a release may change.
 
 Durations are written as a number and a unit: `"90s"`, `"15m"`, `"12h"`,
 `"7d"`. Paths are relative to the project root.
