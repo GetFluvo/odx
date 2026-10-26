@@ -211,7 +211,7 @@ jobs:
           scripts/bot_cycle.sh "$RUNNER_TEMP/project"
       - name: The nightly cycle
         id: first
-        uses: $/
+        uses: getfluvo/odx-action@9d24acc2e609a897f12e05ba419271fe81eb8ff4 # v1.0.1
         with:
           version: none
           bot: true
@@ -219,7 +219,7 @@ jobs:
           cache: false
           working-directory: ${{ runner.temp }}/project
       - name: The same again
-        uses: $/
+        uses: getfluvo/odx-action@9d24acc2e609a897f12e05ba419271fe81eb8ff4 # v1.0.1
         with:
           version: none
           bot: true
