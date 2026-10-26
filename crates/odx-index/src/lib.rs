@@ -7,7 +7,7 @@
 //! older names to look for ([`AddonIndex::aliases`]). [`build`] fills one
 //! series from the sources in [`sources`], in order of trust: configured
 //! overrides, the local object cache, the package index.
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

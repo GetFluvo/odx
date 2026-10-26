@@ -103,7 +103,7 @@ fn import_errors() {
         err.starts_with(&format!("error: {}: ", w("badaddons.yaml"))),
         "{err}"
     );
-    fs.fail_on("/w/repos.yaml", std::io::ErrorKind::PermissionDenied);
+    fs.fail_on("/w/repos.yaml", ErrorKind::PermissionDenied);
     assert_eq!(run(&fs, &["import"]).0, Exit::Failure);
 }
 

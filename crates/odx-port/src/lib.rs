@@ -6,7 +6,7 @@
 //! blacklisted); [`blacklist`] reads and writes oca-port's blacklist files
 //! byte for byte. `odx suggest` and `odx port` share both. [`migrate`]
 //! migrates an addon to another series on a branch, the OCA way.
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 
 pub mod analysis;
 pub mod blacklist;
