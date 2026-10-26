@@ -35,6 +35,7 @@ doc:
 
 # Build the user documentation with warnings as errors.
 docs:
+    python3 scripts/config_reference.py --check
     uv run --only-group docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
 # Serve the user documentation with live reload.
