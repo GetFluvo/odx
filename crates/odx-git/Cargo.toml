@@ -1,6 +1,6 @@
 [package]
 name = "odx-git"
-description = "Git object cache, fetching, worktrees, merges, cherry-picks and patch-ids for odx, on gix with a system git fallback"
+description = "Git object cache, fetching, worktrees, merges, cherry-picks and patch-ids for odx, on the system git"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

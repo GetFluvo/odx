@@ -1,6 +1,6 @@
 # odx-git
 
-Git object cache, fetching, worktrees, merges, cherry-picks and patch-ids for odx, on gix with a system git fallback.
+Git object cache, fetching, worktrees, merges, cherry-picks and patch-ids for odx, on the system git.
 
 Part of [odx](https://github.com/getfluvo/odx), the Odoo Developer eXtension.
 This crate is one of the building blocks of the `odx` command

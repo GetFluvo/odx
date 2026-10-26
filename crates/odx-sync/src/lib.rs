@@ -69,15 +69,23 @@ impl Presence {
     /// cannot be created (the command runs anyway).
     pub fn enter(cache: &Path) -> Option<Self> {
         let dir = cache.join("active");
-        let path = dir.join(format!(
+        let name = format!(
             "{}-{}",
             std::process::id(),
             PRESENCES.fetch_add(1, Ordering::Relaxed)
-        ));
+        );
+        let path = dir.join(&name);
+        // Locked under a hidden name first, which `busy` passes over: a
+        // file it saw before the lock would look left over and be removed.
+        let hidden = dir.join(format!(".{name}"));
         let file = fs::create_dir_all(&dir)
-            .and_then(|()| File::create(&path))
+            .and_then(|()| File::create(&hidden))
             .and_then(|file| file.lock().map(|()| file))
-            .ok()?;
+            .and_then(|file| fs::rename(&hidden, &path).map(|()| file));
+        let Ok(file) = file else {
+            let _ = fs::remove_file(&hidden);
+            return None;
+        };
         Some(Self {
             path,
             file: Some(file),
@@ -103,6 +111,9 @@ pub fn busy(cache: &Path) -> bool {
         .flatten()
     {
         let path = entry.path();
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         if File::open(&path).is_ok_and(|file| file.try_lock().is_ok()) {
             let _ = fs::remove_file(&path);
         } else {
@@ -286,10 +297,31 @@ mod tests {
         fs::write(cache.join("active").join("1-0"), "").unwrap();
         assert!(!busy(&cache));
         assert!(!cache.join("active").join("1-0").exists());
+        // One being entered, not locked yet, is left alone.
+        fs::write(cache.join("active").join(".1-1"), "").unwrap();
+        assert!(!busy(&cache));
+        assert!(cache.join("active").join(".1-1").exists());
         // No cache to announce in.
         let blocked = tmp.path().join("file");
         fs::write(&blocked, "").unwrap();
         assert!(Presence::enter(&blocked).is_none());
+        // A presence that cannot take its name leaves nothing behind.
+        let taken = tmp.path().join("taken");
+        let next = PRESENCES.load(Ordering::Relaxed);
+        fs::create_dir_all(
+            taken
+                .join("active")
+                .join(format!("{}-{next}", std::process::id()))
+                .join("x"),
+        )
+        .unwrap();
+        assert!(Presence::enter(&taken).is_none());
+        assert!(
+            !taken
+                .join("active")
+                .join(format!(".{}-{next}", std::process::id()))
+                .exists()
+        );
     }
 
     #[test]
