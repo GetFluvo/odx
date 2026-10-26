@@ -7,8 +7,13 @@ use std::path::Path;
 fn published_schemas_are_current() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/json");
     let update = std::env::var_os("ODX_UPDATE_SCHEMAS").is_some();
+    let page = std::fs::read_to_string(dir.with_file_name("json-output.md")).unwrap();
     let mut stale = Vec::new();
     for (name, schema) in odx_cli::json::schemas() {
+        assert!(
+            page.contains(&format!("/{name}.schema.json)")),
+            "docs/json-output.md does not list {name}"
+        );
         let file = dir.join(format!("{name}.schema.json"));
         let text = format!("{}\n", serde_json::to_string_pretty(&schema).unwrap());
         if update {

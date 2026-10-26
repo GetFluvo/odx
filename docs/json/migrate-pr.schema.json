@@ -4,16 +4,43 @@
   "description": "What `odx --json migrate pr` prints.",
   "type": "object",
   "properties": {
+    "draft": {
+      "description": "Whether it was opened as a draft.",
+      "type": "boolean"
+    },
+    "number": {
+      "description": "The pull request number.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "pushed_to": {
+      "description": "Where the branch went: a remote or a URL.",
+      "type": "string"
+    },
     "schema": {
       "description": "The version of this layout.",
       "type": "integer",
       "format": "uint32",
       "const": 1,
       "minimum": 0
+    },
+    "status": {
+      "description": "Always `opened`.",
+      "type": "string",
+      "const": "opened"
+    },
+    "url": {
+      "description": "The pull request page.",
+      "type": "string"
     }
   },
-  "additionalProperties": true,
   "required": [
-    "schema"
+    "schema",
+    "status",
+    "pushed_to",
+    "number",
+    "url",
+    "draft"
   ]
 }

@@ -20,7 +20,7 @@ command with the task it belongs to.
 | `--offline` | serve git repositories and forge and index data from the cache only |
 | `--fresh` | ignore cached data; refresh everything first |
 | `--no-refresh` | use cached data even when stale |
-| `--json` | machine-readable output on stdout |
+| `--json` | machine-readable output on stdout; see [JSON output](json-output.md) |
 | `-v` / `-q` | more or less progress on stderr |
 
 `--offline` and `--no-refresh` save network time only: local work such as git,

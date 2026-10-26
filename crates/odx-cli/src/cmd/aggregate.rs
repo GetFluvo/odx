@@ -42,8 +42,8 @@ use super::Report;
 use super::edit::{read_lock, save};
 use super::progress::{Reporter, Verbosity, to_stderr};
 use super::sniff::{
-    Sniffed, describe as describe_sniffed, fail_on_new, script_count, sniff_locked,
-    to_json as sniffed_json,
+    Sniffed, SniffedJson, describe as describe_sniffed, fail_on_new, script_count, sniff_locked,
+    sniffed_json,
 };
 use crate::Context;
 use crate::cli::{AggregateArgs, GlobalArgs, LockArgs};
@@ -1590,7 +1590,7 @@ pub(crate) struct AggregateJson<'a> {
     notes: &'a [String],
     /// The migrations the locked repositories bring, as `odx sniff` reports
     /// them.
-    migrations: serde_json::Value,
+    migrations: Vec<SniffedJson<'a>>,
     /// Commits written to bundles.
     bundled: Vec<BundledJson<'a>>,
     /// Other failures, for people.

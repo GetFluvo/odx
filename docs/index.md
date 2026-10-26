@@ -55,6 +55,7 @@ cli
 configuration
 user-config
 files
+json-output
 ```
 
 ```{toctree}
