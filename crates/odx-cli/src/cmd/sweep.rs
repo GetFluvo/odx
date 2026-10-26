@@ -17,7 +17,7 @@ use serde::Serialize;
 
 use super::Report;
 use super::port::{failed, repository, settings, usage};
-use super::propose::{Proposed, default_remote, forge_repo, opened_json, opened_text, propose};
+use super::propose::{OpenedJson, Proposed, default_remote, forge_repo, opened_text, propose};
 use crate::Context;
 use crate::cli::{GlobalArgs, SweepArgs};
 
@@ -54,7 +54,7 @@ pub(crate) struct SweepJson<'a> {
     /// The subjects of the blacklist commits.
     commits: &'a [String],
     /// The pull request opened, with `--open-pr`.
-    pull_request: Option<serde_json::Value>,
+    pull_request: Option<OpenedJson<'a>>,
 }
 
 /// The reason a false positive is blacklisted with; `None` for what is
@@ -217,7 +217,7 @@ pub(crate) fn run_sweep(
             addons: &rows,
             branch: written.then_some(branch.as_str()),
             commits: &commits,
-            pull_request: opened.as_ref().map(opened_json),
+            pull_request: opened.as_ref().map(OpenedJson::of),
         })
     } else {
         let mut out = text(&rows, &sources, to);

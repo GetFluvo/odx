@@ -37,7 +37,10 @@ pub(super) fn schemas() -> Vec<(&'static str, Schema)> {
             "migrate-own",
             schema_for!(cmd::migrate::MigrateOwnJson<'static>),
         ),
-        ("migrate-pr", schema_for!(cmd::migrate::MigratePrJson)),
+        (
+            "migrate-pr",
+            schema_for!(cmd::migrate::MigratePrJson<'static>),
+        ),
         ("migrate-update", schema_for!(cmd::update::Updated<'static>)),
         ("migrate-unpin", schema_for!(cmd::unpin::Unpinned)),
         ("port", schema_for!(cmd::port::PortJson<'static>)),

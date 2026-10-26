@@ -170,11 +170,6 @@ struct AddonChangeJson<'a> {
     scripts: &'a [Script],
 }
 
-/// `sniffed` as a JSON value, for outputs still built with `json!`.
-pub(crate) fn to_json(sniffed: &[Sniffed]) -> serde_json::Value {
-    serde_json::to_value(sniffed_json(sniffed)).unwrap_or_default()
-}
-
 /// `sniffed` as JSON.
 pub(crate) fn sniffed_json(sniffed: &[Sniffed]) -> Vec<SniffedJson<'_>> {
     sniffed

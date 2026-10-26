@@ -80,10 +80,6 @@ impl<'a> OpenedJson<'a> {
     }
 }
 
-pub(crate) fn opened_json(pushed: &Pushed) -> serde_json::Value {
-    serde_json::to_value(OpenedJson::of(pushed)).unwrap_or_default()
-}
-
 /// Where to push a branch for a fork: like the remote's URL, SSH or HTTPS.
 fn push_url(remote_url: &str, fork: &RepoUrl) -> String {
     if remote_url.starts_with("git@") || remote_url.starts_with("ssh://") {

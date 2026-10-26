@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use super::aggregate::Prepared;
 use super::propose::{
-    Proposed, Pushed, default_remote, forge_repo, git, opened_json, opened_text, propose,
+    OpenedJson, Proposed, Pushed, default_remote, forge_repo, git, opened_text, propose,
 };
 use super::suggest::{Found, repository_name};
 use super::{Report, output_of};
@@ -217,7 +217,7 @@ fn finished(
             schema: 1,
             outcome: PortJsonOutcome::Done {
                 ported,
-                pull_request: opened.as_ref().map(opened_json),
+                pull_request: opened.as_ref().map(OpenedJson::of),
             },
         });
     } else {
@@ -707,7 +707,7 @@ enum PortJsonOutcome<'a> {
         ported: &'a Ported,
         /// The pull request opened, with `--open-pr`.
         #[serde(skip_serializing_if = "Option::is_none")]
-        pull_request: Option<serde_json::Value>,
+        pull_request: Option<OpenedJson<'a>>,
     },
     /// `port addon` found nothing portable.
     #[serde(rename = "nothing to port")]

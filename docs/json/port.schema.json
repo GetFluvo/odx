@@ -42,7 +42,15 @@
           "minimum": 0
         },
         "pull_request": {
-          "description": "The pull request opened, with `--open-pr`."
+          "description": "The pull request opened, with `--open-pr`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenedJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "status": {
           "type": "string",
@@ -147,6 +155,42 @@
         "line",
         "code",
         "message"
+      ]
+    },
+    "OpenedJson": {
+      "description": "A pushed branch and the pull request opened for it.",
+      "type": "object",
+      "properties": {
+        "draft": {
+          "description": "Whether it was opened as a draft.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "The pull request number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "pushed_to": {
+          "description": "Where the branch went: a remote or a URL.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Always `opened`.",
+          "type": "string",
+          "const": "opened"
+        },
+        "url": {
+          "description": "The pull request page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "pushed_to",
+        "number",
+        "url",
+        "draft"
       ]
     }
   }

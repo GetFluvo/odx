@@ -18,7 +18,7 @@ use serde::Serialize;
 use super::deps::Waiting;
 use super::pin::{self, previous};
 use super::propose::{
-    Proposed, Pushed, default_remote, forge_repo, git, opened_json, opened_text, propose,
+    OpenedJson, Proposed, Pushed, default_remote, forge_repo, git, opened_text, propose,
 };
 use super::{Report, output_of};
 use crate::Context;
@@ -32,13 +32,13 @@ pub(crate) fn run_migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context
 /// What `odx --json migrate pr` prints.
 #[derive(Debug, Serialize, JsonSchema)]
 #[schemars(title = "odx migrate pr")]
-pub(crate) struct MigratePrJson {
+pub(crate) struct MigratePrJson<'a> {
     /// The version of this layout.
     #[schemars(extend("const" = 1))]
     schema: u32,
     /// The pull request opened.
     #[serde(flatten)]
-    opened: serde_json::Value,
+    opened: OpenedJson<'a>,
 }
 
 /// What `odx --json migrate addon`, `--continue` and `--abort` print.
@@ -69,7 +69,7 @@ enum MigrateOutcome<'a> {
         pinned: &'a [String],
         /// The pull request opened, with `--open-pr`.
         #[serde(skip_serializing_if = "Option::is_none")]
-        pull_request: Option<serde_json::Value>,
+        pull_request: Option<OpenedJson<'a>>,
     },
     /// A conflict stopped the migration.
     Stopped {
@@ -215,7 +215,7 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
                 out: if global.json {
                     super::to_json(&MigratePrJson {
                         schema: 1,
-                        opened: opened_json(&opened),
+                        opened: OpenedJson::of(&opened),
                     })
                 } else {
                     opened_text(&opened)
@@ -782,7 +782,7 @@ fn json(
             summary,
             waits_on: waits,
             pinned,
-            pull_request: opened.map(opened_json),
+            pull_request: opened.map(OpenedJson::of),
         },
     })
 }
