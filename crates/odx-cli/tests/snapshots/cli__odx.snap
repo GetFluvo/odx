@@ -26,6 +26,7 @@ Commands:
   verdict        Record, list, revoke and share decisions about upstream changes
   check-deps     Compare __manifest__.py dependencies with pyproject.toml
   glue           Glue addons Odoo would install with what the project has, that it does not have
+  wanted         Addons the project may need later: whether they are there, or someone is migrating them
   sniff          List database migration scripts introduced by merges
   changelog      Release notes between two states of odx.lock: merges, packages, Odoo and migrations
   diff           Changes between two states of odx.lock likely to affect the database schema

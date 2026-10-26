@@ -142,6 +142,7 @@ fn execute(
         Command::Vendor(args) => cmd::vendor::run_vendor(args, &cli.global, ctx),
         Command::Sniff(args) => cmd::sniff::run_sniff(args, &cli.global, ctx),
         Command::Glue(args) => cmd::glue::run_glue(args, &cli.global, ctx),
+        Command::Wanted(args) => cmd::wanted::run_wanted(args, &cli.global, ctx),
         Command::Diff(args) => cmd::diff::run_diff(args, &cli.global, ctx),
         Command::Changelog(args) => cmd::changelog::run_changelog(args, &cli.global, ctx),
         Command::Stats(args) => cmd::stats::run_stats(args, &cli.global, ctx),

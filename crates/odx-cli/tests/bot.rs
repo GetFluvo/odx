@@ -276,14 +276,30 @@ impl State {
             }
             (method, Some(path)) if path.starts_with("/issues/") => {
                 let rest = path.trim_start_matches("/issues/");
-                let (number, labels) = rest
-                    .split_once('/')
-                    .map_or((rest, false), |(n, more)| (n, more == "labels"));
+                let (number, more) = rest.split_once('/').unwrap_or((rest, ""));
+                let labels = more == "labels";
                 let number: u64 = number.parse().unwrap();
                 let names = self.label_names(&body["labels"]);
                 let Some(item) = self.item(number) else {
                     return (404, String::new());
                 };
+                if more == "comments" {
+                    let comments = item
+                        .as_object_mut()
+                        .unwrap()
+                        .entry("comments")
+                        .or_insert_with(|| json!([]));
+                    if method == "POST" {
+                        let comment = json!({
+                            "id": comments.as_array().unwrap().len() + 1,
+                            "user": {"login": "odx-bot"},
+                            "body": body["body"],
+                        });
+                        comments.as_array_mut().unwrap().push(comment.clone());
+                        return (201, comment.to_string());
+                    }
+                    return (200, comments.to_string());
+                }
                 match (method, labels) {
                     ("POST", true) => {
                         let list = item["labels"].as_array_mut().unwrap();
@@ -1227,4 +1243,121 @@ fn routine_pull_requests_and_promotions_by_label() {
     );
     let branches = git(&setup.bare, &["branch", "--list", "odx/promote/*"]);
     assert!(!branches.contains("pr-51-prod"), "{branches}");
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one milestone after another, as runs see them"
+)]
+fn a_wanted_addon_whose_migration_starts_is_announced_once() {
+    let setup = Setup::new(false);
+    let pyproject = setup.project.join("pyproject.toml");
+    let text = std::fs::read_to_string(&pyproject).unwrap().replace(
+        "labels = [\"bot\"]\n",
+        "labels = [\"bot\"]\nnotify = [\"ann\"]\n",
+    );
+    std::fs::write(
+        &pyproject,
+        format!(
+            "{text}\n[[tool.odx.wanted]]\naddon = \"pos_y\"\nrepository = \"{}/OCA/pos\"\nnote = \"customer asks in Q3\"\n",
+            setup.up_api
+        ),
+    )
+    .unwrap();
+    git(&setup.project, &["add", "-A"]);
+    git(&setup.project, &["commit", "--quiet", "-m", "wanted"]);
+    setup.git(&["push", "--quiet", "origin", "main"]);
+    setup.git(&["fetch", "--quiet", "origin"]);
+    setup.route(
+        "/api/v3/repos/OCA/pos/pulls",
+        200,
+        r#"[{"number": 7, "title": "[17.0][MIG] pos_y: Migration to 17.0", "state": "open", "base": {"ref": "17.0"},
+             "user": {"login": "joe"}, "created_at": "2026-03-04T05:06:07Z"},
+           {"number": 5, "title": "[17.0][FIX] pos_x: 5", "state": "open", "base": {"ref": "17.0"}},
+           {"number": 1, "title": "[17.0][FIX] pos_x: 1", "state": "open", "base": {"ref": "17.0"}}]"#,
+    );
+    let bot = |args: &[&str]| {
+        let out = setup
+            .command(env!("CARGO_BIN_EXE_odx"))
+            .env("ODX_PYPI_URL", format!("{}/pypi", setup.up_api))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // Without --apply, it says what it would post.
+    assert!(
+        bot(&["bot", "dashboard"]).ends_with("17.0: dashboard issue would be created\n"),
+        "nothing to comment on before the issue exists"
+    );
+    let writes = setup.writes(|| {
+        let out = bot(&["bot", "dashboard", "--apply"]);
+        assert!(
+            out.ends_with(
+                "17.0: dashboard issue #1 created\nwant:pos_y@17.0: migrating OCA/pos#7 commented on #1\n"
+            ),
+            "{out}"
+        );
+    });
+    let comments = writes
+        .iter()
+        .filter(|line| line.contains("/issues/1/comments"))
+        .count();
+    assert_eq!(comments, 1, "{writes:?}");
+    let body = setup.issue(1)["comments"][0]["body"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        body.starts_with("@ann Someone started migrating the wanted addon pos_y on 17.0: OCA/pos#7 by joe, opened 2026-03-04. `odx dashboard act want:pos_y@17.0 --include` adds it to the project."),
+        "{body}"
+    );
+    assert!(
+        setup.issue(1)["body"]
+            .as_str()
+            .unwrap()
+            .contains("Wanted addons")
+    );
+    // The next run finds its comment and says nothing more.
+    let writes = setup.writes(|| {
+        let out = bot(&["--json", "bot", "dashboard", "--apply"]);
+        let value: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["dashboards"][0]["wanted"], json!([]), "{value:#}");
+    });
+    assert!(
+        writes.iter().all(|line| !line.contains("/comments")),
+        "{writes:?}"
+    );
+    // Another migration pull request is another milestone; without
+    // --apply, it is only planned.
+    setup.route(
+        "/api/v3/repos/OCA/pos/pulls",
+        200,
+        r#"[{"number": 8, "title": "[17.0][MIG] pos_y", "state": "open", "base": {"ref": "17.0"},
+             "user": {"login": "kim"}, "created_at": "2026-04-01T00:00:00Z"}]"#,
+    );
+    let out = bot(&["--fresh", "bot", "dashboard"]);
+    assert!(
+        out.ends_with("want:pos_y@17.0: migrating OCA/pos#8 would comment on #1\n"),
+        "{out}"
+    );
+    // A forge that fails to list or take comments ends the run.
+    let comments = "/api/v3/repos/acme/project/issues/1/comments";
+    for method in ["GET", "POST"] {
+        setup.state.lock().unwrap().failing =
+            vec![(method.to_owned(), comments.to_owned(), String::new())];
+        let out = setup
+            .command(env!("CARGO_BIN_EXE_odx"))
+            .env("ODX_PYPI_URL", format!("{}/pypi", setup.up_api))
+            .args(["bot", "dashboard", "--apply"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{method}");
+    }
 }

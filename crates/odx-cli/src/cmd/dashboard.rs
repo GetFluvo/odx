@@ -10,6 +10,7 @@ use odx_aggregate::plan_config;
 use odx_dashboard::{Action, Dashboard, Entry, Section, SectionKind, markdown, table};
 use odx_forge::{CachedHttp, ForgeClient, PrState, RepoUrl, ReqwestHttp};
 use odx_index::series_key;
+use odx_index::sources::distribution;
 use odx_port::analysis::Class;
 use odx_verdicts::Standing;
 
@@ -24,6 +25,7 @@ use super::env_diff::units;
 use super::status::{Row, rows};
 use super::suggest::{Judged, collect, judge, repository_name};
 use super::upgrade::{Kind, addons};
+use super::wanted::State;
 use crate::Context;
 use crate::cli::{
     AddArgs, DashboardAct, DashboardActArgs, DashboardArgs, DashboardFormat, DropArgs, GlobalArgs,
@@ -420,6 +422,65 @@ fn glue(prepared: &Prepared, specs: &mut Specs) -> Section {
     }
 }
 
+/// The wanted section: the wanted addons that are there or being
+/// migrated, to add on the project's series; the others wait unseen.
+fn wanted(
+    ctx: &Context<'_>,
+    prepared: &Prepared,
+    global: &GlobalArgs,
+    specs: &mut Specs,
+    warnings: &mut Vec<Problem>,
+) -> Section {
+    let config = &prepared.project.config;
+    let series = &config.odoo_version;
+    let entries = super::wanted::watch(ctx, prepared, global, warnings)
+        .into_iter()
+        .filter(|watched| {
+            matches!(
+                watched.standing,
+                State::Available { .. } | State::Migrating(_)
+            )
+        })
+        // What the project took as a package is no longer offered.
+        .filter(|watched| {
+            !config
+                .packages
+                .contains_key(&distribution(&watched.addon, &watched.series))
+        })
+        .map(|watched| {
+            let id = watched.id();
+            let add = watched.add_spec(series);
+            if let Some((spec, dist, path)) = add.clone() {
+                specs.insert(
+                    id.clone(),
+                    Edit {
+                        spec,
+                        package: false,
+                        add_as: Some((dist, path)),
+                    },
+                );
+            }
+            Entry {
+                id,
+                addon: Some(watched.addon.clone()),
+                subject: format!("{} on {}", watched.addon, watched.series),
+                state: watched.describe(),
+                actions: if add.is_some() {
+                    vec![Action::Include]
+                } else {
+                    Vec::new()
+                },
+                notes: watched.note.into_iter().collect(),
+            }
+        })
+        .collect();
+    Section {
+        kind: SectionKind::Wanted,
+        fetched_at: now(),
+        entries,
+    }
+}
+
 /// The pairs of environments the drift section compares:
 /// `[tool.odx.dashboard] environment_pairs`, else every promotion edge
 /// between environments that are not disposable.
@@ -583,6 +644,7 @@ pub(crate) fn build(
         if own {
             sections.push(auto_update(ctx, prepared, warnings));
             sections.push(glue(prepared, &mut specs));
+            sections.push(wanted(ctx, prepared, global, &mut specs, warnings));
             sections.extend(drift(prepared, warnings));
         }
         sections.sort_by_key(|section| {

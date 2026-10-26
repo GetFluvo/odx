@@ -1,0 +1,58 @@
+---
+source: crates/odx-cli/tests/cli.rs
+expression: cmd.render_long_help().to_string()
+---
+Watch an addon, or change how it is watched
+
+Usage: odx wanted add [OPTIONS] <ADDON>
+
+Arguments:
+  <ADDON>
+          The addon's technical name
+
+Options:
+      --series <SERIES>
+          Series to watch it on (default: the project's)
+
+      --repository <REPO>
+          Its repository, `owner/repo` on GitHub or a URL (default: where the addon index finds it)
+
+      --note <NOTE>
+          Why it is wanted
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve git repositories and forge and index data from the cache only; what is not cached fails. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Say when each repository's fetch and build starts, and what each fetched and merged
+
+  -q, --quiet
+          Errors only on standard error: no progress lines, no warnings

@@ -271,6 +271,8 @@ pub enum DashboardSection {
     AutoUpdate,
     /// Glue addons the project misses.
     Glue,
+    /// Wanted addons that are there or being migrated.
+    Wanted,
     /// Environment drift.
     Drift,
     /// What verdicts, mutes and blacklists hide.
@@ -294,6 +296,7 @@ impl DashboardSection {
             Self::Backport => "backport",
             Self::AutoUpdate => "auto-update",
             Self::Glue => "glue",
+            Self::Wanted => "wanted",
             Self::Drift => "drift",
             Self::Suppressed => "suppressed",
         }
@@ -939,6 +942,7 @@ mod tests {
             "backport",
             "auto-update",
             "glue",
+            "wanted",
             "drift",
             "suppressed",
         ];

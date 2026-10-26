@@ -33,6 +33,7 @@ use super::dashboard::{Specs, build, run_act};
 use super::promote_apply::{commit, failed, worktree};
 use super::propose::forge_repo;
 use super::verify::run_verify;
+use super::wanted;
 use crate::Context;
 use crate::cli::{
     AggregateArgs, BotArgs, BotCommand, DashboardActArgs, DashboardArgs, DashboardFormat,
@@ -167,6 +168,19 @@ struct WrittenJson {
     requests: Vec<RequestJson>,
     /// Each routine change and what became of it.
     routine: Vec<RoutineJson>,
+    /// Each wanted addon that reached a milestone, announced in a comment.
+    wanted: Vec<NoticeJson>,
+}
+
+/// A wanted addon's milestone, announced on the dashboard issue.
+#[derive(Debug, Serialize, JsonSchema)]
+struct NoticeJson {
+    /// The dashboard entry: `want:<addon>@<series>`.
+    id: String,
+    /// `migrating <owner>/<repo>#<n>` or `available`.
+    milestone: String,
+    /// `commented`, or `would comment` without `--apply`.
+    write: &'static str,
 }
 
 /// A dashboard the run left alone.
@@ -579,6 +593,10 @@ fn cycle_on(
         let body = issue::body(&page, found.map(|i| i.body.as_str()));
         let (write, written) = write_issue(forge, bot, dashboard, found, &body)?;
         let _ = writeln!(out, "{}: dashboard issue {write}", dashboard.series);
+        let notify = settings
+            .and_then(|bot| bot.notify.as_deref())
+            .unwrap_or_default();
+        let wanted = announce(forge, bot, dashboard, written.as_ref(), notify, &mut out)?;
         listed.push(DashboardRunJson::Written(WrittenJson {
             series: dashboard.series.clone(),
             issue: IssueJson {
@@ -588,6 +606,7 @@ fn cycle_on(
             },
             requests: acted.done,
             routine: acted.routine,
+            wanted,
         }));
     }
     let value = BotJson {
@@ -607,6 +626,68 @@ fn cycle_on(
         warnings,
         ..Report::default()
     })
+}
+
+/// Comment on the dashboard issue for each wanted addon that reached a
+/// milestone no comment there announced yet, mentioning `notify`: a person
+/// watching the project hears of it, which an edit of the issue does not do.
+fn announce(
+    forge: &Forge<'_>,
+    bot: &BotArgs,
+    dashboard: &Dashboard,
+    issue: Option<&Issue>,
+    notify: &[String],
+    out: &mut String,
+) -> Result<Vec<NoticeJson>, Report> {
+    let reached: Vec<(&Entry, String)> = dashboard
+        .sections
+        .iter()
+        .filter(|section| section.kind == SectionKind::Wanted)
+        .flat_map(|section| &section.entries)
+        .filter_map(|entry| wanted::milestone(entry).map(|milestone| (entry, milestone)))
+        .collect();
+    let Some(issue) = issue.filter(|_| !reached.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let comments = forge
+        .client
+        .issue_comments(&forge.repo, forge.kind, issue.number)
+        .map_err(forge_failure)?;
+    let mut notices = Vec::new();
+    for (entry, milestone) in reached {
+        let marker = wanted::marker(&entry.id, &milestone);
+        if comments
+            .iter()
+            .any(|comment| comment.body.contains(&marker))
+        {
+            continue;
+        }
+        let write = if bot.apply {
+            forge
+                .client
+                .comment(
+                    &forge.repo,
+                    forge.kind,
+                    issue.number,
+                    &wanted::notice(entry, &milestone, notify),
+                )
+                .map_err(forge_failure)?;
+            "commented"
+        } else {
+            "would comment"
+        };
+        let _ = writeln!(
+            out,
+            "{}: {} {write} on #{}",
+            entry.id, milestone, issue.number
+        );
+        notices.push(NoticeJson {
+            id: entry.id.clone(),
+            milestone,
+            write,
+        });
+    }
+    Ok(notices)
 }
 
 /// Create or update the dashboard issue: what was written (`created`,

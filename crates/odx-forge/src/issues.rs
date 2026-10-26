@@ -500,6 +500,10 @@ mod tests {
             comment,
             Err(ForgeError::Status { status: 403, .. })
         ));
+        let (comment, _) = run(vec![Err(ForgeError::Http("down".to_owned()))], |c| {
+            c.comment(&github(), ForgeKind::Github, 4, "b")
+        });
+        assert_eq!(comment, Err(ForgeError::Http("down".to_owned())));
     }
 
     #[test]

@@ -69,6 +69,7 @@ errors on standard error: no progress lines and no warnings.
 | `dashboard`, `bot` | one view of everything to act on, and the same as an issue with pull requests | [Following upstream](upstream.md#the-dashboard) |
 | `verdict` | record and share decisions about upstream changes | [Following upstream](upstream.md#verdicts-and-mutes) |
 | `glue` | glue addons Odoo would install with what the project has | [Following upstream](upstream.md#glue-addons) |
+| `wanted` | addons the project may need later: there yet, or being migrated | [Following upstream](upstream.md#wanted-addons) |
 | `check-deps` | compare manifest dependencies with `pyproject.toml` | [Checking addons](checks.md#checking-dependencies) |
 | `lint` | Odoo-specific lint checks with project context | [Checking addons](checks.md#linting) |
 | `stats` | lines of code per language | [Checking addons](checks.md#lines-of-code) |
