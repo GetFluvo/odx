@@ -306,7 +306,9 @@ fn new_upstream(
             })
             .unwrap_or_default();
         for pr in open {
-            let named = mine.iter().find(|addon| pr.title.contains(**addon));
+            let named = mine
+                .iter()
+                .find(|addon| super::deps::names(&pr.title, addon));
             let new = u32::try_from(pr.number).is_ok_and(|n| !merged.contains(&n));
             if let Some(addon) = named.filter(|_| new) {
                 let id = format!("new:{}#{}", repository_name(&repo.url), pr.number);

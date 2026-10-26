@@ -370,3 +370,34 @@ fn glue_is_ignored_with_a_reason() {
         assert_eq!(bad.ignore_glue("x", "y"), Err(EditError::Malformed(key)));
     }
 }
+
+#[test]
+fn wanted_addons_are_added_replaced_and_removed() {
+    let mut edit = PyprojectEdit::parse("[tool.odx]\nodoo_version = \"17.0\"\n").unwrap();
+    edit.want("contract", &[], None, None).unwrap();
+    edit.want(
+        "agreement",
+        &["17.0".to_owned(), "18.0".to_owned()],
+        Some("OCA/contract"),
+        Some("customer asks in Q3"),
+    )
+    .unwrap();
+    edit.want("contract", &[], None, Some("later")).unwrap();
+    assert_eq!(
+        edit.to_string(),
+        "[tool.odx]\nodoo_version = \"17.0\"\n\n[[tool.odx.wanted]]\naddon = \"contract\"\nnote = \"later\"\n\n[[tool.odx.wanted]]\naddon = \"agreement\"\nseries = [\"17.0\", \"18.0\"]\nrepository = \"OCA/contract\"\nnote = \"customer asks in Q3\"\n"
+    );
+    edit.unwant("contract").unwrap();
+    assert!(!edit.to_string().contains("\"contract\""));
+    assert_eq!(
+        edit.unwant("contract"),
+        Err(EditError::NotFound("contract is not wanted".to_owned()))
+    );
+    let mut bad = PyprojectEdit::parse("[tool.odx]\nwanted = 1\n").unwrap();
+    assert_eq!(
+        bad.want("x", &[], None, None),
+        Err(EditError::Malformed("[tool.odx].wanted"))
+    );
+    let mut none = PyprojectEdit::parse("[project]\n").unwrap();
+    assert_eq!(none.unwant("x"), Err(EditError::NoOdxTable));
+}

@@ -231,6 +231,65 @@ impl PyprojectEdit {
         Ok(())
     }
 
+    /// Add `addon` as a `[[tool.odx.wanted]]` entry, or replace the entry
+    /// it has; `series` empty watches the project's series.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::NoOdxTable`] without `[tool.odx]`, and
+    /// [`EditError::Malformed`] when `wanted` is no array of tables.
+    pub fn want(
+        &mut self,
+        addon: &str,
+        series: &[String],
+        repository: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<(), EditError> {
+        let mut table = Table::new();
+        table.insert("addon", Item::Value(Value::from(addon)));
+        if !series.is_empty() {
+            table.insert(
+                "series",
+                Item::Value(Value::Array(series.iter().map(String::as_str).collect())),
+            );
+        }
+        if let Some(repository) = repository {
+            table.insert("repository", Item::Value(Value::from(repository)));
+        }
+        if let Some(note) = note {
+            table.insert("note", Item::Value(Value::from(note)));
+        }
+        let wanted = self.wanted()?;
+        let known = wanted.iter().position(|known| is_addon(known, addon));
+        match known.and_then(|at| wanted.get_mut(at)) {
+            Some(known) => *known = table,
+            None => wanted.push(table),
+        }
+        Ok(())
+    }
+
+    /// Remove `addon`'s `[[tool.odx.wanted]]` entry.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::NotFound`] when `addon` is not wanted, and the errors of
+    /// [`PyprojectEdit::want`].
+    pub fn unwant(&mut self, addon: &str) -> Result<(), EditError> {
+        let wanted = self.wanted()?;
+        let known = wanted.iter().position(|known| is_addon(known, addon));
+        let at = known.ok_or_else(|| EditError::NotFound(format!("{addon} is not wanted")))?;
+        wanted.remove(at);
+        Ok(())
+    }
+
+    fn wanted(&mut self) -> Result<&mut ArrayOfTables, EditError> {
+        self.odx_table(None)?
+            .entry("wanted")
+            .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()))
+            .as_array_of_tables_mut()
+            .ok_or(EditError::Malformed("[tool.odx].wanted"))
+    }
+
     /// Remove the merge `spec` from its repository.
     ///
     /// # Errors
@@ -422,3 +481,8 @@ fn matches(value: &Value, target: &Target) -> bool {
 #[cfg(test)]
 #[path = "doc_tests.rs"]
 mod tests;
+
+/// Whether the `[[tool.odx.wanted]]` entry `table` is `addon`'s.
+fn is_addon(table: &Table, addon: &str) -> bool {
+    table.get("addon").and_then(Item::as_str) == Some(addon)
+}

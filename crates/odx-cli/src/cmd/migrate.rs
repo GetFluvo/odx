@@ -468,7 +468,7 @@ fn repository_plan(
     };
     let pr_of = |addon: &str| {
         open.iter()
-            .find(|(_, title)| title.contains("[MIG]") && title.contains(addon))
+            .find(|(_, title)| super::deps::migrates(title, addon))
             .map(|(number, _)| *number)
     };
     let (prs, todo): (Vec<&str>, Vec<&str>) = missing
@@ -676,7 +676,7 @@ fn migration_pr(ctx: &Context<'_>, plan: &Plan, warnings: &mut Vec<Problem>) -> 
         Ok(prs) => {
             let existing = prs
                 .iter()
-                .find(|pr| pr.title.contains("[MIG]") && pr.title.contains(&plan.addon));
+                .find(|pr| super::deps::migrates(&pr.title, &plan.addon));
             if let Some(pr) = existing {
                 return Err(Report::error(
                     Exit::Failure,

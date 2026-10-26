@@ -96,6 +96,25 @@ pub(crate) fn refs(kind: ForgeKind, base: &str, number: u64) -> (String, String)
     }
 }
 
+/// Whether `title` names `addon` as a word: `pos_x` in `[17.0][FIX] pos_x:
+/// ...`, but not `pos`.
+pub(crate) fn names(title: &str, addon: &str) -> bool {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    !addon.is_empty()
+        && title.match_indices(addon).any(|(at, _)| {
+            let before = title.get(..at).and_then(|text| text.chars().next_back());
+            let after = title
+                .get(at + addon.len()..)
+                .and_then(|text| text.chars().next());
+            !before.is_some_and(word) && !after.is_some_and(word)
+        })
+}
+
+/// Whether `title` is that of a migration pull request (`[MIG]`) of `addon`.
+pub(crate) fn migrates(title: &str, addon: &str) -> bool {
+    title.contains("[MIG]") && names(title, addon)
+}
+
 /// Looks dependencies up on the package index and the forges, remembering
 /// what it asked.
 pub(crate) struct Lookup<'a> {
@@ -182,9 +201,7 @@ fn migration(
             .map(|pr| (pr.number, pr.title))
             .collect()
     });
-    let (number, _) = prs
-        .iter()
-        .find(|(_, title)| title.contains("[MIG]") && title.contains(addon))?;
+    let (number, _) = prs.iter().find(|(_, title)| migrates(title, addon))?;
     let (page, head) = refs(kind, &format!("{}/{}", repo.origin(), repo.path), *number);
     Some(Migration {
         origin: repo.origin(),
@@ -198,6 +215,24 @@ fn migration(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_name_addons_as_words() {
+        assert!(migrates(
+            "[18.0][MIG] contract: Migration to 18.0",
+            "contract"
+        ));
+        assert!(migrates("[MIG] contract_sale, contract", "contract"));
+        assert!(!migrates(
+            "[18.0][MIG] contract_sale: Migration",
+            "contract"
+        ));
+        assert!(!migrates("[18.0][MIG] sale_contract", "contract"));
+        assert!(!migrates("[18.0][FIX] contract", "contract"));
+        assert!(names("[17.0][FIX] pos_x", "pos_x"));
+        assert!(!names("[17.0][FIX] pos_x", "pos"));
+        assert!(!names("anything", ""));
+    }
 
     #[test]
     fn pages_and_heads_per_forge() {

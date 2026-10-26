@@ -101,6 +101,14 @@ fn issue(value: &Value) -> Issue {
     }
 }
 
+fn comment(value: &Value) -> Comment {
+    Comment {
+        id: value.get("id").and_then(Value::as_u64).unwrap_or_default(),
+        author: text(value, "/user/login"),
+        body: text(value, "/body"),
+    }
+}
+
 /// The repository's issue API, or why there is none.
 fn issues_api(repo: &RepoUrl, kind: ForgeKind) -> Result<String, ForgeError> {
     match kind {
@@ -267,15 +275,31 @@ impl ForgeClient<'_> {
             .as_array()
             .map_or(&[][..], Vec::as_slice)
             .iter()
-            .map(|comment| Comment {
-                id: comment
-                    .get("id")
-                    .and_then(Value::as_u64)
-                    .unwrap_or_default(),
-                author: text(comment, "/user/login"),
-                body: text(comment, "/body"),
-            })
+            .map(comment)
             .collect())
+    }
+
+    /// Comment `body` on issue (or pull request) `number` of `repo`.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::Status`] when the forge refuses, [`ForgeError::Unsupported`]
+    /// on GitLab, and network and JSON errors.
+    pub fn comment(
+        &self,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        number: u64,
+        body: &str,
+    ) -> Result<Comment, ForgeError> {
+        let api = issues_api(repo, kind)?;
+        let response = self.post(
+            &format!("{api}/{number}/comments"),
+            repo,
+            kind,
+            &json!({ "body": body }),
+        )?;
+        created(&response, repo).map(|value| comment(&value))
     }
 
     /// How the forge wants `labels` named in a request: by name on
@@ -441,10 +465,42 @@ mod tests {
         assert_eq!(added, unsupported);
         let (comments, _) = run(vec![], |c| c.issue_comments(&gitlab, ForgeKind::Gitlab, 1));
         assert_eq!(comments.map(drop), unsupported);
+        let (commented, _) = run(vec![], |c| c.comment(&gitlab, ForgeKind::Gitlab, 1, "b"));
+        assert_eq!(commented.map(drop), unsupported);
     }
 
     const CREATED: &str = r#"{"number":4,"title":"t","body":"b","state":"open",
         "html_url":"https://x/issues/4","labels":[{"name":"odx:dashboard"}]}"#;
+
+    #[test]
+    fn comments_on_issues() {
+        let (comment, urls) = run(
+            vec![Ok(reply(
+                201,
+                r#"{"id":9,"user":{"login":"odx-bot"},"body":"b"}"#,
+            ))],
+            |c| c.comment(&github(), ForgeKind::Github, 4, "b"),
+        );
+        assert_eq!(
+            comment.unwrap(),
+            Comment {
+                id: 9,
+                author: "odx-bot".to_owned(),
+                body: "b".to_owned(),
+            }
+        );
+        assert_eq!(
+            urls,
+            [r#"POST https://api.github.com/repos/acme/project/issues/4/comments {"body":"b"}"#]
+        );
+        let (comment, _) = run(vec![Ok(reply(403, ""))], |c| {
+            c.comment(&github(), ForgeKind::Github, 4, "b")
+        });
+        assert!(matches!(
+            comment,
+            Err(ForgeError::Status { status: 403, .. })
+        ));
+    }
 
     #[test]
     fn creates_issues() {

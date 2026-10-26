@@ -91,6 +91,10 @@ pub struct OdxConfig {
     pub check_deps: Option<CheckDeps>,
     /// `odx glue`.
     pub glue: Option<Glue>,
+    /// Addons the project may need later, watched until someone migrates them (`odx wanted`).
+    /// Default: none.
+    #[serde(default)]
+    pub wanted: Vec<Wanted>,
 }
 
 impl OdxConfig {
@@ -725,6 +729,8 @@ pub struct Bot {
     pub vault_heads: Option<bool>,
     /// Run on a public project repository. Default: off.
     pub allow_public: Option<bool>,
+    /// Forge users mentioned when a wanted addon's migration starts or lands. Default: none.
+    pub notify: Option<Vec<String>>,
 }
 
 /// A kind of bot pull request.
@@ -789,6 +795,32 @@ pub struct Glue {
     /// Glue addons the project does not want, each with why. Default: none.
     #[serde(default)]
     pub ignore: BTreeMap<String, String>,
+}
+
+/// `[[tool.odx.wanted]]`: an addon the project may need later. `odx wanted`
+/// says per series whether it is there, whether someone is migrating it, or
+/// neither.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Wanted {
+    /// The addon's technical name.
+    pub addon: String,
+    /// Series to watch it on. Default: `odoo_version`.
+    pub series: Option<Vec<String>>,
+    /// Its repository, as `owner/repo` on GitHub or a URL. Default: where the addon index finds it.
+    pub repository: Option<String>,
+    /// Why it is wanted. Default: none.
+    pub note: Option<String>,
+}
+
+impl OdxConfig {
+    /// The series `wanted` is watched on.
+    pub fn wanted_series(&self, wanted: &Wanted) -> Vec<String> {
+        wanted
+            .series
+            .clone()
+            .unwrap_or_else(|| vec![self.odoo_version.clone()])
+    }
 }
 
 #[cfg(test)]
