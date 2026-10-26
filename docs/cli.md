@@ -15,16 +15,40 @@ Every command supports `--help`; most end with examples.
 | `-C, --project-dir <DIR>` | run as if started in `DIR` |
 | `-c, --config <FILE>` | the `pyproject.toml` to use (a `repos.yaml` for the commands that read one) |
 | `-j, --jobs <N>` | override the number of parallel jobs |
-| `--offline` | serve forge and index data from the cache only |
+| `--offline` | serve git repositories and forge and index data from the cache only |
 | `--fresh` | ignore cached data; refresh everything first |
 | `--no-refresh` | use cached data even when stale |
 | `--json` | machine-readable output on stdout |
-| `-v` / `-q` | more or less logging on stderr |
+| `-v` / `-q` | more or less progress on stderr |
 
 `--offline` and `--no-refresh` save network time only: local work such as git,
-pre-commit and odoo-lint takes as long as before, and a repository that is not
-in the cache yet is still fetched. In a measured migration they
-saved about 3 % of a ten-second run.
+pre-commit and odoo-lint takes as long as before. In a measured migration they
+saved about 3 % of a ten-second run. `--no-refresh` still fetches a repository
+that is not in the cache yet; `--offline` never does, and fails instead:
+
+```console
+$ odx --offline aggregate
+   Failed pos: branch 17.0 of https://github.com/OCA/pos is not in the cache; fetch it once without --offline
+```
+
+### Progress
+
+While repositories are fetched and built, odx writes a line per repository to
+standard error; standard output keeps only the result, so `--json` and pipes
+are unaffected:
+
+```console
+$ odx aggregate
+  Fetched pos in 2.3s
+   Cached web
+    Built pos in 0.4s: 2 merged, 1 up to date
+    Built web in 0.1s: base only
+```
+
+`Cached` means no network was needed. `-v` adds a line when each fetch and
+build starts, every source with its commit and where it came from (upstream,
+a mirror, a local clone or the cache), and every merge. `-q` leaves only
+errors on standard error: no progress lines and no warnings.
 
 ## Editing `pyproject.toml`
 
@@ -78,7 +102,7 @@ A repository fetched less than `[tool.odx.cache] ttl.refs` ago (default
 cache without network; the summary then says `(N already cached)`.
 `--fresh` fetches regardless, `--no-refresh` (and `--offline`) use whatever
 the cache holds. `odx lock`, `odx aggregate --update` and `odx sync` always
-fetch.
+fetch, unless `--offline`.
 
 ```toml
 [tool.odx.cache]

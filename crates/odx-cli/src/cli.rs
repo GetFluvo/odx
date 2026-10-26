@@ -34,7 +34,7 @@ pub struct Cli {
 }
 
 /// Options accepted by every command.
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, Default, Args)]
 #[command(next_help_heading = "Global options")]
 #[expect(
     clippy::struct_excessive_bools,
@@ -53,8 +53,8 @@ pub struct GlobalArgs {
     #[arg(short, long, global = true, value_name = "N")]
     pub jobs: Option<usize>,
 
-    /// Serve forge and index data from the cache only; a repository not in the cache
-    /// yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before.
+    /// Serve git repositories and forge and index data from the cache only; what is not
+    /// cached fails. Local work (git, pre-commit, odoo-lint) takes as long as before.
     #[arg(long, global = true)]
     pub offline: bool,
 
@@ -74,11 +74,11 @@ pub struct GlobalArgs {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Increase log verbosity (repeatable).
+    /// Say when each repository's fetch and build starts, and what each fetched and merged.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
-    /// Errors only.
+    /// Errors only on standard error: no progress lines, no warnings.
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     pub quiet: bool,
 }

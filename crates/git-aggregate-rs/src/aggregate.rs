@@ -275,7 +275,15 @@ fn prepare_and_run(cli: &Cli, ctx: &Context<'_>, log: &mut Log) -> Result<Vec<Bu
         runnable
     };
     let plans = plans.into_iter().map(|p| p.plan).collect();
-    let (outcomes, results) = run_pipeline(&cache, &backend, plans, limits, Some(&merger), &build);
+    let (outcomes, results) = run_pipeline(
+        &cache,
+        &backend,
+        plans,
+        limits,
+        Some(&merger),
+        &build,
+        &|_| {},
+    );
     let planned = planned.into_inner();
     Ok(finish(
         cli, &selected, &outcomes, &planned, results, &merger, log,

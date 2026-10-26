@@ -22,6 +22,9 @@ pub enum GitError {
     /// Another process holds the repository lock.
     #[error("{0} is locked by another odx process")]
     Locked(String),
+    /// Offline, and what is asked for is not in the cache.
+    #[error("{0} is not in the cache; fetch it once without --offline")]
+    NotCached(String),
     /// The operation was cancelled before it started.
     #[error("cancelled")]
     Cancelled,

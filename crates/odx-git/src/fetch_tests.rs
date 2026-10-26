@@ -103,6 +103,7 @@ fn fetches_branches_pull_requests_and_commits() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     let shas: Vec<&str> = fetched.iter().map(|f| f.sha.as_str()).collect();
@@ -144,6 +145,7 @@ fn gitlab_and_gitea_layouts() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitlab, WAIT).unwrap()[0].sha,
@@ -157,6 +159,7 @@ fn gitlab_and_gitea_layouts() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     assert_eq!(
         fetch(&cache, &system(), &gitea, WAIT).unwrap()[0].sha,
@@ -209,6 +212,7 @@ fn one_fetch_per_remote_url() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let backend = Counting {
         inner: system(),
@@ -237,6 +241,7 @@ fn errors() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let err = fetch(&cache, &system(), &missing, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("git fetch failed: "), "{err}");
@@ -297,6 +302,7 @@ fn unresolved_sources_are_errors() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let err = fetch(&cache, &Hollow, &plan, Duration::ZERO).unwrap_err();
     assert_eq!(
@@ -318,6 +324,7 @@ fn url_file_write_errors_are_reported() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     fs::create_dir_all(cache.url_file(&plan.url)).unwrap();
     assert!(matches!(
@@ -357,6 +364,7 @@ fn resolve_failures_propagate() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let err = fetch(&Cache::new(tmp.path()), &Broken, &plan, Duration::ZERO).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git"), "{err}");
@@ -398,6 +406,7 @@ fn locked_commits_come_from_the_mirror_first() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let backend = Counting {
         inner: system(),
@@ -425,6 +434,7 @@ fn cached_commits_are_not_fetched_again() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     fetch(&cache, &system(), &plan, WAIT).unwrap();
     let backend = Counting {
@@ -434,6 +444,54 @@ fn cached_commits_are_not_fetched_again() {
     let fetched = fetch(&cache, &backend, &plan, WAIT).unwrap();
     assert_eq!(fetched[0].via, Via::Cache);
     assert!(backend.urls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn offline_serves_the_cache_or_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let up = upstream(tmp.path(), "pos");
+    let cache = Cache::new(tmp.path().join("cache"));
+    let plan = FetchPlan {
+        offline: true,
+        ..pos_plan(&up, None)
+    };
+    let counted = |plan: &FetchPlan| {
+        let backend = Counting {
+            inner: system(),
+            urls: Mutex::new(Vec::new()),
+        };
+        let fetched = fetch(&cache, &backend, plan, WAIT);
+        assert!(backend.urls.lock().unwrap().is_empty());
+        fetched
+    };
+    // Nothing cached: no repository is created for it either.
+    let error = counted(&plan).unwrap_err();
+    assert!(matches!(error, GitError::NotCached(_)));
+    assert!(
+        error
+            .to_string()
+            .ends_with("fetch it once without --offline")
+    );
+    assert!(!cache.repo_dir(&plan.url).exists());
+    // Cached long ago: served all the same.
+    let online = FetchPlan {
+        offline: false,
+        ..plan.clone()
+    };
+    let fetched = fetch(&cache, &system(), &online, WAIT).unwrap();
+    fs::write(cache.fetched_file(&plan.url), "0\n").unwrap();
+    let served = counted(&plan).unwrap();
+    assert!(served.iter().all(|f| f.via == Via::Cache));
+    assert_eq!(
+        served.iter().map(|f| &f.sha).collect::<Vec<_>>(),
+        fetched.iter().map(|f| &f.sha).collect::<Vec<_>>()
+    );
+    // One source missing fails the repository.
+    let more = FetchPlan {
+        sources: vec![(None, Source::Branch("17.0-new".into()))],
+        ..plan
+    };
+    assert!(matches!(counted(&more), Err(GitError::NotCached(what)) if what.contains("17.0-new")));
 }
 
 #[test]
@@ -507,6 +565,7 @@ fn commits_gone_upstream_come_from_the_vault() {
         fallback: Some(file_url(&mirror)),
         clone: None,
         max_age: None,
+        offline: false,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     assert_eq!(
@@ -551,6 +610,7 @@ fn commits_the_mirror_lacks_come_from_upstream() {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     };
     let fetched = fetch(&cache, &system(), &plan, WAIT).unwrap();
     assert_eq!(fetched[0].via, Via::Upstream);
@@ -604,6 +664,7 @@ fn pos_plan(up: &Upstream, clone: Option<LocalClone>) -> FetchPlan {
         fallback: None,
         clone,
         max_age: None,
+        offline: false,
     }
 }
 

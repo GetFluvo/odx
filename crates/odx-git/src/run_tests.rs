@@ -46,6 +46,7 @@ fn plan(url: &str) -> FetchPlan {
         fallback: None,
         clone: None,
         max_age: None,
+        offline: false,
     }
 }
 
@@ -65,7 +66,15 @@ async fn run(
 ) -> Vec<Outcome> {
     let tmp = tempfile::tempdir().unwrap();
     let dynamic: Arc<dyn GitBackend> = Arc::clone(backend) as Arc<dyn GitBackend>;
-    fetch_all(&Cache::new(tmp.path()), &dynamic, plans, limits, cancel).await
+    fetch_all(
+        &Cache::new(tmp.path()),
+        &dynamic,
+        plans,
+        limits,
+        cancel,
+        &|_| {},
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -180,14 +189,26 @@ async fn a_panicking_backend_becomes_an_error() {
     let tmp = tempfile::tempdir().unwrap();
     let backend: Arc<dyn GitBackend> = Arc::new(Panicky);
     assert_eq!(Panicky.resolve(Path::new("."), "x").unwrap(), None);
+    let events = Mutex::new(Vec::new());
     let outcomes = fetch_all(
         &Cache::new(tmp.path()),
         &backend,
         vec![plan("https://x/y.git")],
         limits(1, 1),
         &CancellationToken::new(),
+        &|event| {
+            events.lock().unwrap().push(match event {
+                Progress::Fetching(url) => format!("fetching {url}"),
+                Progress::Fetched(outcome) => format!("fetched {}", outcome.url),
+                _ => "other".to_owned(),
+            });
+        },
     )
     .await;
+    assert_eq!(
+        events.into_inner().unwrap(),
+        ["fetching https://x/y.git", "fetched https://x/y.git"]
+    );
     assert!(
         outcomes[0]
             .result
@@ -218,7 +239,23 @@ async fn aggregations_run_and_can_be_cancelled() {
         keep_conflicts: false,
         force: false,
     };
-    let results = aggregate_all(&merger, vec![missing.clone()], 0, &CancellationToken::new()).await;
+    let events = Mutex::new(Vec::new());
+    let record = |event: Progress<'_>| {
+        events.lock().unwrap().push(match event {
+            Progress::Building(_) => "building",
+            Progress::Built(_, Ok(_)) => "built",
+            Progress::Built(_, Err(_)) => "failed",
+            _ => "other",
+        });
+    };
+    let results = aggregate_all(
+        &merger,
+        vec![missing.clone()],
+        0,
+        &CancellationToken::new(),
+        &record,
+    )
+    .await;
     assert!(
         results[0]
             .as_ref()
@@ -229,8 +266,13 @@ async fn aggregations_run_and_can_be_cancelled() {
 
     let cancel = CancellationToken::new();
     cancel.cancel();
-    let results = aggregate_all(&merger, vec![missing], 1, &cancel).await;
+    let results = aggregate_all(&merger, vec![missing], 1, &cancel, &record).await;
     assert_eq!(results[0].as_ref().unwrap_err().to_string(), "cancelled");
+    // A cancelled build never starts.
+    assert_eq!(
+        events.into_inner().unwrap(),
+        ["building", "failed", "failed"]
+    );
 }
 
 /// A process runner that panics, as a stand-in for a bug in git handling.
@@ -257,7 +299,14 @@ async fn a_panicking_merge_becomes_an_error() {
         keep_conflicts: false,
         force: false,
     };
-    let results = aggregate_all(&merger, vec![aggregation], 1, &CancellationToken::new()).await;
+    let results = aggregate_all(
+        &merger,
+        vec![aggregation],
+        1,
+        &CancellationToken::new(),
+        &|_| {},
+    )
+    .await;
     assert!(
         results[0]
             .as_ref()

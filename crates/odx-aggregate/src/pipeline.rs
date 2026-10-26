@@ -8,7 +8,7 @@ use odx_config::user::{CloneMode, UserConfig, expand_home};
 use odx_core::{Env, Invocation, ProcessRunner};
 use odx_git::{
     Aggregated, Aggregation, Cache, CancellationToken, Clones, FetchPlan, GitBackend, GitError,
-    Limits, MergeError, Merger, Outcome, aggregate_all, fetch_all,
+    Limits, MergeError, Merger, Outcome, Progress, aggregate_all, fetch_all,
 };
 
 /// The local clones configured in `[clones]` of the user configuration.
@@ -56,6 +56,8 @@ pub fn mergiraf_program(
 /// outcomes (none without a `merger`), on a runtime of its own; pending work
 /// is cancelled when Ctrl-C is pressed.
 ///
+/// `progress` hears of each fetch and build as it starts and ends.
+///
 /// Excluded from coverage: building the runtime only fails when the OS
 /// refuses threads, and a real SIGINT cannot be raised inside the test
 /// process. Everything it calls is tested on its own.
@@ -67,6 +69,7 @@ pub fn run_pipeline(
     limits: Limits,
     merger: Option<&Arc<Merger>>,
     build: &dyn Fn(&[Outcome]) -> Vec<Aggregation>,
+    progress: &(dyn Fn(Progress<'_>) + Sync),
 ) -> (Vec<Outcome>, Vec<Result<Aggregated, MergeError>>) {
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -93,9 +96,11 @@ pub fn run_pipeline(
                 on_signal.cancel();
             }
         });
-        let outcomes = fetch_all(cache, backend, plans, limits, &cancel).await;
+        let outcomes = fetch_all(cache, backend, plans, limits, &cancel, progress).await;
         let results = match merger {
-            Some(merger) => aggregate_all(merger, build(&outcomes), limits.jobs, &cancel).await,
+            Some(merger) => {
+                aggregate_all(merger, build(&outcomes), limits.jobs, &cancel, progress).await
+            }
             None => Vec::new(),
         };
         (outcomes, results)
@@ -111,8 +116,18 @@ pub fn run_fetches(
     backend: &Arc<dyn GitBackend>,
     plans: Vec<FetchPlan>,
     limits: Limits,
+    progress: &(dyn Fn(Progress<'_>) + Sync),
 ) -> Vec<Outcome> {
-    run_pipeline(cache, backend, plans, limits, None, &|_| Vec::new()).0
+    run_pipeline(
+        cache,
+        backend,
+        plans,
+        limits,
+        None,
+        &|_| Vec::new(),
+        progress,
+    )
+    .0
 }
 
 #[cfg(test)]

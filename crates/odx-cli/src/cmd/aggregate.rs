@@ -38,6 +38,7 @@ use toml_edit::DocumentMut;
 
 use super::Report;
 use super::edit::{read_lock, save};
+use super::progress::{Reporter, Verbosity, to_stderr};
 use super::sniff::{
     Sniffed, describe as describe_sniffed, fail_on_new, script_count, sniff_locked,
     to_json as sniffed_json,
@@ -78,6 +79,10 @@ pub(crate) struct Prepared {
     /// How old fetched refs may be before they are fetched again; `None`
     /// fetches every time.
     pub(crate) max_age: Option<Duration>,
+    /// Never use the network for git (`--offline`).
+    offline: bool,
+    /// How much to say while fetching and building.
+    verbosity: Verbosity,
     /// `[mirrors]` of the user configuration.
     mirrors: BTreeMap<String, UserMirror>,
     /// Register the workspace for `odx sync --all` (`[cache]
@@ -161,6 +166,8 @@ pub(crate) fn prepare(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Prepared
             .contains_key(&project.root.display().to_string());
     Ok(Prepared {
         max_age,
+        offline: global.offline,
+        verbosity: Verbosity::of(global),
         mirrors: user.mirrors.clone(),
         register,
         clones: local_clones(&user, ctx.env),
@@ -233,6 +240,7 @@ fn build(
     for plan in &mut plans {
         plan.plan.clone = prepared.clones.find(&plan.plan.url).cloned();
         plan.plan.max_age = prepared.max_age;
+        plan.plan.offline = prepared.offline;
         if let Some(mirror) = mirror_for(&prepared.mirrors, &plan.plan.url) {
             plan.plan.fallback.get_or_insert_with(|| mirror.url.clone());
             if mirror.prefer.unwrap_or(false) {
@@ -265,6 +273,7 @@ fn build(
         *aggregated.borrow_mut() = repos;
         runnable
     };
+    let reporter = Reporter::new(prepared.verbosity, planned, &to_stderr);
     let (outcomes, results) = run_pipeline(
         &prepared.cache,
         &backend,
@@ -272,6 +281,7 @@ fn build(
         prepared.limits,
         merger,
         &plan_builds,
+        &|event| reporter.hear(event),
     );
     Built {
         plans,
@@ -736,9 +746,19 @@ fn lock_packages(
     let mut plans = package_fetch_plans(&specs, pinned, vault);
     for plan in &mut plans {
         plan.clone = prepared.clones.find(&plan.url).cloned();
+        plan.offline = prepared.offline;
     }
     let backend: Arc<dyn GitBackend> = Arc::new(SystemGit::new(Arc::new(OsRunner)));
-    let outcomes = run_fetches(&prepared.cache, &backend, plans, prepared.limits);
+    let reporter = Reporter::new(prepared.verbosity, &[], &to_stderr);
+    let outcomes = run_fetches(
+        &prepared.cache,
+        &backend,
+        plans,
+        prepared.limits,
+        &|event| {
+            reporter.hear(event);
+        },
+    );
     let fetched: Vec<(&str, &[Fetched])> = outcomes
         .iter()
         .filter_map(|o| {
@@ -759,7 +779,8 @@ fn lock_packages(
         .failures
         .extend(missing.iter().map(|dist| format!("{dist}: not resolved")));
     lock.packages = entries;
-    lock.odoo = odoo_pin(doc, &previous, update).map_err(|e| Report::error(Exit::Failure, e))?;
+    lock.odoo = odoo_pin(doc, &previous, update, prepared.offline)
+        .map_err(|e| Report::error(Exit::Failure, e))?;
     Ok((specs, edit))
 }
 
@@ -770,6 +791,7 @@ fn odoo_pin(
     doc: &DocumentMut,
     previous: &Lockfile,
     update: bool,
+    offline: bool,
 ) -> Result<Option<OdooPin>, String> {
     let Some(source) = read_uv_git_sources(doc)
         .into_iter()
@@ -794,6 +816,11 @@ fn odoo_pin(
         matches!(reference.len(), 40 | 64) && reference.bytes().all(|b| b.is_ascii_hexdigit());
     let rev = if full {
         reference
+    } else if offline {
+        return Err(format!(
+            "odoo: {reference} of {} is asked of the remote; run without --offline",
+            source.git
+        ));
     } else {
         SystemGit::new(Arc::new(OsRunner))
             .ls_remote(&source.git, &reference)

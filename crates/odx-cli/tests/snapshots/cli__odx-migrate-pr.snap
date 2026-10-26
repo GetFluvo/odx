@@ -30,7 +30,7 @@ Global options:
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve git repositories and forge and index data from the cache only; what is not cached fails. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -45,7 +45,7 @@ Global options:
           Machine-readable output on stdout
 
   -v, --verbose...
-          Increase log verbosity (repeatable)
+          Say when each repository's fetch and build starts, and what each fetched and merged
 
   -q, --quiet
-          Errors only
+          Errors only on standard error: no progress lines, no warnings
