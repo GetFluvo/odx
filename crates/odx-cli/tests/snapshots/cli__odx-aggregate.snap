@@ -7,20 +7,11 @@ Fetch and merge the configured PRs and branches
 Usage: odx aggregate [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --fetch-only
           Only fill the cache; do not touch working trees
 
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --repo <NAME>
           Only this repository (its `name`, or its URL when unnamed)
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --prefer-mirror
           Fetch locked commits from the configured mirror first (default in CI)
@@ -28,23 +19,42 @@ Options:
       --keep-conflicts
           Keep conflicted working trees for inspection instead of aborting
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --force
           Discard local changes in working trees and replace directories odx does not manage
-
-      --fresh
-          Ignore cached data; refresh everything before answering
 
       --bundle-dir <DIR>
           Fetch locked commits from the git bundles `odx lock --bundle` wrote here first
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
-
       --locked
           Fail instead of resolving anything odx.lock does not pin; never write odx.lock
+
+      --update
+          Resolve every branch and pull request again instead of using odx.lock
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved
@@ -52,17 +62,13 @@ Options:
       --json
           Machine-readable output on stdout
 
-      --update
-          Resolve every branch and pull request again instead of using odx.lock
-
   -v, --verbose...
           Increase log verbosity (repeatable)
 
   -q, --quiet
           Errors only
 
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version
+Examples:
+  odx aggregate                 build every repository from the merges in pyproject.toml
+  odx aggregate --locked        build exactly what odx.lock pins (CI, deployments)
+  odx aggregate --repo pos      only one repository

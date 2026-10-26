@@ -7,14 +7,8 @@ Build (and publish) wheels of aggregated, unmerged and private addons
 Usage: odx build [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --publish
           Publish the built wheels to the private index
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --index <NAME>
           The `[[tool.uv.index]]` to publish to (default: `[tool.odx.platform] index`, else `private`)
@@ -22,26 +16,39 @@ Options:
       --addon <GLOB>
           Only addons whose name matches (repeatable, shell-style patterns)
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --project
           Also build the project's own addons (from the committed HEAD)
-
-      --fresh
-          Ignore cached data; refresh everything before answering
 
       --out-dir <DIR>
           Where the wheels go (default: `dist/wheels`)
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
-
       --sbom
           Emit a CycloneDX SBOM per wheel
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved
@@ -54,9 +61,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

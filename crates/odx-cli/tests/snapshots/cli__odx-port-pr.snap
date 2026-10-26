@@ -11,35 +11,42 @@ Arguments:
           Pull request, for example `OCA/contract#1476`
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --to <SERIES>
           Target series
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --remote <NAME>
           The remote the series come from [default: the one pointing at the pull request's repository; for addons `upstream` when it exists, else `origin`]
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
       --no-migrate
           Leave out odoo-lint's upgrade fixes
-
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
 
       --open-pr
           Then push the branch and open a draft pull request
 
-      --fresh
-          Ignore cached data; refresh everything before answering
-
       --push-remote <NAME>
           With --open-pr: push to this remote instead of the target or your fork
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
@@ -55,9 +62,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

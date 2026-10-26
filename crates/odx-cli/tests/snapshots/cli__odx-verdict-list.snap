@@ -7,26 +7,33 @@ List verdicts and mutes
 Usage: odx verdict list [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --series <SERIES>
           Only those for this target series
 
       --addon <ADDON>
           Only those for this addon
 
+      --stale
+          Only those whose target code changed since
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
   -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
-      --stale
-          Only those whose target code changed since
-
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -45,9 +52,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

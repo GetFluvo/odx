@@ -11,14 +11,8 @@ Arguments:
           Modules to promote, with their dependency closure
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --from-pr <N>
           Promote the project addons a pull request merged into the source changed
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --rollback <N>
           Revert the promotion pull request N merged into --to
@@ -26,17 +20,8 @@ Options:
       --feature <NAME>
           Promote a feature set from [tool.odx.features]
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --search <TEXT>
           Find modules and feature sets by functional description; lists candidates
-
-      --fresh
-          Ignore cached data; refresh everything before answering
 
       --select <NAMES>
           The candidates of --search to promote
@@ -44,17 +29,8 @@ Options:
       --from <ENV>
           Source environment [default: the one environment allowed to promote into --to]
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
-
-      --refresh-index
-          Rebuild the addon index for the series involved
-
       --to <ENV>
           Target environment
-
-      --json
-          Machine-readable output on stdout
 
       --remote <NAME>
           The remote whose branches are read (local branches when it has none)
@@ -64,14 +40,8 @@ Options:
       --allow-downgrade
           Copy an older package over a newer one
 
-  -v, --verbose...
-          Increase log verbosity (repeatable)
-
       --allow-source-change
           Replace an addon that comes from another source on the target
-
-  -q, --quiet
-          Errors only
 
       --no-with-odoo
           Leave the Odoo core revision of the target as it is
@@ -99,3 +69,34 @@ Options:
 
   -V, --version
           Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only

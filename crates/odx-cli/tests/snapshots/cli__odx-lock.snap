@@ -7,14 +7,8 @@ Resolve every merge and package to a SHA, vault it, write odx.lock
 Usage: odx lock [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --repo <NAME>
           Only this repository (its `name`, or its URL when unnamed)
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --migrate
           Rewrite odx.lock in the current format and stop
@@ -22,35 +16,17 @@ Options:
       --check
           Fail if odx.lock would change
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --update
           Re-resolve every entry instead of keeping existing pins
 
       --follow <REPO#PR>
           Adopt this pull request's new head even when its CI is not green (`<repo>#<pr>`)
 
-      --fresh
-          Ignore cached data; refresh everything before answering
-
       --bundle <DIR>
           Also write one git bundle per repository with its locked commits into DIR
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
-
       --no-uv
           Do not run `uv lock` after rewriting package sources
-
-      --refresh-index
-          Rebuild the addon index for the series involved
-
-      --json
-          Machine-readable output on stdout
 
       --no-push
           Do not push locked commits to the configured vault
@@ -58,14 +34,44 @@ Options:
       --auto-update
           Apply the configured lock auto-update policy to PyPI packages
 
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
   -v, --verbose...
           Increase log verbosity (repeatable)
 
   -q, --quiet
           Errors only
 
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version
+Examples:
+  odx lock                      pin what odx.lock does not pin yet
+  odx lock --update             resolve every branch and pull request again
+  odx lock --check              fail when odx.lock is out of date (CI)

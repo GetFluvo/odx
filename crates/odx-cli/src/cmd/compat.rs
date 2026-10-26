@@ -24,6 +24,15 @@ pub(crate) fn run_import(args: &ImportArgs, ctx: &Context<'_>) -> Report {
 
 fn import_report(args: &ImportArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let repos_path = ctx.dir.join(&args.repos);
+    if !ctx.fs.exists(&repos_path) {
+        return Err(Report::error(
+            Exit::Usage,
+            format!(
+                "{}: no such file\nhint: pass the git-aggregator file: odx import path/to/repos.yaml",
+                repos_path.display()
+            ),
+        ));
+    }
     let repos = parse_repos(&read_text(ctx.fs, &repos_path)?)
         .map_err(|e| Report::error(Exit::Usage, format!("{}: {e}", repos_path.display())))?;
     let mut report = Report::default();

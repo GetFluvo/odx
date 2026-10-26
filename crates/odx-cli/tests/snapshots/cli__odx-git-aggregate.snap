@@ -23,9 +23,6 @@ Options:
           
           [default: repos.yaml]
 
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
   -p, --push
           Push the result to the target remote and branch
 
@@ -44,26 +41,14 @@ Options:
           
           [default: info]
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
   -e, --expand-env
           Expand `$VAR` and `${VAR}` in the repositories file
-
-      --fresh
-          Ignore cached data; refresh everything before answering
 
       --env-file <FILE>
           Variables for --expand-env (the environment takes precedence)
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
-
   -f, --force
           Discard local changes, and replace directories not built by odx
-
-      --refresh-index
-          Rebuild the addon index for the series involved
 
   -j, --jobs <N>
           Repositories fetched and built at once [default: number of CPUs]
@@ -71,14 +56,8 @@ Options:
       --no-color
           Disable colored output
 
-  -v, --verbose...
-          Increase log verbosity (repeatable)
-
       --allow-shell
           Run `shell_command_after` entries (skipped with a warning otherwise)
-
-  -q, --quiet
-          Errors only
 
       --rebase
           Rebase merges onto the result instead of creating merge commits
@@ -94,3 +73,25 @@ Options:
 
   -V, --version
           Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only

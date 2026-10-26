@@ -167,6 +167,30 @@ fn tools(ctx: &Context<'_>, prepared: Option<&Prepared>) -> Vec<Check> {
 
 /// Checks that need the project: tokens, the vault, the platform, the
 /// cache, packages in develop mode.
+/// Whether odx has a token for `host`, and how to give it one.
+fn token_check(host: &str, kind: ForgeKind, ctx: &Context<'_>) -> Check {
+    if token(host, kind, ctx.env, &OsRunner).is_some() {
+        return check(Level::Ok, &format!("token {host}"), "found");
+    }
+    let variable: String = host
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    check(
+        Level::Warn,
+        &format!("token {host}"),
+        format!(
+            "none; anonymous API limits apply: run `odx auth login {host}` or set ODX_TOKEN_{variable}"
+        ),
+    )
+}
+
 fn project(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<Check> {
     let config = &prepared.project.config;
     let root = &prepared.project.root;
@@ -203,14 +227,7 @@ fn project(ctx: &Context<'_>, global: &GlobalArgs, prepared: &Prepared) -> Vec<C
     hosts.sort_by(|a, b| a.0.cmp(&b.0));
     hosts.dedup_by(|a, b| a.0 == b.0);
     for (host, kind) in hosts {
-        checks.push(match token(&host, kind, ctx.env, &OsRunner) {
-            Some(_) => check(Level::Ok, &format!("token {host}"), "found"),
-            None => check(
-                Level::Warn,
-                &format!("token {host}"),
-                "none; anonymous API limits apply (set ODX_TOKEN_<HOST> or the forge's token variable)",
-            ),
-        });
+        checks.push(token_check(&host, kind, ctx));
     }
     checks.extend(vault(ctx, global, prepared));
     let provided = provided_set(config, root, |path| {

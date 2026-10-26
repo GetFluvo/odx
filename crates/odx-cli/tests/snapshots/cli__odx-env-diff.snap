@@ -14,16 +14,10 @@ Arguments:
           Second environment, or a branch of one
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --remote <NAME>
           The remote whose branches are compared (local branches when it has none)
           
           [default: origin]
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --vendored <A> <B>
           Compare two vendor manifests (`.odx/vendor.lock`) of the environments instead
@@ -31,11 +25,24 @@ Options:
       --installed <A> <B>
           Compare the wheels installed in two virtual environments (or site-packages) instead
 
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
   -j, --jobs <N>
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -54,9 +61,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

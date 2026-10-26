@@ -7,23 +7,30 @@ Migrate the project's own addons in place: odoo-lint's upgrade fixes and version
 Usage: odx migrate own [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --to <SERIES>
           Target series [default: `[tool.odx.upgrade] target_odoo_version`]
 
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --no-pre-commit
           Leave out the repository's pre-commit fixes
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -42,9 +49,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version
