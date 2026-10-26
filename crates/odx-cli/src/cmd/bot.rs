@@ -1344,6 +1344,7 @@ fn promote_args(from: &str, to: &str, remote: &str) -> PromoteArgs {
         allow_source_change: false,
         no_with_odoo: false,
         with_code: true,
+        no_with_code: false,
         allow_transitive: false,
         include_branch_specific: Vec::new(),
         commit: true,

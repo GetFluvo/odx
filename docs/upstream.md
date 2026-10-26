@@ -63,8 +63,8 @@ cache, and compares the commits that touch the addon:
   (`.oca/oca-port/blacklist/<addon>.json`) lists it.
 
 Blacklisted groups are hidden unless `--show-muted`. The series looked
-on default to `[tool.odx.port] default_from`, else the one below and the
-one above; each environment's series (`[tool.odx.environments.env.<name>]
+on default to `[tool.odx.suggest] series`, else `[tool.odx.port]
+default_from`, else the one below and the one above; each environment's series (`[tool.odx.environments.env.<name>]
 series`) is a target of its own. `--check-apply` replays every portable
 group on the target with `git merge-tree`, without touching a worktree, and
 says whether it applies cleanly or conflicts.
@@ -87,9 +87,8 @@ section compares the pairs of `[tool.odx.dashboard] environment_pairs`,
 else every promotion edge between environments that are not disposable;
 with both directions of a pair shown, each difference is listed once, from
 the side that has more of it, and only what a promotion along the pair
-would copy offers `promote`.
-
-
+would copy offers `promote`. `--section` shows only the sections named;
+`[tool.odx.dashboard] sections` sets the ones shown without it.
 
 | Section | Entries | Actions |
 | --- | --- | --- |

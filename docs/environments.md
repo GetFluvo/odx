@@ -144,7 +144,8 @@ the `[tool.uv.sources]` entry and the `uv.lock` blocks verbatim, and the
 then runs `uv lock` there and refuses when that re-resolves anything else
 (`transitive drift`; `--allow-transitive` keeps it). `--with-code`
 cherry-picks the listed commits first, authors kept; a commit that does not
-apply stops the promotion. Writing needs `--yes`: odx asks no questions.
+apply stops the promotion. `[tool.odx.promote] with_code = true` makes that
+the default, and `--no-with-code` copies the pins only. Writing needs `--yes`: odx asks no questions.
 
 Branch-specific files are never promoted: what cherry-picked commits change
 in them is put back as the target has it. `--include-branch-specific <path>`

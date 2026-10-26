@@ -30,10 +30,21 @@ fn usage(message: String) -> Report {
     Report::error(Exit::Usage, message)
 }
 
+/// `args` with `[tool.odx.promote] with_code` as the default of
+/// `--with-code`.
+fn with_defaults(args: &PromoteArgs, config: &odx_config::OdxConfig) -> PromoteArgs {
+    let configured = config.promote.as_ref().and_then(|p| p.with_code);
+    PromoteArgs {
+        with_code: !args.no_with_code && (args.with_code || configured.unwrap_or(false)),
+        ..args.clone()
+    }
+}
+
 fn promote(args: &PromoteArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let prepared = prepare(global, ctx)?;
     let root = &prepared.project.root;
     let config = &prepared.project.config;
+    let args = &with_defaults(args, config);
     let model = model(config)?;
     let to = environment(&model, &args.to)?;
     if args.rollback.is_some() {
@@ -558,4 +569,50 @@ fn json(from: &Checkout, to: &Checkout, plan: &Plan, done: &Done<'_>) -> String 
         })),
     });
     format!("{value:#}\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    /// `odx promote`'s arguments on their own.
+    #[derive(Parser)]
+    struct Promote {
+        #[command(flatten)]
+        args: PromoteArgs,
+    }
+
+    fn parse(flags: &[&str]) -> Result<PromoteArgs, clap::Error> {
+        let mut line = vec!["promote", "sale_x", "--to", "prod"];
+        line.extend_from_slice(flags);
+        Promote::try_parse_from(line).map(|promote| promote.args)
+    }
+
+    fn args(flags: &[&str]) -> PromoteArgs {
+        parse(flags).unwrap()
+    }
+
+    fn config(with_code: Option<bool>) -> odx_config::OdxConfig {
+        let text = with_code.map_or_else(String::new, |on| {
+            format!("[tool.odx.promote]\nwith_code = {on}\n")
+        });
+        let text = format!("[tool.odx]\nodoo_version = \"17.0\"\n{text}");
+        odx_config::parse_pyproject(&text, std::path::Path::new("p.toml"))
+            .unwrap()
+            .unwrap()
+            .config
+    }
+
+    #[test]
+    fn with_code_defaults_to_the_configuration() {
+        let with_code = |flags: &[&str], on| with_defaults(&args(flags), &config(on)).with_code;
+        assert!(!with_code(&[], None));
+        assert!(with_code(&["--with-code"], None));
+        assert!(with_code(&[], Some(true)));
+        assert!(!with_code(&["--no-with-code"], Some(true)));
+        assert!(!with_code(&[], Some(false)));
+        assert!(parse(&["--with-code", "--no-with-code"]).is_err());
+    }
 }

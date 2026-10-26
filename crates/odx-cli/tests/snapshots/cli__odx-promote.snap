@@ -47,7 +47,10 @@ Options:
           Leave the Odoo core revision of the target as it is
 
       --with-code
-          Cherry-pick the source's commits on the closure's project addons that the target lacks
+          Cherry-pick the source's commits on the closure's project addons that the target lacks (default: `[tool.odx.promote] with_code`)
+
+      --no-with-code
+          Copy pins only, whatever `[tool.odx.promote] with_code` says
 
       --allow-transitive
           Keep what `uv lock` re-resolves outside the closure

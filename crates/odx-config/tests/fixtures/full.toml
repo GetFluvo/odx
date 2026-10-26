@@ -39,19 +39,15 @@ auto_create = false
 
 [tool.odx.http]
 per_host_concurrency = 6
-cache_ttl = "24h"
-offline = false
 
 [tool.odx.cache]
 # Staleness thresholds; stale sections are refreshed before a command answers.
-ttl = { refs = "15m", pr_state = "30m", index = "24h", wheels = "7d", suggest = "6h", drift = "1h" }
-warm_worktrees = false
+ttl = { refs = "15m", pr_state = "30m" }
 prefetch_wheels = true
 
 [tool.odx.dashboard]
 sections = ["pinned", "droppable", "new-upstream", "forward-port", "auto-update", "drift"]
 environment_pairs = [["test", "prod"]]
-show_backports = false
 
 [tool.odx.groups]
 # dependency group -> directory the group's addons are vendored into
@@ -94,8 +90,6 @@ allowed_paths = ["i18n/*.po", "i18n/*.pot", "README.rst", "readme/**", "static/d
 
 [tool.odx.upgrade]
 target_odoo_version = "18.0"
-check_pypi = true
-github_orgs = ["OCA", "odoo"]
 
 [tool.odx.index]
 ttl = "7d"
@@ -111,18 +105,12 @@ base_tier_validation = { "18.0" = "OCA/server-ux", "19.0" = "OCA/tier-validation
 "18.0" = { "account_old_name" = "account_new_name" }
 
 [tool.odx.port]
-blacklist = "auto"             # "auto" | "oca-port" | "mutes" | "both"
 default_from = ["16.0", "17.0", "18.0"]
 repo_wide_threshold = 5
 migration_commit_patterns = ["^\\[MIG\\]", "^\\[ADD\\].*\\bmigration\\b"]
-migrate = "odoo-lint"          # "odoo-lint" | "odoo-module-migrator" | "none"
-
-[tool.odx.port.rewrites]
-"static/src/js/" = "static/src/"
 
 [tool.odx.suggest]
 series = ["16.0", "18.0"]
-mutes_file = ".odx/mutes.toml"
 
 [tool.odx.features.pos-loyalty]
 description = "Point of sale loyalty program and its reports"
@@ -163,7 +151,6 @@ search_synonyms = { invoicing = ["invoice", "billing", "account_move"] }   # ext
 [tool.odx.bot]
 environment = "test"
 dashboard = true
-group_prs = true
 max_prs_per_run = 10
 labels = ["odx"]
 mute_expiry = "180d"

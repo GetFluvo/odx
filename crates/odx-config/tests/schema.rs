@@ -9,8 +9,8 @@
 use std::path::Path;
 
 use odx_config::schema::{
-    BlacklistMode, BotAction, DashboardSection, IndexSource, MergirafMode, MigrateTool, OnConflict,
-    OnHeadChange, PlatformProfile, Preset, RefStyle, Role,
+    BotAction, DashboardSection, IndexSource, MergirafMode, OnConflict, OnHeadChange,
+    PlatformProfile, Preset, RefStyle, Role,
 };
 use odx_config::{MergeSource, parse_pyproject};
 
@@ -54,10 +54,10 @@ fn full_documented_example_parses() {
             .unwrap()
             .ttl
             .unwrap()
-            .wheels
+            .pr_state
             .unwrap()
             .to_string(),
-        "7d"
+        "30m"
     );
     assert_eq!(config.features["pos-loyalty"].modules.len(), 2);
     let envs = config.environments.unwrap();
@@ -67,7 +67,7 @@ fn full_documented_example_parses() {
         config.platform.unwrap().profile,
         Some(PlatformProfile::GenericWheels)
     );
-    assert_eq!(config.port.unwrap().migrate, Some(MigrateTool::OdooLint));
+    assert_eq!(config.suggest.unwrap().series.unwrap(), ["16.0", "18.0"]);
     assert_eq!(
         config.index.unwrap().overrides["base_tier_validation"]["19.0"],
         "OCA/tier-validation"
@@ -115,34 +115,7 @@ fn every_enum_value_is_accepted() {
 }
 
 #[test]
-fn port_and_platform_enums() {
-    for (value, expected) in [
-        ("auto", BlacklistMode::Auto),
-        ("oca-port", BlacklistMode::OcaPort),
-        ("mutes", BlacklistMode::Mutes),
-        ("both", BlacklistMode::Both),
-    ] {
-        assert_eq!(
-            with("port", "blacklist", &format!("\"{value}\""))
-                .port
-                .unwrap()
-                .blacklist,
-            Some(expected)
-        );
-    }
-    for (value, expected) in [
-        ("odoo-lint", MigrateTool::OdooLint),
-        ("odoo-module-migrator", MigrateTool::OdooModuleMigrator),
-        ("none", MigrateTool::None),
-    ] {
-        assert_eq!(
-            with("port", "migrate", &format!("\"{value}\""))
-                .port
-                .unwrap()
-                .migrate,
-            Some(expected)
-        );
-    }
+fn platform_enums() {
     for (value, expected) in [
         ("generic-wheels", PlatformProfile::GenericWheels),
         ("vendored-source", PlatformProfile::VendoredSource),
@@ -198,7 +171,7 @@ fn list_enums() {
     let sections = with(
         "dashboard",
         "sections",
-        r#"["pinned", "droppable", "new-upstream", "forward-port", "auto-update", "drift"]"#,
+        r#"["pinned", "droppable", "new-upstream", "forward-port", "backport", "auto-update", "glue", "drift", "suppressed"]"#,
     );
     assert_eq!(
         sections.dashboard.unwrap().sections.unwrap(),
@@ -207,8 +180,11 @@ fn list_enums() {
             DashboardSection::Droppable,
             DashboardSection::NewUpstream,
             DashboardSection::ForwardPort,
+            DashboardSection::Backport,
             DashboardSection::AutoUpdate,
+            DashboardSection::Glue,
             DashboardSection::Drift,
+            DashboardSection::Suppressed,
         ]
     );
     let sources = with(

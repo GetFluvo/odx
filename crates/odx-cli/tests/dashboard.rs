@@ -301,6 +301,21 @@ fn sections_and_renderers() {
         value[0]["sections"][0]["entries"][0]["id"],
         "fwd:OCA/pos#2->17.0"
     );
+    // `[tool.odx.dashboard] sections` when --section is not given.
+    let config = std::fs::read_to_string(setup.project.join("pyproject.toml")).unwrap();
+    std::fs::write(
+        setup.project.join("pyproject.toml"),
+        format!("{config}\n[tool.odx.dashboard]\nsections = [\"backport\"]\n"),
+    )
+    .unwrap();
+    let (_, out, _) = setup.odx(&["--json", "dashboard"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value[0]["sections"].as_array().unwrap().len(), 1);
+    assert_eq!(value[0]["sections"][0]["kind"], "backport");
+    let (_, out, _) = setup.odx(&["--json", "dashboard", "--section", "pinned"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value[0]["sections"][0]["kind"], "pinned");
+    std::fs::write(setup.project.join("pyproject.toml"), config).unwrap();
     let (code, _, err) = setup.odx(&["dashboard", "--section", "nope"]);
     assert_eq!(code, 2);
     assert!(err.contains("no section \"nope\""), "{err}");

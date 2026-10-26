@@ -373,7 +373,8 @@ fn resolve_failures_propagate() {
         offline: true,
         ..plan
     };
-    let err = fetch(&Cache::new(tmp.path()), &Broken, &offline, Duration::ZERO).unwrap_err();
+    // Not Duration::ZERO: a git child of another test may hold the lock a moment.
+    let err = fetch(&Cache::new(tmp.path()), &Broken, &offline, WAIT).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git"), "{err}");
     let no_git = SystemGit::with_program(Arc::new(OsRunner), "odx-surely-missing-git");
     assert!(no_git.resolve(tmp.path(), "HEAD").is_err());

@@ -323,5 +323,18 @@ fn suggest_failures() {
             "2 suggestions (1 blacklisted upstream, 0 suppressed by verdicts and mutes)\n"
         ),
         "{out}"
+    ); // `[tool.odx.suggest] series` comes before the port's default.
+    std::fs::write(
+        project.root.join("pyproject.toml"),
+        format!(
+            "[tool.odx]\nodoo_version = \"17.0\"\n\n[tool.odx.suggest]\nseries = [\"18.0\"]\n\n[tool.odx.port]\ndefault_from = [\"16.0\"]\n\n[[tool.odx.repositories]]\nname = \"pos\"\nurl = \"{}\"\naddons = [\"pos_x\"]\nmerges = []\n",
+            project.url
+        ),
+    )
+    .unwrap();
+    let (_, out, _) = project.odx(&["suggest"]);
+    assert!(
+        out.contains(" from 18.0: ") && !out.contains(" from 16.0: "),
+        "{out}"
     );
 }

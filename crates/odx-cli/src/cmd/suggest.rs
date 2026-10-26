@@ -95,18 +95,24 @@ pub(crate) fn targets(args: &SuggestArgs, prepared: &Prepared) -> Result<Vec<Str
     Ok(targets.into_iter().collect())
 }
 
-/// The series to look on for `target`: `--from`, else `[tool.odx.port]
-/// default_from`, else the series just below and just above.
+/// The series to look on for `target`: `--from`, else `[tool.odx.suggest]
+/// series`, else `[tool.odx.port] default_from`, else the series just below
+/// and just above.
 fn sources(args: &SuggestArgs, prepared: &Prepared, target: &str) -> Vec<String> {
     if !args.from.is_empty() {
         return args.from.clone();
     }
-    if let Some(from) = prepared
-        .project
-        .config
-        .port
+    let config = &prepared.project.config;
+    if let Some(from) = config
+        .suggest
         .as_ref()
-        .and_then(|port| port.default_from.clone())
+        .and_then(|suggest| suggest.series.clone())
+        .or_else(|| {
+            config
+                .port
+                .as_ref()
+                .and_then(|port| port.default_from.clone())
+        })
     {
         return from;
     }
