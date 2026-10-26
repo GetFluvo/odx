@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx migrate plan (repository)",
+  "description": "What `odx --json migrate plan` prints in a plain addons repository.",
+  "type": "object",
+  "properties": {
+    "available": {
+      "description": "Addons already on the target series.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pull_requests": {
+      "description": "Addons with an open migration pull request.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RepositoryPullRequestJson"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "source": {
+      "description": "The source series: `<remote>/<from>`.",
+      "type": "string"
+    },
+    "target": {
+      "description": "The target series.",
+      "type": "string"
+    },
+    "to_migrate": {
+      "description": "Addons to migrate, dependencies first.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "waits_on": {
+      "description": "What each addon to migrate waits for.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Waiting"
+        }
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "source",
+    "target",
+    "available",
+    "pull_requests",
+    "to_migrate",
+    "waits_on"
+  ],
+  "$defs": {
+    "Migration": {
+      "description": "An open migration pull request of a dependency.",
+      "type": "object",
+      "properties": {
+        "head": {
+          "description": "The ref a pip requirement points at for it.",
+          "type": "string"
+        },
+        "number": {
+          "description": "Its number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "origin": {
+          "description": "Where the repository is served: `scheme://host[:port]`.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "`owner/repo` of its repository.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Its page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "origin",
+        "number",
+        "url",
+        "head"
+      ]
+    },
+    "RepositoryPullRequestJson": {
+      "description": "An addon with an open migration pull request.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "number": {
+          "description": "The pull request's number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "addon",
+        "number"
+      ]
+    },
+    "Waiting": {
+      "description": "A dependency that is not available on the target series yet.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The dependency.",
+          "type": "string"
+        },
+        "pull_request": {
+          "description": "Its open migration pull request, when there is one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Migration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repository": {
+          "description": "The repository it lives in on the source series, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "addon"
+      ]
+    }
+  }
+}

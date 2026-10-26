@@ -7,13 +7,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 use odx_analyze::sniff::{
-    AddonChange, Change, addon_changes, manifest_addon, manifest_path, manifest_version, script,
+    AddonChange, Change, Script, addon_changes, manifest_addon, manifest_path, manifest_version,
+    script,
 };
 use odx_config::OdxConfig;
 use odx_config::lock::{LockedRepository, Lockfile};
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner};
 use odx_git::{GitError, Merger};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::prepare;
@@ -125,26 +128,73 @@ pub(crate) fn describe(sniffed: &[Sniffed]) -> String {
     text
 }
 
-/// `sniffed` as JSON.
+/// What `odx --json sniff` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx sniff")]
+pub(crate) struct SniffJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Migration scripts found.
+    scripts: usize,
+    /// Every repository or package that brings migration scripts or a
+    /// version change.
+    sources: Vec<SniffedJson<'a>>,
+    /// Repositories or packages that could not be compared.
+    errors: &'a [String],
+}
+
+/// What one repository or package change does to database migrations.
+#[derive(Debug, Serialize, JsonSchema)]
+pub(crate) struct SniffedJson<'a> {
+    /// Repository name or distribution.
+    name: &'a str,
+    /// `repository` or `package`.
+    kind: &'a str,
+    /// Addons with migration scripts or a version change.
+    addons: Vec<AddonChangeJson<'a>>,
+}
+
+/// What a change does to one addon's database migration.
+#[derive(Debug, Serialize, JsonSchema)]
+struct AddonChangeJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The manifest version before the change, if known.
+    previous_version: Option<&'a str>,
+    /// The manifest version after the change, if known.
+    version: Option<&'a str>,
+    /// The version changed without migration scripts.
+    bumped_without_scripts: bool,
+    /// Migration scripts added or modified, sorted by path.
+    scripts: &'a [Script],
+}
+
+/// `sniffed` as a JSON value, for outputs still built with `json!`.
 pub(crate) fn to_json(sniffed: &[Sniffed]) -> serde_json::Value {
-    serde_json::Value::Array(
-        sniffed
-            .iter()
-            .map(|source| {
-                serde_json::json!({
-                    "name": source.name,
-                    "kind": source.kind,
-                    "addons": source.addons.iter().map(|addon| serde_json::json!({
-                        "addon": addon.addon,
-                        "previous_version": addon.previous_version,
-                        "version": addon.version,
-                        "bumped_without_scripts": addon.bumped_without_scripts(),
-                        "scripts": addon.scripts,
-                    })).collect::<Vec<_>>(),
+    serde_json::to_value(sniffed_json(sniffed)).unwrap_or_default()
+}
+
+/// `sniffed` as JSON.
+pub(crate) fn sniffed_json(sniffed: &[Sniffed]) -> Vec<SniffedJson<'_>> {
+    sniffed
+        .iter()
+        .map(|source| SniffedJson {
+            name: &source.name,
+            kind: source.kind,
+            addons: source
+                .addons
+                .iter()
+                .map(|addon| AddonChangeJson {
+                    addon: &addon.addon,
+                    previous_version: addon.previous_version.as_deref(),
+                    version: addon.version.as_deref(),
+                    bumped_without_scripts: addon.bumped_without_scripts(),
+                    scripts: &addon.scripts,
                 })
-            })
-            .collect(),
-    )
+                .collect(),
+        })
+        .collect()
 }
 
 /// The number of migration scripts in `sniffed`.
@@ -223,15 +273,12 @@ fn sniff(args: &SniffArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Rep
     let scripts = script_count(&sniffed);
     let mut report = if global.json {
         Report {
-            out: format!(
-                "{}\n",
-                serde_json::json!({
-                    "schema": 1,
-                    "scripts": scripts,
-                    "sources": to_json(&sniffed),
-                    "errors": problems,
-                })
-            ),
+            out: super::to_json(&SniffJson {
+                schema: 1,
+                scripts,
+                sources: sniffed_json(&sniffed),
+                errors: &problems,
+            }),
             ..Report::default()
         }
     } else {

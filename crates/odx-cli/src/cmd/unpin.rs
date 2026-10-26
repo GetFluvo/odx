@@ -288,19 +288,47 @@ fn push(ctx: &Context<'_>, (to, head, there): &(String, String, String)) -> Resu
     .map_err(failed)
 }
 
-/// What `odx migrate unpin` found and did.
-#[derive(Debug, Default, serde::Serialize)]
-struct Unpinned {
+/// What `odx --json migrate unpin` prints: what it found and did.
+#[derive(Debug, Default, serde::Serialize, schemars::JsonSchema)]
+#[schemars(title = "odx migrate unpin")]
+pub(crate) struct Unpinned {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// `no pins`, `waiting`, `ready` or `unpinned`.
     status: &'static str,
-    pins: Vec<serde_json::Value>,
+    /// The pins in `test-requirements.txt`.
+    pins: Vec<PinJson>,
+    /// How the pins went: `commit` (the pin commit dropped) or `lines`
+    /// (removed in a commit).
     dropped: Option<&'static str>,
+    /// Where `--push` sent the branch.
     pushed_to: Option<String>,
+    /// The page of the branch's pull request.
     pull_request: Option<String>,
+    /// Its checks: `green`, `red`, `pending` or `unknown`.
     ci: Option<&'static str>,
+    /// Its failing checks.
     failing: Vec<String>,
+    /// Whether `--merge` merged it.
     merged: bool,
+    /// What the command prints without `--json`.
     #[serde(skip)]
     text: String,
+}
+
+/// A dependency pinned to its migration pull request.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct PinJson {
+    /// The addon.
+    addon: String,
+    /// The repository's URL.
+    repository: String,
+    /// The pull request's number.
+    number: u64,
+    /// Where it stands upstream: `open`, `closed`, `merged`, `released`
+    /// or `unknown`.
+    state: &'static str,
 }
 
 const fn ci_key(state: CiState) -> &'static str {
@@ -333,7 +361,10 @@ pub(crate) fn run(
     let pull_request = pull_request(ctx, args, &branch)?;
     let text = std::fs::read_to_string(root(ctx).join("test-requirements.txt")).unwrap_or_default();
     let pins: Vec<Pinned> = text.lines().filter_map(pinned).collect();
-    let mut out = Unpinned::default();
+    let mut out = Unpinned {
+        schema: 1,
+        ..Unpinned::default()
+    };
     if pins.is_empty() {
         out.status = "no pins";
         out.text.push_str("no pins in test-requirements.txt\n");
@@ -349,7 +380,7 @@ pub(crate) fn run(
     }
     Ok(Report {
         out: if global.json {
-            format!("{}\n", serde_json::to_string(&out).unwrap_or_default())
+            super::to_json(&out)
         } else {
             out.text
         },
@@ -394,12 +425,12 @@ fn settle(
             pin.number,
             state.describe(&to)
         );
-        out.pins.push(serde_json::json!({
-            "addon": pin.addon,
-            "repository": pin.repository,
-            "number": pin.number,
-            "state": state.key(),
-        }));
+        out.pins.push(PinJson {
+            addon: pin.addon.clone(),
+            repository: pin.repository.clone(),
+            number: pin.number,
+            state: state.key(),
+        });
     }
     if states.iter().any(|state| *state != Upstream::Released) {
         out.status = "waiting";

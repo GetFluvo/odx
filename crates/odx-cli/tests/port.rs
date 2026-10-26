@@ -166,7 +166,7 @@ fn ports_what_an_addon_lacks() {
     let mut json = vec!["--json"];
     json.extend_from_slice(ADDON);
     let (_, out, _) = odx(&work, &json);
-    assert_eq!(out, "{\"status\":\"nothing to port\"}\n");
+    assert_eq!(out, "{\"schema\":1,\"status\":\"nothing to port\"}\n");
 }
 
 #[test]

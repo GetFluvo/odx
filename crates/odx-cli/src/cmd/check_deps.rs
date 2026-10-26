@@ -21,6 +21,8 @@ use odx_forge::{CachedHttp, ReqwestHttp};
 use odx_git::Merger;
 use odx_index::sources::{distribution, package_index};
 use odx_vendor::record::VendorRecord;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -421,7 +423,7 @@ fn check_deps(
     }
     let scanned = inventory.scanned().count();
     report.out = if global.json {
-        format!("{}\n", json(&findings))
+        json(&findings)
     } else {
         text(&findings, scanned)
     };
@@ -521,21 +523,126 @@ fn text(findings: &Findings, scanned: usize) -> String {
     out
 }
 
-fn json(findings: &Findings) -> serde_json::Value {
-    let pairs = |list: &[(String, String)], a: &str, b: &str| {
-        list.iter()
-            .map(|(x, y)| serde_json::json!({ a: x, b: y }))
-            .collect::<Vec<_>>()
-    };
-    serde_json::json!({
-        "schema": 1,
-        "missing": pairs(&findings.missing, "addon", "needed_by"),
-        "python": pairs(&findings.python, "package", "needed_by"),
-        "duplicates": findings.duplicates.iter().map(|(addon, from)| serde_json::json!({"addon": addon, "sources": from})).collect::<Vec<_>>(),
-        "stray": findings.stray.iter().map(|(path, why)| serde_json::json!({"path": path, "reason": why})).collect::<Vec<_>>(),
-        "unused": findings.unused,
-        "licenses": findings.licenses.iter().map(|(addon, mine, dep, theirs)| serde_json::json!({"addon": addon, "license": mine, "depends_on": dep, "its_license": theirs})).collect::<Vec<_>>(),
-        "fixed": pairs(&findings.fixed, "package", "group"),
+/// What `odx --json check-deps` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx check-deps")]
+pub(crate) struct CheckDepsJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Addons depended on that nothing provides.
+    missing: Vec<MissingJson<'a>>,
+    /// Python packages addons need that nothing provides.
+    python: Vec<PythonJson<'a>>,
+    /// Addons more than one source provides.
+    duplicates: Vec<DuplicateJson<'a>>,
+    /// Addon directories nobody put there.
+    stray: Vec<StrayJson<'a>>,
+    /// Declared addon packages nothing depends on, with `--unused`.
+    unused: &'a [String],
+    /// Dependencies under an incompatible license, with `--licenses`.
+    licenses: Vec<LicenseJson<'a>>,
+    /// Packages `--fix` added.
+    fixed: Vec<FixedJson<'a>>,
+}
+
+/// An addon depended on that nothing provides.
+#[derive(Debug, Serialize, JsonSchema)]
+struct MissingJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The addon that depends on it.
+    needed_by: &'a str,
+}
+
+/// A Python package an addon needs that nothing provides.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PythonJson<'a> {
+    /// The package.
+    package: &'a str,
+    /// The addon that needs it.
+    needed_by: &'a str,
+}
+
+/// An addon more than one source provides.
+#[derive(Debug, Serialize, JsonSchema)]
+struct DuplicateJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The sources that provide it.
+    sources: &'a [String],
+}
+
+/// An addon directory nobody put there.
+#[derive(Debug, Serialize, JsonSchema)]
+struct StrayJson<'a> {
+    /// The directory.
+    path: &'a str,
+    /// `not vendored by odx vendor` or `not tracked by git`.
+    reason: &'a str,
+}
+
+/// A dependency under an incompatible license.
+#[derive(Debug, Serialize, JsonSchema)]
+struct LicenseJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// Its license.
+    license: &'a str,
+    /// The dependency.
+    depends_on: &'a str,
+    /// The dependency's license.
+    its_license: &'a str,
+}
+
+/// A package `--fix` added.
+#[derive(Debug, Serialize, JsonSchema)]
+struct FixedJson<'a> {
+    /// The distribution.
+    package: &'a str,
+    /// The dependency group it was added to.
+    group: &'a str,
+}
+
+fn json(findings: &Findings) -> String {
+    super::to_json(&CheckDepsJson {
+        schema: 1,
+        missing: findings
+            .missing
+            .iter()
+            .map(|(addon, needed_by)| MissingJson { addon, needed_by })
+            .collect(),
+        python: findings
+            .python
+            .iter()
+            .map(|(package, needed_by)| PythonJson { package, needed_by })
+            .collect(),
+        duplicates: findings
+            .duplicates
+            .iter()
+            .map(|(addon, sources)| DuplicateJson { addon, sources })
+            .collect(),
+        stray: findings
+            .stray
+            .iter()
+            .map(|(path, reason)| StrayJson { path, reason })
+            .collect(),
+        unused: &findings.unused,
+        licenses: findings
+            .licenses
+            .iter()
+            .map(|(addon, license, depends_on, its_license)| LicenseJson {
+                addon,
+                license,
+                depends_on,
+                its_license,
+            })
+            .collect(),
+        fixed: findings
+            .fixed
+            .iter()
+            .map(|(package, group)| FixedJson { package, group })
+            .collect(),
     })
 }
 
@@ -553,5 +660,18 @@ mod tests {
         assert!(!incompatible("AGPL-3", "GPL-3"));
         assert_eq!(addon_of("odoo14-addon-pos-x").as_deref(), Some("pos_x"));
         assert_eq!(addon_of("requests"), None);
+    }
+
+    #[test]
+    fn fixed_packages_are_reported() {
+        let findings = Findings {
+            fixed: vec![("odoo-addon-x".to_owned(), "addons".to_owned())],
+            ..Findings::default()
+        };
+        let value: serde_json::Value = serde_json::from_str(&json(&findings)).unwrap();
+        assert_eq!(
+            value["fixed"],
+            serde_json::json!([{"package": "odoo-addon-x", "group": "addons"}])
+        );
     }
 }

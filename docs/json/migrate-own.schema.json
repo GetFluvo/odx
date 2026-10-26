@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx migrate own",
+  "description": "What `odx --json migrate own` prints.",
+  "type": "object",
+  "properties": {
+    "addons": {
+      "description": "The project's own addons, migrated in place.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/InPlace"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "target": {
+      "description": "The series migrated to.",
+      "type": "string"
+    },
+    "warnings": {
+      "description": "Steps that could not run, and why.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "target",
+    "addons",
+    "warnings"
+  ],
+  "$defs": {
+    "Finding": {
+      "description": "A finding odoo-lint leaves to fix by hand.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "The rule's code, e.g. `U1908`.",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "The file, relative to the repository.",
+          "type": "string"
+        },
+        "line": {
+          "description": "The line.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "message": {
+          "description": "What to do.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "line",
+        "code",
+        "message"
+      ]
+    },
+    "InPlace": {
+      "description": "An addon migrated in place by [`Worktree::migrate_in_place`].",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon's directory, as given.",
+          "type": "string"
+        },
+        "committed": {
+          "description": "Whether the migration changed anything, committed as `[MIG]`.",
+          "type": "boolean"
+        },
+        "findings": {
+          "description": "What odoo-lint leaves to fix by hand.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          }
+        }
+      },
+      "required": [
+        "addon",
+        "committed",
+        "findings"
+      ]
+    }
+  }
+}

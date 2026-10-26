@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use odx_analyze::sniff::{AddonChange, Change};
+use odx_analyze::sniff::{AddonChange, Change, Script};
 use odx_config::Problem;
 use odx_config::lock::Lockfile;
 use odx_core::Exit;
@@ -16,6 +16,8 @@ use odx_core::system::OsRunner;
 use odx_git::Merger;
 use odx_lint::schema::{Schema, SchemaChange, changes};
 use odx_vendor::archive::{extract, subdirectory_entry};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::prepare;
@@ -231,41 +233,102 @@ fn text(sources: &[SourceDiff]) -> String {
     out
 }
 
-fn json(since: &str, to: &str, sources: &[SourceDiff], problems: &[String]) -> String {
-    let sources: Vec<serde_json::Value> = sources
-        .iter()
-        .map(|source| {
-            let addons: Vec<serde_json::Value> = source
-                .addons
+/// What `odx --json diff` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx diff")]
+pub(crate) struct DiffJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The revision of `odx.lock` compared from.
+    since: &'a str,
+    /// The revision compared to, or `working tree`.
+    to: &'a str,
+    /// The repositories and packages with addons that changed.
+    sources: Vec<SourceDiffJson<'a>>,
+    /// Repositories or packages that could not be compared.
+    errors: &'a [String],
+}
+
+/// The addons one repository or package changes.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SourceDiffJson<'a> {
+    /// Repository name or distribution.
+    name: &'a str,
+    /// `repository` or `package`.
+    kind: &'a str,
+    /// The addons that changed.
+    addons: Vec<AddonDiffJson<'a>>,
+}
+
+/// What happened to one addon.
+#[derive(Debug, Serialize, JsonSchema)]
+struct AddonDiffJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// `added`, `removed` or `changed`.
+    state: &'a str,
+    /// Models created, for an added addon.
+    models: usize,
+    /// Fields declared, for an added addon.
+    fields: usize,
+    /// The manifest version before, when it changed.
+    previous_version: Option<&'a str>,
+    /// The manifest version after, when it changed.
+    version: Option<&'a str>,
+    /// Changes to models, fields, parents and access rights.
+    changes: Vec<SchemaChangeJson<'a>>,
+    /// Migration scripts added or modified, sorted by path.
+    scripts: &'a [Script],
+}
+
+/// A change likely to affect the database schema.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SchemaChangeJson<'a> {
+    /// What kind of change, e.g. `field-added`.
+    change: &'a str,
+    /// The change as `odx diff` writes it.
+    text: String,
+}
+
+impl AddonDiff {
+    fn json(&self) -> AddonDiffJson<'_> {
+        let migration = self.migration.as_ref();
+        AddonDiffJson {
+            addon: &self.addon,
+            state: self.state,
+            models: self.size.0,
+            fields: self.size.1,
+            previous_version: migration.and_then(|m| m.previous_version.as_deref()),
+            version: migration.and_then(|m| m.version.as_deref()),
+            changes: self
+                .changes
                 .iter()
-                .map(|addon| {
-                    let migration = addon.migration.as_ref();
-                    serde_json::json!({
-                        "addon": addon.addon,
-                        "state": addon.state,
-                        "models": addon.size.0,
-                        "fields": addon.size.1,
-                        "previous_version": migration.and_then(|m| m.previous_version.clone()),
-                        "version": migration.and_then(|m| m.version.clone()),
-                        "changes": addon.changes.iter().map(|change| serde_json::json!({
-                            "change": change.name(),
-                            "text": change.to_string(),
-                        })).collect::<Vec<_>>(),
-                        "scripts": migration.map_or(&[][..], |m| m.scripts.as_slice()),
-                    })
+                .map(|change| SchemaChangeJson {
+                    change: change.name(),
+                    text: change.to_string(),
                 })
-                .collect();
-            serde_json::json!({"name": source.name, "kind": source.kind, "addons": addons})
-        })
-        .collect();
-    let value = serde_json::json!({
-        "schema": 1,
-        "since": since,
-        "to": to,
-        "sources": sources,
-        "errors": problems,
-    });
-    format!("{value:#}\n")
+                .collect(),
+            scripts: migration.map_or(&[][..], |m| m.scripts.as_slice()),
+        }
+    }
+}
+
+fn json(since: &str, to: &str, sources: &[SourceDiff], problems: &[String]) -> String {
+    super::to_json(&DiffJson {
+        schema: 1,
+        since,
+        to,
+        sources: sources
+            .iter()
+            .map(|source| SourceDiffJson {
+                name: &source.name,
+                kind: source.kind,
+                addons: source.addons.iter().map(AddonDiff::json).collect(),
+            })
+            .collect(),
+        errors: problems,
+    })
 }
 
 /// `odx diff [--since REV] [--to REV]`.

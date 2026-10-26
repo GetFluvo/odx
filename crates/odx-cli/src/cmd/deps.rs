@@ -8,11 +8,13 @@ use std::collections::BTreeMap;
 use odx_core::system::OsRunner;
 use odx_forge::{ForgeClient, ForgeKind, Http, RepoUrl, ReqwestHttp};
 use odx_index::sources::package_index;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use crate::Context;
 
 /// A dependency that is not available on the target series yet.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub(crate) struct Waiting {
     /// The dependency.
     pub(crate) addon: String,
@@ -23,12 +25,13 @@ pub(crate) struct Waiting {
 }
 
 /// An open migration pull request of a dependency.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub(crate) struct Migration {
     /// `owner/repo` of its repository.
     pub(crate) repository: String,
     /// Where the repository is served: `scheme://host[:port]`.
     pub(crate) origin: String,
+    /// Its number.
     pub(crate) number: u64,
     /// Its page.
     pub(crate) url: String,

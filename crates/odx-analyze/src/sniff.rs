@@ -9,10 +9,11 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::Serialize;
 
 /// When Odoo runs a migration script.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Phase {
     /// Before the addon's models are loaded.
@@ -35,7 +36,7 @@ impl Phase {
 }
 
 /// How a file changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Change {
     /// The file is new.
@@ -45,7 +46,7 @@ pub enum Change {
 }
 
 /// A migration script that a change adds or modifies.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
 pub struct Script {
     /// The addon the script migrates.
     pub addon: String,

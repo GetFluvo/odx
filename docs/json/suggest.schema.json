@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx suggest",
+  "description": "What `odx --json suggest` prints.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "suggestions": {
+      "description": "Every suggestion, the suppressed ones included.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SuggestionJson"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "suggestions"
+  ],
+  "$defs": {
+    "CommitJson": {
+      "description": "A commit of a suggestion.",
+      "type": "object",
+      "properties": {
+        "author": {
+          "description": "Author name.",
+          "type": "string"
+        },
+        "date": {
+          "description": "Author date (ISO 8601).",
+          "type": "string"
+        },
+        "sha": {
+          "description": "Full id.",
+          "type": "string"
+        },
+        "subject": {
+          "description": "First line of the message.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "subject",
+        "author",
+        "date"
+      ]
+    },
+    "SuggestionJson": {
+      "description": "Commits of one pull request (or the orphaned commits) an addon has on\nan older series and not on the project's.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "applies": {
+          "description": "Whether its commits cherry-pick cleanly onto the target, with\n`--check-apply`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "class": {
+          "description": "`portable`, `migration commit`, `repo-wide change`, `translations`,\n`reverted` or `blacklisted`.",
+          "type": "string"
+        },
+        "commits": {
+          "description": "Its commits, newest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommitJson"
+          }
+        },
+        "key": {
+          "description": "The blacklist key: `<owner>/<repo>#<n>` or `orphaned_commits`.",
+          "type": "string"
+        },
+        "patch_ids": {
+          "description": "The patch-ids of its commits, relative to the addon.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pr": {
+          "description": "The pull request's number; null for orphaned commits.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reason": {
+          "description": "The blacklist's reason, when blacklisted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "description": "The repository the addon lives in on the source series.",
+          "type": "string"
+        },
+        "source": {
+          "description": "The series the commits are on.",
+          "type": "string"
+        },
+        "target": {
+          "description": "The project's series.",
+          "type": "string"
+        },
+        "title": {
+          "description": "The subject of its oldest commit.",
+          "type": "string"
+        },
+        "verdict": {
+          "description": "The first verdict or mute in force for it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerdictJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "addon",
+        "target",
+        "source",
+        "repository",
+        "key",
+        "title",
+        "class",
+        "patch_ids",
+        "commits"
+      ]
+    },
+    "VerdictJson": {
+      "description": "A verdict or mute recorded for a suggestion.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "`v:<series>:<addon>:<patch-id prefix>`, or `m:...` for a mute.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "What it says, e.g. `not-needed`.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why.",
+          "type": "string"
+        },
+        "stale": {
+          "description": "The target code changed since: the suggestion resurfaces with the\nold reason.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "reason",
+        "stale"
+      ]
+    }
+  }
+}

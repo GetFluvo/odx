@@ -12,6 +12,9 @@ use odx_port::blacklist::{self, Blacklist};
 use odx_port::git::Repo;
 use odx_port::migrate::Worktree;
 
+use schemars::JsonSchema;
+use serde::Serialize;
+
 use super::Report;
 use super::port::{failed, repository, settings, usage};
 use super::propose::{Proposed, default_remote, forge_repo, opened_json, opened_text, propose};
@@ -19,15 +22,39 @@ use crate::Context;
 use crate::cli::{GlobalArgs, SweepArgs};
 
 /// What a sweep found for one addon on one source series.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 struct Row {
+    /// The addon.
     addon: String,
+    /// The source series.
     series: String,
+    /// The blacklist key: `<owner>/<repo>#<n>` or `orphaned_commits`.
     key: String,
+    /// The subject of its oldest commit.
     title: String,
+    /// `portable`, `migration commit`, `repo-wide change`, `translations`,
+    /// `reverted` or `blacklisted`.
     class: &'static str,
+    /// Why it is blacklisted, or would be as a false positive.
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+}
+
+/// What `odx --json port sweep` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx port sweep")]
+pub(crate) struct SweepJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// What the sweep found, addon by addon.
+    addons: &'a [Row],
+    /// The branch the blacklist was written on, with `--write-blacklist`.
+    branch: Option<&'a str>,
+    /// The subjects of the blacklist commits.
+    commits: &'a [String],
+    /// The pull request opened, with `--open-pr`.
+    pull_request: Option<serde_json::Value>,
 }
 
 /// The reason a false positive is blacklisted with; `None` for what is
@@ -185,13 +212,13 @@ pub(crate) fn run_sweep(
         None
     };
     let out = if global.json {
-        let value = serde_json::json!({
-            "addons": rows,
-            "branch": written.then_some(&branch),
-            "commits": commits,
-            "pull_request": opened.as_ref().map(opened_json),
-        });
-        format!("{value}\n")
+        super::to_json(&SweepJson {
+            schema: 1,
+            addons: &rows,
+            branch: written.then_some(branch.as_str()),
+            commits: &commits,
+            pull_request: opened.as_ref().map(opened_json),
+        })
     } else {
         let mut out = text(&rows, &sources, to);
         if written {

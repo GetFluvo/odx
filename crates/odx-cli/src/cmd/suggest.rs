@@ -17,6 +17,8 @@ use odx_port::analysis::{Class, Group, Query, Settings, analyse};
 use odx_port::blacklist::{self, Blacklist};
 use odx_port::git::Repo;
 use odx_verdicts::{Entry, Standing};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare};
@@ -262,7 +264,7 @@ fn suggest(args: &SuggestArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         })
         .collect();
     report.out = if global.json {
-        format!("{}\n", json(&judged, &applies))
+        json(&judged, &applies)
     } else {
         text(&judged, &applies, args.show_muted)
     };
@@ -492,34 +494,118 @@ fn text(judged: &[Judged<'_>], applies: &[Option<bool>], show_suppressed: bool) 
     out
 }
 
-fn json(judged: &[Judged<'_>], applies: &[Option<bool>]) -> serde_json::Value {
-    serde_json::json!({
-        "schema": 1,
-        "suggestions": judged.iter().zip(applies).map(|(item, applies)| {
+/// What `odx --json suggest` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx suggest")]
+pub(crate) struct SuggestJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Every suggestion, the suppressed ones included.
+    suggestions: Vec<SuggestionJson<'a>>,
+}
+
+/// Commits of one pull request (or the orphaned commits) an addon has on
+/// an older series and not on the project's.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SuggestionJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The project's series.
+    target: &'a str,
+    /// The series the commits are on.
+    source: &'a str,
+    /// The repository the addon lives in on the source series.
+    repository: &'a str,
+    /// The blacklist key: `<owner>/<repo>#<n>` or `orphaned_commits`.
+    key: &'a str,
+    /// The pull request's number; null for orphaned commits.
+    pr: Option<u64>,
+    /// The subject of its oldest commit.
+    title: &'a str,
+    /// `portable`, `migration commit`, `repo-wide change`, `translations`,
+    /// `reverted` or `blacklisted`.
+    class: &'a str,
+    /// The blacklist's reason, when blacklisted.
+    reason: Option<&'a str>,
+    /// The patch-ids of its commits, relative to the addon.
+    patch_ids: &'a [String],
+    /// Whether its commits cherry-pick cleanly onto the target, with
+    /// `--check-apply`.
+    applies: Option<bool>,
+    /// The first verdict or mute in force for it.
+    verdict: Option<VerdictJson<'a>>,
+    /// Its commits, newest first.
+    commits: Vec<CommitJson<'a>>,
+}
+
+/// A verdict or mute recorded for a suggestion.
+#[derive(Debug, Serialize, JsonSchema)]
+struct VerdictJson<'a> {
+    /// `v:<series>:<addon>:<patch-id prefix>`, or `m:...` for a mute.
+    id: &'a str,
+    /// What it says, e.g. `not-needed`.
+    kind: &'a str,
+    /// Why.
+    reason: &'a str,
+    /// The target code changed since: the suggestion resurfaces with the
+    /// old reason.
+    stale: bool,
+}
+
+/// A commit of a suggestion.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CommitJson<'a> {
+    /// Full id.
+    sha: &'a str,
+    /// First line of the message.
+    subject: &'a str,
+    /// Author name.
+    author: &'a str,
+    /// Author date (ISO 8601).
+    date: &'a str,
+}
+
+fn json(judged: &[Judged<'_>], applies: &[Option<bool>]) -> String {
+    let suggestions = judged
+        .iter()
+        .zip(applies)
+        .map(|(item, applies)| {
             let group = item.group;
-            serde_json::json!({
-                "addon": item.found.addon,
-                "target": item.found.target,
-                "source": item.found.source,
-                "repository": item.found.url,
-                "key": group.key,
-                "pr": group.pr,
-                "title": group.title,
-                "class": group.class.name(),
-                "reason": group.reason,
-                "patch_ids": group.patch_ids,
-                "applies": applies,
-                "verdict": item.verdict.map(|(entry, standing)| serde_json::json!({
-                    "id": entry.id,
-                    "kind": entry.kind.name(),
-                    "reason": entry.reason,
-                    "stale": standing == Standing::Stale,
-                })),
-                "commits": group.commits.iter().map(|c| serde_json::json!({
-                    "sha": c.sha, "subject": c.subject, "author": c.author, "date": c.date,
-                })).collect::<Vec<_>>(),
-            })
-        }).collect::<Vec<_>>(),
+            SuggestionJson {
+                addon: &item.found.addon,
+                target: &item.found.target,
+                source: &item.found.source,
+                repository: &item.found.url,
+                key: &group.key,
+                pr: group.pr,
+                title: &group.title,
+                class: group.class.name(),
+                reason: group.reason.as_deref(),
+                patch_ids: &group.patch_ids,
+                applies: *applies,
+                verdict: item.verdict.map(|(entry, standing)| VerdictJson {
+                    id: &entry.id,
+                    kind: entry.kind.name(),
+                    reason: &entry.reason,
+                    stale: standing == Standing::Stale,
+                }),
+                commits: group
+                    .commits
+                    .iter()
+                    .map(|c| CommitJson {
+                        sha: &c.sha,
+                        subject: &c.subject,
+                        author: &c.author,
+                        date: &c.date,
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    super::to_json(&SuggestJson {
+        schema: 1,
+        suggestions,
     })
 }
 

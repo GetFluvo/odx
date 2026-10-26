@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx check-deps",
+  "description": "What `odx --json check-deps` prints.",
+  "type": "object",
+  "properties": {
+    "duplicates": {
+      "description": "Addons more than one source provides.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DuplicateJson"
+      }
+    },
+    "fixed": {
+      "description": "Packages `--fix` added.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FixedJson"
+      }
+    },
+    "licenses": {
+      "description": "Dependencies under an incompatible license, with `--licenses`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LicenseJson"
+      }
+    },
+    "missing": {
+      "description": "Addons depended on that nothing provides.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MissingJson"
+      }
+    },
+    "python": {
+      "description": "Python packages addons need that nothing provides.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PythonJson"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "stray": {
+      "description": "Addon directories nobody put there.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StrayJson"
+      }
+    },
+    "unused": {
+      "description": "Declared addon packages nothing depends on, with `--unused`.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "missing",
+    "python",
+    "duplicates",
+    "stray",
+    "unused",
+    "licenses",
+    "fixed"
+  ],
+  "$defs": {
+    "DuplicateJson": {
+      "description": "An addon more than one source provides.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "sources": {
+          "description": "The sources that provide it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "addon",
+        "sources"
+      ]
+    },
+    "FixedJson": {
+      "description": "A package `--fix` added.",
+      "type": "object",
+      "properties": {
+        "group": {
+          "description": "The dependency group it was added to.",
+          "type": "string"
+        },
+        "package": {
+          "description": "The distribution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package",
+        "group"
+      ]
+    },
+    "LicenseJson": {
+      "description": "A dependency under an incompatible license.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "depends_on": {
+          "description": "The dependency.",
+          "type": "string"
+        },
+        "its_license": {
+          "description": "The dependency's license.",
+          "type": "string"
+        },
+        "license": {
+          "description": "Its license.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "license",
+        "depends_on",
+        "its_license"
+      ]
+    },
+    "MissingJson": {
+      "description": "An addon depended on that nothing provides.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "needed_by": {
+          "description": "The addon that depends on it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "needed_by"
+      ]
+    },
+    "PythonJson": {
+      "description": "A Python package an addon needs that nothing provides.",
+      "type": "object",
+      "properties": {
+        "needed_by": {
+          "description": "The addon that needs it.",
+          "type": "string"
+        },
+        "package": {
+          "description": "The package.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package",
+        "needed_by"
+      ]
+    },
+    "StrayJson": {
+      "description": "An addon directory nobody put there.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The directory.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "`not vendored by odx vendor` or `not tracked by git`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ]
+    }
+  }
+}

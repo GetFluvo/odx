@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx diff",
+  "description": "What `odx --json diff` prints.",
+  "type": "object",
+  "properties": {
+    "errors": {
+      "description": "Repositories or packages that could not be compared.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "since": {
+      "description": "The revision of `odx.lock` compared from.",
+      "type": "string"
+    },
+    "sources": {
+      "description": "The repositories and packages with addons that changed.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SourceDiffJson"
+      }
+    },
+    "to": {
+      "description": "The revision compared to, or `working tree`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "since",
+    "to",
+    "sources",
+    "errors"
+  ],
+  "$defs": {
+    "AddonDiffJson": {
+      "description": "What happened to one addon.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "changes": {
+          "description": "Changes to models, fields, parents and access rights.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SchemaChangeJson"
+          }
+        },
+        "fields": {
+          "description": "Fields declared, for an added addon.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "models": {
+          "description": "Models created, for an added addon.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "previous_version": {
+          "description": "The manifest version before, when it changed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scripts": {
+          "description": "Migration scripts added or modified, sorted by path.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Script"
+          }
+        },
+        "state": {
+          "description": "`added`, `removed` or `changed`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "The manifest version after, when it changed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "addon",
+        "state",
+        "models",
+        "fields",
+        "changes",
+        "scripts"
+      ]
+    },
+    "Change": {
+      "description": "How a file changed.",
+      "oneOf": [
+        {
+          "description": "The file is new.",
+          "type": "string",
+          "const": "added"
+        },
+        {
+          "description": "The file existed and changed.",
+          "type": "string",
+          "const": "modified"
+        }
+      ]
+    },
+    "Phase": {
+      "description": "When Odoo runs a migration script.",
+      "oneOf": [
+        {
+          "description": "Before the addon's models are loaded.",
+          "type": "string",
+          "const": "pre"
+        },
+        {
+          "description": "After the addon is updated.",
+          "type": "string",
+          "const": "post"
+        },
+        {
+          "description": "After every addon is updated.",
+          "type": "string",
+          "const": "end"
+        }
+      ]
+    },
+    "SchemaChangeJson": {
+      "description": "A change likely to affect the database schema.",
+      "type": "object",
+      "properties": {
+        "change": {
+          "description": "What kind of change, e.g. `field-added`.",
+          "type": "string"
+        },
+        "text": {
+          "description": "The change as `odx diff` writes it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "change",
+        "text"
+      ]
+    },
+    "Script": {
+      "description": "A migration script that a change adds or modifies.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon the script migrates.",
+          "type": "string"
+        },
+        "change": {
+          "description": "Added or modified.",
+          "$ref": "#/$defs/Change"
+        },
+        "path": {
+          "description": "Path of the script in its repository.",
+          "type": "string"
+        },
+        "phase": {
+          "description": "When the script runs.",
+          "$ref": "#/$defs/Phase"
+        },
+        "version": {
+          "description": "The version directory: the script runs when the addon moves past it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "version",
+        "phase",
+        "path",
+        "change"
+      ]
+    },
+    "SourceDiffJson": {
+      "description": "The addons one repository or package changes.",
+      "type": "object",
+      "properties": {
+        "addons": {
+          "description": "The addons that changed.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AddonDiffJson"
+          }
+        },
+        "kind": {
+          "description": "`repository` or `package`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Repository name or distribution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "addons"
+      ]
+    }
+  }
+}

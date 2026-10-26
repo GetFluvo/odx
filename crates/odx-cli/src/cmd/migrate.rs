@@ -10,8 +10,10 @@ use odx_config::Problem;
 use odx_core::Exit;
 use odx_core::system::OsRunner;
 use odx_forge::{ForgeClient, Http, ReqwestHttp};
-use odx_port::migrate::{Finding, Outcome, Plan, State, Summary, Tools, Worktree};
+use odx_port::migrate::{Finding, InPlace, Outcome, Plan, State, Summary, Tools, Worktree};
 use odx_port::squash::Rules;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::deps::Waiting;
 use super::pin::{self, previous};
@@ -27,13 +29,127 @@ pub(crate) fn run_migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context
     migrate(args, global, ctx).unwrap_or_else(|report| report)
 }
 
+/// What `odx --json migrate pr` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx migrate pr")]
+pub(crate) struct MigratePrJson {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The pull request opened.
+    #[serde(flatten)]
+    opened: serde_json::Value,
+}
+
+/// What `odx --json migrate addon`, `--continue` and `--abort` print.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx migrate")]
+pub(crate) struct MigrateJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// How the migration ended.
+    #[serde(flatten)]
+    outcome: MigrateOutcome<'a>,
+}
+
+/// How a migration ended, by its `status`.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+enum MigrateOutcome<'a> {
+    /// The migration branch is ready for review.
+    Done {
+        /// The migration.
+        #[serde(flatten)]
+        summary: &'a Summary,
+        /// Dependencies not on the target series yet.
+        waits_on: &'a [Waiting],
+        /// The requirement lines pinned to pull requests, with
+        /// `--pin-unreleased`.
+        pinned: &'a [String],
+        /// The pull request opened, with `--open-pr`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pull_request: Option<serde_json::Value>,
+    },
+    /// A conflict stopped the migration.
+    Stopped {
+        /// What happened and how to go on.
+        message: &'a str,
+    },
+    /// `--abort` put the repository back.
+    Aborted {
+        /// The migration branch.
+        branch: String,
+    },
+}
+
+/// What `odx --json migrate pin` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx migrate pin")]
+pub(crate) struct MigratePinJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The requirement lines pinned to pull requests.
+    pinned: &'a [String],
+    /// Dependencies not on the target series yet.
+    waits_on: &'a [Waiting],
+}
+
+/// What `odx --json migrate own` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx migrate own")]
+pub(crate) struct MigrateOwnJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The series migrated to.
+    target: &'a str,
+    /// The project's own addons, migrated in place.
+    addons: &'a [InPlace],
+    /// Steps that could not run, and why.
+    warnings: &'a [String],
+}
+
+/// What `odx --json migrate plan` prints in a plain addons repository.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx migrate plan (repository)")]
+pub(crate) struct MigratePlanRepositoryJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The source series: `<remote>/<from>`.
+    source: String,
+    /// The target series.
+    target: &'a str,
+    /// Addons already on the target series.
+    available: &'a [&'a str],
+    /// Addons with an open migration pull request.
+    pull_requests: Vec<RepositoryPullRequestJson<'a>>,
+    /// Addons to migrate, dependencies first.
+    to_migrate: &'a [String],
+    /// What each addon to migrate waits for.
+    waits_on: &'a BTreeMap<&'a String, Vec<Waiting>>,
+}
+
+/// An addon with an open migration pull request.
+#[derive(Debug, Serialize, JsonSchema)]
+struct RepositoryPullRequestJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// The pull request's number.
+    number: u64,
+}
+
 /// What `odx migrate --abort` says it did.
 fn aborted(state: &State, json: bool) -> String {
     if json {
-        format!(
-            "{}\n",
-            serde_json::json!({"status": "aborted", "branch": state.plan.branch()})
-        )
+        super::to_json(&MigrateJson {
+            schema: 1,
+            outcome: MigrateOutcome::Aborted {
+                branch: state.plan.branch(),
+            },
+        })
     } else if state.update {
         format!(
             "aborted the update of {}: back where it was\n",
@@ -97,7 +213,10 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
             let opened = open_pr(ctx, &tools, pr)?;
             return Ok(Report {
                 out: if global.json {
-                    format!("{}\n", opened_json(&opened))
+                    super::to_json(&MigratePrJson {
+                        schema: 1,
+                        opened: opened_json(&opened),
+                    })
                 } else {
                     opened_text(&opened)
                 },
@@ -124,10 +243,10 @@ fn migrate(args: &MigrateArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result
         Outcome::Stopped(message) => Report {
             exit: Exit::Failure,
             out: if global.json {
-                format!(
-                    "{}\n",
-                    serde_json::json!({"status": "stopped", "message": message})
-                )
+                super::to_json(&MigrateJson {
+                    schema: 1,
+                    outcome: MigrateOutcome::Stopped { message: &message },
+                })
             } else {
                 String::new()
             },
@@ -223,10 +342,11 @@ fn pin_command(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report>
     }
     Ok(Report {
         out: if global.json {
-            format!(
-                "{}\n",
-                serde_json::json!({"pinned": pinned, "waits_on": waits})
-            )
+            super::to_json(&MigratePinJson {
+                schema: 1,
+                pinned: &pinned,
+                waits_on: &waits,
+            })
         } else {
             out
         },
@@ -261,10 +381,12 @@ fn own(
         .migrate_in_place(&dirs, &to, tools)
         .map_err(|e| Report::error(Exit::Failure, e))?;
     let out = if global.json {
-        format!(
-            "{}\n",
-            serde_json::json!({"target": to, "addons": done, "warnings": warnings})
-        )
+        super::to_json(&MigrateOwnJson {
+            schema: 1,
+            target: &to,
+            addons: &done,
+            warnings: &warnings,
+        })
     } else {
         let mut out = format!("own addons migrated in place to {to}:\n");
         for addon in &done {
@@ -411,17 +533,19 @@ struct RepositoryPlan<'a> {
 
 impl RepositoryPlan<'_> {
     fn json(&self) -> String {
-        let value = serde_json::json!({
-            "source": format!("{}/{}", self.remote, self.from),
-            "target": self.to,
-            "available": self.ready,
-            "pull_requests": self.prs.iter().map(|(addon, number)| serde_json::json!({
-                "addon": addon, "number": number,
-            })).collect::<Vec<_>>(),
-            "to_migrate": self.order,
-            "waits_on": self.waits,
-        });
-        format!("{value}\n")
+        super::to_json(&MigratePlanRepositoryJson {
+            schema: 1,
+            source: format!("{}/{}", self.remote, self.from),
+            target: self.to,
+            available: self.ready,
+            pull_requests: self
+                .prs
+                .iter()
+                .map(|&(addon, number)| RepositoryPullRequestJson { addon, number })
+                .collect(),
+            to_migrate: self.order,
+            waits_on: self.waits,
+        })
     }
 
     fn text(&self) -> String {
@@ -652,24 +776,15 @@ fn json(
     pinned: &[String],
     opened: Option<&Pushed>,
 ) -> String {
-    #[derive(serde::Serialize)]
-    struct Done<'a> {
-        status: &'static str,
-        #[serde(flatten)]
-        summary: &'a Summary,
-        waits_on: &'a [Waiting],
-        pinned: &'a [String],
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pull_request: Option<serde_json::Value>,
-    }
-    let done = Done {
-        status: "done",
-        summary,
-        waits_on: waits,
-        pinned,
-        pull_request: opened.map(opened_json),
-    };
-    format!("{}\n", serde_json::to_string(&done).unwrap_or_default())
+    super::to_json(&MigrateJson {
+        schema: 1,
+        outcome: MigrateOutcome::Done {
+            summary,
+            waits_on: waits,
+            pinned,
+            pull_request: opened.map(opened_json),
+        },
+    })
 }
 
 /// The pull request's description.
