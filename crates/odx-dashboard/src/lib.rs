@@ -12,10 +12,11 @@ pub mod tui;
 
 use std::fmt::Write as _;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// What a section shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SectionKind {
     /// Pull requests the project aggregates or pins, and their state.
@@ -93,7 +94,7 @@ impl SectionKind {
 }
 
 /// Something a person can do about an entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Action {
     /// Add the pull request to the project.
@@ -142,7 +143,7 @@ impl Action {
 }
 
 /// One line of a section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Entry {
     /// Stable id, the same in every renderer.
     pub id: String,
@@ -159,7 +160,7 @@ pub struct Entry {
 }
 
 /// One section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Section {
     /// What it shows.
     pub kind: SectionKind,
@@ -170,9 +171,10 @@ pub struct Section {
 }
 
 /// The dashboard of one series.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Dashboard {
-    /// Format version.
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
     pub schema: u32,
     /// The series.
     pub series: String,

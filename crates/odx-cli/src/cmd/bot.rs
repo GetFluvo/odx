@@ -22,7 +22,9 @@ use odx_forge::{
     CachedHttp, ForgeClient, ForgeError, ForgeKind, Http, Issue, IssueEdit, IssueState, Proposal,
     RepoUrl, ReqwestHttp, Visibility,
 };
-use serde_json::{Value, json};
+use schemars::JsonSchema;
+use serde::Serialize;
+use serde_json::Value;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare, run_aggregate, run_lock, vault_heads};
@@ -125,26 +127,195 @@ enum Outcome {
     Failed(String),
 }
 
-/// A pull request, as JSON.
-fn pull_json(pull: &Issue) -> Value {
-    json!({"number": pull.number, "url": pull.url})
+/// What `odx --json bot` prints (`odx bot plan` prints it always).
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx bot")]
+pub(crate) struct BotJson {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The project repository: `<host>/<path>`.
+    repository: String,
+    /// Whether the run acted, rather than only planned (`--apply`).
+    apply: bool,
+    /// The branch bot pull requests target.
+    base: String,
+    /// The promotions asked for by labelling merged pull requests.
+    promotions: Vec<PromotionJson>,
+    /// Each dashboard and what the run did on it.
+    dashboards: Vec<DashboardRunJson>,
+}
+
+/// A dashboard and what the run did on it.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+enum DashboardRunJson {
+    /// Its issue was written, or would be.
+    Written(WrittenJson),
+    /// Its issue is closed, or the dashboard is turned off: nothing done.
+    Paused(PausedJson),
+}
+
+/// A dashboard whose issue was written, or would be.
+#[derive(Debug, Serialize, JsonSchema)]
+struct WrittenJson {
+    /// The series.
+    series: String,
+    /// Its issue.
+    issue: IssueJson,
+    /// Each box ticked on it and what became of it.
+    requests: Vec<RequestJson>,
+    /// Each routine change and what became of it.
+    routine: Vec<RoutineJson>,
+}
+
+/// A dashboard the run left alone.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PausedJson {
+    /// The series.
+    series: String,
+    /// Its issue.
+    issue: PausedIssueJson,
+}
+
+/// The issue of a paused dashboard.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PausedIssueJson {
+    /// Always `paused`.
+    #[schemars(extend("const" = "paused"))]
+    write: &'static str,
+}
+
+/// The dashboard issue.
+#[derive(Debug, Serialize, JsonSchema)]
+struct IssueJson {
+    /// What was written: `#<n> created`, `#<n> updated`, `#<n> unchanged`,
+    /// or `would be created`, `#<n> would be updated` without `--apply`.
+    write: String,
+    /// Its number; null when it is not created yet.
+    number: Option<u64>,
+    /// Its page; null when it is not created yet.
+    url: Option<String>,
+}
+
+/// A ticked box and what became of it.
+#[derive(Debug, Serialize, JsonSchema)]
+struct RequestJson {
+    /// The dashboard entry.
+    id: String,
+    /// The action asked for.
+    action: Action,
+    /// What became of it.
+    result: OutcomeJson,
+}
+
+/// A routine change and what became of it.
+#[derive(Debug, Serialize, JsonSchema)]
+struct RoutineJson {
+    /// `drop-override`, `repin` or `auto-update`.
+    kind: &'static str,
+    /// The dashboard entries it takes care of.
+    entries: Vec<String>,
+    /// What became of it.
+    result: OutcomeJson,
+}
+
+/// A promotion asked for by label, and what became of it.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PromotionJson {
+    /// The merged pull request carrying the label.
+    pull_request: u64,
+    /// The environment it merged into.
+    from: String,
+    /// The environment it is promoted into.
+    to: String,
+    /// What became of it.
+    result: OutcomeJson,
+}
+
+/// What became of a box, a routine change or a promotion.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "outcome", rename_all = "kebab-case")]
+enum OutcomeJson {
+    /// A dry run: what would be done.
+    Planned,
+    /// Left for the next run (`--max-prs`).
+    Deferred,
+    /// Its pull request, opened.
+    Opened {
+        /// The pull request.
+        pull_request: PullJson,
+    },
+    /// Its pull request, updated.
+    Updated {
+        /// The pull request.
+        pull_request: PullJson,
+    },
+    /// Its pull request, open with the same change already.
+    Unchanged {
+        /// The pull request.
+        pull_request: PullJson,
+    },
+    /// Its pull request, closed by a person: not proposed again.
+    Closed {
+        /// The pull request.
+        pull_request: PullJson,
+    },
+    /// Done without a pull request, or nothing to propose.
+    Recorded {
+        /// How.
+        message: String,
+    },
+    /// It failed; the box stays ticked.
+    Failed {
+        /// Why.
+        message: String,
+    },
+}
+
+/// A pull request.
+#[derive(Debug, Serialize, JsonSchema)]
+struct PullJson {
+    /// Its number.
+    number: u64,
+    /// Its page.
+    url: String,
+}
+
+impl PullJson {
+    fn of(pull: &Issue) -> Self {
+        Self {
+            number: pull.number,
+            url: pull.url.clone(),
+        }
+    }
 }
 
 impl Outcome {
-    fn json(&self) -> Value {
+    fn json(&self) -> OutcomeJson {
         match self {
-            Self::Planned => json!({"outcome": "planned"}),
-            Self::Deferred => json!({"outcome": "deferred"}),
-            Self::Proposed(pull, opened) => json!({
-                "outcome": if *opened { "opened" } else { "updated" },
-                "pull_request": pull_json(pull),
-            }),
-            Self::Unchanged(pull) => {
-                json!({"outcome": "unchanged", "pull_request": pull_json(pull)})
+            Self::Planned => OutcomeJson::Planned,
+            Self::Deferred => OutcomeJson::Deferred,
+            Self::Proposed(pull, opened) => {
+                let pull_request = PullJson::of(pull);
+                if *opened {
+                    OutcomeJson::Opened { pull_request }
+                } else {
+                    OutcomeJson::Updated { pull_request }
+                }
             }
-            Self::Closed(pull) => json!({"outcome": "closed", "pull_request": pull_json(pull)}),
-            Self::Recorded(message) => json!({"outcome": "recorded", "message": message}),
-            Self::Failed(message) => json!({"outcome": "failed", "message": message}),
+            Self::Unchanged(pull) => OutcomeJson::Unchanged {
+                pull_request: PullJson::of(pull),
+            },
+            Self::Closed(pull) => OutcomeJson::Closed {
+                pull_request: PullJson::of(pull),
+            },
+            Self::Recorded(message) => OutcomeJson::Recorded {
+                message: message.clone(),
+            },
+            Self::Failed(message) => OutcomeJson::Failed {
+                message: message.clone(),
+            },
         }
     }
 
@@ -366,7 +537,10 @@ fn cycle_on(
                 "{}: the dashboard is paused (its issue is closed; --reopen reopens it)",
                 dashboard.series
             );
-            listed.push(json!({"series": dashboard.series, "issue": {"write": "paused"}}));
+            listed.push(DashboardRunJson::Paused(PausedJson {
+                series: dashboard.series.clone(),
+                issue: PausedIssueJson { write: "paused" },
+            }));
             continue;
         }
         let apply = mode.act && bot.apply;
@@ -405,28 +579,28 @@ fn cycle_on(
         let body = issue::body(&page, found.map(|i| i.body.as_str()));
         let (write, written) = write_issue(forge, bot, dashboard, found, &body)?;
         let _ = writeln!(out, "{}: dashboard issue {write}", dashboard.series);
-        listed.push(json!({
-            "series": dashboard.series,
-            "issue": {
-                "write": write,
-                "number": written.as_ref().map(|i| i.number),
-                "url": written.map(|i| i.url),
+        listed.push(DashboardRunJson::Written(WrittenJson {
+            series: dashboard.series.clone(),
+            issue: IssueJson {
+                write,
+                number: written.as_ref().map(|i| i.number),
+                url: written.map(|i| i.url),
             },
-            "requests": acted.done,
-            "routine": acted.routine,
+            requests: acted.done,
+            routine: acted.routine,
         }));
     }
-    let value = json!({
-        "schema": 1,
-        "repository": format!("{}/{}", forge.repo.host, forge.repo.path),
-        "apply": bot.apply,
-        "base": base,
-        "promotions": promotions,
-        "dashboards": listed,
-    });
+    let value = BotJson {
+        schema: 1,
+        repository: format!("{}/{}", forge.repo.host, forge.repo.path),
+        apply: bot.apply,
+        base,
+        promotions,
+        dashboards: listed,
+    };
     Ok(Report {
         out: if global.json {
-            format!("{value:#}\n")
+            super::to_json(&value)
         } else {
             out
         },
@@ -508,9 +682,9 @@ struct Work<'a> {
 #[derive(Default)]
 struct Acted {
     /// Each box and what became of it.
-    done: Vec<Value>,
+    done: Vec<RequestJson>,
     /// Each routine change and what became of it.
-    routine: Vec<Value>,
+    routine: Vec<RoutineJson>,
     /// The boxes that stay ticked.
     pending: Vec<(String, Action)>,
     /// Those done without a pull request, and how.
@@ -627,9 +801,11 @@ impl Job<'_> {
                 action.name(),
                 outcome.text()
             );
-            acted
-                .done
-                .push(json!({"id": id, "action": action.name(), "result": outcome.json()}));
+            acted.done.push(RequestJson {
+                id,
+                action,
+                result: outcome.json(),
+            });
         }
     }
 
@@ -956,7 +1132,7 @@ impl Job<'_> {
         pulls: &mut Vec<Issue>,
         budget: &mut usize,
         out: &mut String,
-    ) -> Result<Vec<Value>, Report> {
+    ) -> Result<Vec<PromotionJson>, Report> {
         let config = &self.prepared.project.config;
         let label = config
             .bot
@@ -1006,12 +1182,12 @@ impl Job<'_> {
                     pull.number,
                     outcome.text()
                 );
-                done.push(json!({
-                    "pull_request": pull.number,
-                    "from": from,
-                    "to": to,
-                    "result": outcome.json(),
-                }));
+                done.push(PromotionJson {
+                    pull_request: pull.number,
+                    from: from.clone(),
+                    to: to.clone(),
+                    result: outcome.json(),
+                });
             }
         }
         Ok(done)
@@ -1067,9 +1243,11 @@ impl Job<'_> {
                 dashboard.series,
                 outcome.text()
             );
-            acted
-                .routine
-                .push(json!({"kind": name, "entries": ids, "result": outcome.json()}));
+            acted.routine.push(RoutineJson {
+                kind: name,
+                entries: ids,
+                result: outcome.json(),
+            });
         }
     }
 

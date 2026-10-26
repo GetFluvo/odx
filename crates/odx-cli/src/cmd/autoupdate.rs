@@ -18,6 +18,8 @@ use odx_platform::autoupdate::{
 use odx_platform::requirements::is_odoo;
 use odx_vendor::VendorError;
 use odx_vendor::archive::{download_error, fetch, get};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare, uv_program};
@@ -56,14 +58,56 @@ pub(crate) fn auto_update(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repo
         upgrade(ctx, &prepared.project.root, &updated, &mut report);
     }
     report.out = if global.json {
-        format!(
-            "{}\n",
-            serde_json::json!({ "schema": 1, "updated": updated, "review": review })
-        )
+        super::to_json(&AutoUpdateJson {
+            schema: 1,
+            updated: updated.iter().map(UpdateJson::of).collect(),
+            review: review.iter().map(UpdateJson::of).collect(),
+        })
     } else {
         describe(&updated, &review)
     };
     Ok(report)
+}
+
+/// What `odx --json lock --auto-update` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx lock --auto-update")]
+pub(crate) struct AutoUpdateJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The updates taken.
+    updated: Vec<UpdateJson<'a>>,
+    /// The updates left for review.
+    review: Vec<UpdateJson<'a>>,
+}
+
+/// An update taken or left for review.
+#[derive(Debug, Serialize, JsonSchema)]
+struct UpdateJson<'a> {
+    /// The distribution.
+    package: &'a str,
+    /// The locked version.
+    from: &'a str,
+    /// The version offered; empty when the index could not be read.
+    to: &'a str,
+    /// Why it needs review; empty when taken.
+    reason: &'a str,
+    /// The paths that changed: all of them when taken, those outside
+    /// `allowed_paths` when left for review.
+    paths: &'a [String],
+}
+
+impl<'a> UpdateJson<'a> {
+    fn of(update: &'a Update) -> Self {
+        Self {
+            package: &update.package,
+            from: &update.from,
+            to: &update.to,
+            reason: &update.reason,
+            paths: &update.paths,
+        }
+    }
 }
 
 /// Updates the policy takes, and updates it leaves for review.

@@ -2757,6 +2757,7 @@ name = "odx-dashboard"
 version = "0.0.9"
 dependencies = [
  "ratatui",
+ "schemars",
  "serde",
  "serde_json",
 ]

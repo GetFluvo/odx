@@ -667,10 +667,7 @@ fn dashboard(
         })
         .collect();
     let out = if global.json {
-        format!(
-            "{}\n",
-            serde_json::to_string(&dashboards).unwrap_or_default()
-        )
+        super::to_json(&dashboards)
     } else {
         dashboards
             .iter()

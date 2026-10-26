@@ -927,7 +927,7 @@ fn forge_failures_end_the_run() {
     .unwrap();
     let (code, out, err) = setup.odx(&["bot", "plan"]);
     assert_eq!(code, 0, "{err}");
-    assert!(out.contains("\"base\": \"main\""), "{out}");
+    assert!(out.contains("\"base\":\"main\""), "{out}");
     git(&setup.project, &["checkout", "--quiet", "--detach"]);
     let (code, _, err) = setup.odx(&["bot", "plan"]);
     assert_eq!(code, 2);

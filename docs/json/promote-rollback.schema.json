@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx promote --rollback",
+  "description": "What `odx --json promote --rollback` prints.",
+  "type": "object",
+  "properties": {
+    "applied": {
+      "description": "What writing the rollback did; null for a plan only.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AppliedJson"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "revert": {
+      "description": "The commits reverted, newest first.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rollback": {
+      "description": "The promotion's pull request number.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "title": {
+      "description": "Its title.",
+      "type": "string"
+    },
+    "to": {
+      "description": "The environment it is rolled back on.",
+      "$ref": "#/$defs/TargetJson"
+    }
+  },
+  "required": [
+    "schema",
+    "rollback",
+    "title",
+    "to",
+    "revert"
+  ],
+  "$defs": {
+    "AppliedJson": {
+      "description": "What writing the rollback did.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "The branch written.",
+          "type": "string"
+        },
+        "commit": {
+          "description": "Its head.",
+          "type": "string"
+        },
+        "env_diff": {
+          "description": "`odx env diff` of the target and the rollback.",
+          "type": "string"
+        },
+        "pull_request": {
+          "description": "The pull request opened for it; null without `--open-pr`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenedJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "branch",
+        "commit",
+        "env_diff"
+      ]
+    },
+    "OpenedJson": {
+      "description": "A pushed branch and the pull request opened for it.",
+      "type": "object",
+      "properties": {
+        "draft": {
+          "description": "Whether it was opened as a draft.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "The pull request number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "pushed_to": {
+          "description": "Where the branch went: a remote or a URL.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Always `opened`.",
+          "type": "string",
+          "const": "opened"
+        },
+        "url": {
+          "description": "The pull request page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "pushed_to",
+        "number",
+        "url",
+        "draft"
+      ]
+    },
+    "TargetJson": {
+      "description": "An environment, as read.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "Its branch.",
+          "type": "string"
+        },
+        "env": {
+          "description": "The environment.",
+          "type": "string"
+        },
+        "from": {
+          "description": "The git ref it was read from.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "env",
+        "branch",
+        "from"
+      ]
+    }
+  }
+}

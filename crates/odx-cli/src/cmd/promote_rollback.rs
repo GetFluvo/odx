@@ -6,13 +6,15 @@ use std::path::Path;
 
 use odx_config::environments::{Environment, Model};
 use odx_core::{Exit, Invocation};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::checkout::{Checkout, git, read};
 use super::output_of;
 use super::promote_apply::{commit, failed, open, worktree};
 use super::promote_forge::{Merged, merged};
-use super::propose::{opened_json, opened_text};
+use super::propose::{OpenedJson, opened_text};
 use crate::Context;
 use crate::cli::{GlobalArgs, PromoteArgs};
 
@@ -94,7 +96,7 @@ pub(crate) fn rollback(
     for line in &subjects {
         let _ = writeln!(out, "  revert {line}");
     }
-    let mut applied = serde_json::Value::Null;
+    let mut written = None;
     if !(args.commit || args.open_pr) {
         out.push_str("plan only (--commit or --open-pr with --yes writes it)\n");
     } else if !args.yes {
@@ -103,40 +105,87 @@ pub(crate) fn rollback(
             "--commit and --open-pr write a branch: add --yes to confirm".to_owned(),
         ));
     } else {
-        let written = write(ctx, root, model, args, &target, &found, &reverted)?;
+        let done = write(ctx, root, model, args, &target, &found, &reverted)?;
         let _ = write!(
             out,
             "committed {} on {}\n{}",
-            written.commit.chars().take(7).collect::<String>(),
-            written.branch,
-            written.diff
+            done.commit.chars().take(7).collect::<String>(),
+            done.branch,
+            done.diff
         );
-        if let Some(pushed) = &written.pushed {
+        if let Some(pushed) = &done.pushed {
             out.push_str(&opened_text(pushed));
         }
-        applied = serde_json::json!({
-            "branch": written.branch,
-            "commit": written.commit,
-            "env_diff": written.diff,
-            "pull_request": written.pushed.as_ref().map(opened_json),
-        });
+        written = Some(done);
     }
-    let value = serde_json::json!({
-        "schema": 1,
-        "rollback": number,
-        "title": found.pr.title,
-        "to": { "env": target.env.name, "branch": target.env.branch, "from": target.from },
-        "revert": reverted,
-        "applied": applied,
-    });
+    let value = RollbackJson {
+        schema: 1,
+        rollback: number,
+        title: &found.pr.title,
+        to: TargetJson {
+            env: &target.env.name,
+            branch: &target.env.branch,
+            from: &target.from,
+        },
+        revert: &reverted,
+        applied: written.as_ref().map(|written| AppliedJson {
+            branch: &written.branch,
+            commit: &written.commit,
+            env_diff: &written.diff,
+            pull_request: written.pushed.as_ref().map(OpenedJson::of),
+        }),
+    };
     Ok(Report {
         out: if global.json {
-            format!("{value:#}\n")
+            super::to_json(&value)
         } else {
             out
         },
         ..Report::default()
     })
+}
+
+/// What `odx --json promote --rollback` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx promote --rollback")]
+pub(crate) struct RollbackJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The promotion's pull request number.
+    rollback: u64,
+    /// Its title.
+    title: &'a str,
+    /// The environment it is rolled back on.
+    to: TargetJson<'a>,
+    /// The commits reverted, newest first.
+    revert: &'a [String],
+    /// What writing the rollback did; null for a plan only.
+    applied: Option<AppliedJson<'a>>,
+}
+
+/// An environment, as read.
+#[derive(Debug, Serialize, JsonSchema)]
+struct TargetJson<'a> {
+    /// The environment.
+    env: &'a str,
+    /// Its branch.
+    branch: &'a str,
+    /// The git ref it was read from.
+    from: &'a str,
+}
+
+/// What writing the rollback did.
+#[derive(Debug, Serialize, JsonSchema)]
+struct AppliedJson<'a> {
+    /// The branch written.
+    branch: &'a str,
+    /// Its head.
+    commit: &'a str,
+    /// `odx env diff` of the target and the rollback.
+    env_diff: &'a str,
+    /// The pull request opened for it; null without `--open-pr`.
+    pull_request: Option<OpenedJson<'a>>,
 }
 
 /// What writing the rollback did.

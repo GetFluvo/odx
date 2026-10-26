@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx promote --search",
+  "description": "What `odx --json promote --search` prints.",
+  "type": "object",
+  "properties": {
+    "candidates": {
+      "description": "What matches, best first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CandidateJson"
+      }
+    },
+    "query": {
+      "description": "What was searched for.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "query",
+    "candidates"
+  ],
+  "$defs": {
+    "CandidateJson": {
+      "description": "Something `--select` can promote.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "A feature or an addon.",
+          "$ref": "#/$defs/CandidateKind"
+        },
+        "modules": {
+          "description": "The addons it promotes.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Its name, for `--select`.",
+          "type": "string"
+        },
+        "score": {
+          "description": "How well it matches; higher is better.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "score",
+        "modules"
+      ]
+    },
+    "CandidateKind": {
+      "description": "What a candidate is.",
+      "oneOf": [
+        {
+          "description": "A feature: a group of addons.",
+          "type": "string",
+          "const": "feature"
+        },
+        {
+          "description": "One addon.",
+          "type": "string",
+          "const": "addon"
+        }
+      ]
+    }
+  }
+}
