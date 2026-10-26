@@ -5,6 +5,40 @@ odx reads and writes the files of
 [doodba](https://github.com/Tecnativa/doodba) (`addons.yaml`), so existing
 projects can move over gradually.
 
+## Switching a project over
+
+1. **Import.** In the directory with `repos.yaml`:
+
+   ```console
+   $ odx import repos.yaml --write
+   ```
+
+   This writes `[[tool.odx.repositories]]` into `pyproject.toml` (created
+   when missing) and reports on standard error what it could not translate,
+   such as `shell_command_after`.
+
+2. **Build and compare.** `odx aggregate` builds the same repositories under
+   `vendor/<name>`, or where `target_dir` says. The trees are identical to
+   what `gitaggregate` builds; only the commit ids differ, because odx
+   rebases the merges by default (`merge_strategy = "merge"` creates merge
+   commits as `gitaggregate` does). To compare, build both and run
+   `git diff --stat <gitaggregate dir> <odx dir>` over the addon
+   directories, or compare `git rev-parse HEAD^{tree}` of each.
+
+3. **Lock.** `odx lock`, then commit `pyproject.toml` and `odx.lock`. From
+   here on the build is reproducible, which `gitaggregate` was not.
+
+4. **Replace the calls.** Where scripts or CI ran `gitaggregate -c
+   repos.yaml`, run `odx aggregate --locked`. If something still reads
+   `repos.yaml`, keep it generated with `odx export` until it is gone, or
+   use `odx git-aggregate`, which runs a `repos.yaml` unchanged.
+
+5. **Remove `repos.yaml`** once nothing reads it. `[tool.odx]` is the only
+   source from then on.
+
+doodba's `addons.yaml` is imported along with `repos.yaml` when it sits next
+to it: its addon lists become `addons = [...]` on the repositories.
+
 ## Import
 
 ```console
@@ -96,4 +130,4 @@ Differences from `gitaggregate`:
   a warning, not a failure.
 
 The cache and local clones are shared with `odx aggregate` (see
-[Command line](cli.md)).
+[Building the workspace](workspace.md#fetching-into-the-cache)).

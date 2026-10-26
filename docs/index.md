@@ -16,14 +16,55 @@ end-before: <!-- github-only -->
 ```{toctree}
 ---
 hidden:
+caption: Start
 maxdepth: 2
 ---
 
 installation
-cli
+getting-started
+concepts
+```
+
+```{toctree}
+---
+hidden:
+caption: Guides
+maxdepth: 2
+---
+
+workspace
+upstream
+checks
+reviewing
+series
+environments
+wheels
+ci
 compatibility
-benchmarks
+troubleshooting
+```
+
+```{toctree}
+---
+hidden:
+caption: Reference
+maxdepth: 2
+---
+
+cli
+configuration
+user-config
 files
+```
+
+```{toctree}
+---
+hidden:
+caption: Project
+maxdepth: 2
+---
+
+benchmarks
 development
 License <license>
 Changelog <https://github.com/getfluvo/odx/releases>
