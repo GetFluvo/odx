@@ -6,8 +6,6 @@
 //! compares two such sides unit by unit; `odx env diff`, promotion pull
 //! requests and the dashboard's drift section print the result.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::str::FromStr as _;
