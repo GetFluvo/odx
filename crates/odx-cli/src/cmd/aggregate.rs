@@ -33,6 +33,8 @@ use odx_git::{
     Aggregated, Aggregation, Cache, Clones, Fetched, GitBackend, Limits, MergeError, Merger,
     Outcome, StepOutcome, SystemGit, VaultRefs, Via, bundle, url_hash, vault,
 };
+use schemars::JsonSchema;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use toml_edit::DocumentMut;
 
@@ -1352,7 +1354,7 @@ impl Summary {
     fn report(&self, json: bool, fetch_only: bool, warnings: Vec<odx_config::Problem>) -> Report {
         let mut report = if json {
             Report {
-                out: format!("{}\n", self.to_json(fetch_only)),
+                out: super::to_json(&self.to_json(fetch_only)),
                 ..Report::default()
             }
         } else {
@@ -1449,98 +1451,282 @@ impl Summary {
         report
     }
 
-    fn to_json(&self, fetch_only: bool) -> serde_json::Value {
-        let fetches: Vec<serde_json::Value> = self
-            .fetches
+    fn built_json(&self) -> Vec<BuiltJson<'_>> {
+        self.builds
             .iter()
-            .map(|(names, result)| match result {
-                Ok(fetched) => serde_json::json!({
-                    "repositories": names,
-                    "refs": fetched.len(),
-                    "from_mirror": fetched.iter().filter(|f| f.via == Via::Mirror).count(),
-                    "through_clone": fetched.iter().filter(|f| f.via == Via::Clone).count(),
-                    "cached": fetched.iter().filter(|f| f.via == Via::Cache).count(),
-                }),
-                Err(e) => serde_json::json!({ "repositories": names, "error": e }),
+            .map(|(name, dir, result)| match result {
+                Ok(built) => BuiltJson::Built {
+                    name,
+                    target_dir: (!self.scratch).then_some(dir.as_str()),
+                    head: &built.head,
+                    tree: &built.tree,
+                    merges: built
+                        .steps
+                        .iter()
+                        .map(|(label, outcome)| MergeJson {
+                            label,
+                            status: outcome.status(),
+                            files: match outcome {
+                                StepOutcome::Skipped { files } => Some(files),
+                                _ => None,
+                            },
+                        })
+                        .collect(),
+                },
+                Err(e) => BuiltJson::Failed {
+                    name,
+                    target_dir: (!self.scratch).then_some(dir.as_str()),
+                    error: e,
+                },
             })
-            .collect();
-        let mut value = serde_json::Map::new();
-        value.insert("schema".to_owned(), serde_json::json!(1));
-        value.insert("fetched".to_owned(), serde_json::Value::Array(fetches));
-        if !fetch_only {
-            let builds: Vec<serde_json::Value> = self
-                .builds
-                .iter()
-                .map(|(name, dir, result)| match result {
-                    Ok(built) => serde_json::json!({
-                        "name": name,
-                        "target_dir": (!self.scratch).then_some(dir),
-                        "head": built.head,
-                        "tree": built.tree,
-                        "merges": built.steps.iter().map(|(label, outcome)| match outcome {
-                            StepOutcome::Skipped { files } => serde_json::json!({ "label": label, "status": "skipped", "files": files }),
-                            other => serde_json::json!({ "label": label, "status": other.status() }),
-                        }).collect::<Vec<_>>(),
-                    }),
-                    Err(e) => serde_json::json!({ "name": name, "target_dir": (!self.scratch).then_some(dir), "error": e }),
-                })
-                .collect();
-            value.insert("built".to_owned(), serde_json::Value::Array(builds));
-            let current: Vec<serde_json::Value> = self
-                .current
-                .iter()
-                .map(|(name, dir)| serde_json::json!({ "name": name, "target_dir": dir }))
-                .collect();
-            value.insert("current".to_owned(), serde_json::Value::Array(current));
-        }
-        let changes: Vec<serde_json::Value> = self
-            .changes
-            .iter()
-            .map(|change| {
-                serde_json::json!({
-                    "repository": change.repository,
-                    "item": change.item,
-                    "change": change.kind.as_str(),
-                    "old": change.old,
-                    "new": change.new,
-                })
-            })
-            .collect();
-        value.insert("lock".to_owned(), serde_json::Value::Array(changes));
-        let vaulted: Vec<serde_json::Value> = self
-            .vaulted
-            .iter()
-            .map(|(name, commits)| serde_json::json!({ "repository": name, "commits": commits }))
-            .collect();
-        value.insert("vaulted".to_owned(), serde_json::Value::Array(vaulted));
-        let kept: Vec<serde_json::Value> = self
-            .kept
-            .iter()
-            .map(|keep| {
-                serde_json::json!({
-                    "repository": keep.repository,
-                    "item": keep.label,
-                    "locked": keep.locked,
-                    "upstream_head": keep.head,
-                    "ci": keep.ci.map(LockCi::as_str),
-                    "classification": keep.classification.map(RedClassification::as_str),
-                })
-            })
-            .collect();
-        value.insert("kept".to_owned(), serde_json::Value::Array(kept));
-        value.insert("rewritten".to_owned(), serde_json::json!(self.rewritten));
-        value.insert("notes".to_owned(), serde_json::json!(self.notes));
-        value.insert("migrations".to_owned(), sniffed_json(&self.sniffed));
-        let bundled: Vec<serde_json::Value> = self
-            .bundled
-            .iter()
-            .map(|(url, commits, file)| serde_json::json!({ "url": url, "commits": commits, "file": file }))
-            .collect();
-        value.insert("bundled".to_owned(), serde_json::Value::Array(bundled));
-        let failures = &self.failures;
-        value.insert("errors".to_owned(), serde_json::json!(failures));
-        serde_json::Value::Object(value)
+            .collect()
     }
+
+    fn to_json(&self, fetch_only: bool) -> AggregateJson<'_> {
+        AggregateJson {
+            schema: 1,
+            fetched: self
+                .fetches
+                .iter()
+                .map(|(names, result)| match result {
+                    Ok(fetched) => FetchedJson::Fetched {
+                        repositories: names,
+                        refs: fetched.len(),
+                        from_mirror: fetched.iter().filter(|f| f.via == Via::Mirror).count(),
+                        through_clone: fetched.iter().filter(|f| f.via == Via::Clone).count(),
+                        cached: fetched.iter().filter(|f| f.via == Via::Cache).count(),
+                    },
+                    Err(e) => FetchedJson::Failed {
+                        repositories: names,
+                        error: e,
+                    },
+                })
+                .collect(),
+            built: (!fetch_only).then(|| self.built_json()),
+            current: (!fetch_only).then(|| {
+                self.current
+                    .iter()
+                    .map(|(name, dir)| CurrentJson {
+                        name,
+                        target_dir: dir,
+                    })
+                    .collect()
+            }),
+            lock: self
+                .changes
+                .iter()
+                .map(|change| LockChangeJson {
+                    repository: &change.repository,
+                    item: &change.item,
+                    change: change.kind.as_str(),
+                    old: change.old.as_deref(),
+                    new: change.new.as_deref(),
+                })
+                .collect(),
+            vaulted: self
+                .vaulted
+                .iter()
+                .map(|(name, commits)| VaultedJson {
+                    repository: name,
+                    commits: *commits,
+                })
+                .collect(),
+            kept: self
+                .kept
+                .iter()
+                .map(|keep| KeptJson {
+                    repository: &keep.repository,
+                    item: &keep.label,
+                    locked: &keep.locked,
+                    upstream_head: &keep.head,
+                    ci: keep.ci.map(LockCi::as_str),
+                    classification: keep.classification.map(RedClassification::as_str),
+                })
+                .collect(),
+            rewritten: self.rewritten,
+            notes: &self.notes,
+            migrations: sniffed_json(&self.sniffed),
+            bundled: self
+                .bundled
+                .iter()
+                .map(|(url, commits, file)| BundledJson {
+                    url,
+                    commits: *commits,
+                    file,
+                })
+                .collect(),
+            errors: &self.failures,
+        }
+    }
+}
+
+/// What `odx --json aggregate` and `odx --json lock` print.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx aggregate")]
+pub(crate) struct AggregateJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Per fetch, the repositories it served.
+    fetched: Vec<FetchedJson<'a>>,
+    /// Per repository, its working tree; absent with `--fetch-only`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(default, with = "Vec<BuiltJson<'a>>")]
+    built: Option<Vec<BuiltJson<'a>>>,
+    /// Repositories whose working tree was the locked result already;
+    /// absent with `--fetch-only`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(default, with = "Vec<CurrentJson<'a>>")]
+    current: Option<Vec<CurrentJson<'a>>>,
+    /// The changes to `odx.lock`.
+    lock: Vec<LockChangeJson<'a>>,
+    /// Repositories whose commits were pushed to the vault.
+    vaulted: Vec<VaultedJson<'a>>,
+    /// Pull requests kept at their locked commit although their head moved.
+    kept: Vec<KeptJson<'a>>,
+    /// Whether packages were pointed at the vault in `pyproject.toml`.
+    rewritten: bool,
+    /// Other things done, for people.
+    notes: &'a [String],
+    /// The migrations the locked repositories bring, as `odx sniff` reports
+    /// them.
+    migrations: serde_json::Value,
+    /// Commits written to bundles.
+    bundled: Vec<BundledJson<'a>>,
+    /// Other failures, for people.
+    errors: &'a [String],
+}
+
+/// One fetch.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+enum FetchedJson<'a> {
+    /// It succeeded.
+    Fetched {
+        /// The repositories it served, comma-separated.
+        repositories: &'a str,
+        /// Refs fetched.
+        refs: usize,
+        /// Of which from the mirror.
+        from_mirror: usize,
+        /// Of which through a local clone.
+        through_clone: usize,
+        /// Of which already cached.
+        cached: usize,
+    },
+    /// It failed.
+    Failed {
+        /// The repositories it served, comma-separated.
+        repositories: &'a str,
+        /// Why.
+        error: &'a str,
+    },
+}
+
+/// One repository built.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+enum BuiltJson<'a> {
+    /// It was built.
+    Built {
+        /// The repository.
+        name: &'a str,
+        /// Its working tree, relative to the project root; null for
+        /// `odx lock`, which builds in scratch working trees.
+        target_dir: Option<&'a str>,
+        /// The resulting commit.
+        head: &'a str,
+        /// Its tree.
+        tree: &'a str,
+        /// One outcome per merge, in order.
+        merges: Vec<MergeJson<'a>>,
+    },
+    /// It failed.
+    Failed {
+        /// The repository.
+        name: &'a str,
+        /// Its working tree, relative to the project root; null for
+        /// `odx lock`.
+        target_dir: Option<&'a str>,
+        /// Why.
+        error: &'a str,
+    },
+}
+
+/// How one merge went.
+#[derive(Debug, Serialize, JsonSchema)]
+struct MergeJson<'a> {
+    /// The merge, such as `#123`.
+    label: &'a str,
+    /// `merged`, `merge-commit`, `up-to-date` or `skipped`.
+    status: &'static str,
+    /// The conflicting files; only when skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(default, with = "Vec<String>")]
+    files: Option<&'a [String]>,
+}
+
+/// A working tree that was current already.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CurrentJson<'a> {
+    /// The repository.
+    name: &'a str,
+    /// Its working tree, relative to the project root.
+    target_dir: &'a str,
+}
+
+/// One change to `odx.lock`.
+#[derive(Debug, Serialize, JsonSchema)]
+struct LockChangeJson<'a> {
+    /// The repository.
+    repository: &'a str,
+    /// `base <branch>`, a merge label such as `#123`, or empty for the
+    /// whole repository.
+    item: &'a str,
+    /// `added`, `removed`, `rebased (same patch)` or `changed`.
+    change: &'static str,
+    /// The old commit, if any.
+    old: Option<&'a str>,
+    /// The new commit, if any.
+    new: Option<&'a str>,
+}
+
+/// A repository vaulted.
+#[derive(Debug, Serialize, JsonSchema)]
+struct VaultedJson<'a> {
+    /// The repository.
+    repository: &'a str,
+    /// Commits pushed to the vault.
+    commits: usize,
+}
+
+/// A pull request kept at its locked commit.
+#[derive(Debug, Serialize, JsonSchema)]
+struct KeptJson<'a> {
+    /// The repository.
+    repository: &'a str,
+    /// The merge, such as `#123`.
+    item: &'a str,
+    /// The locked commit.
+    locked: &'a str,
+    /// The new upstream head.
+    upstream_head: &'a str,
+    /// Its CI: `green`, `red`, `pending` or `unknown`; null when it was
+    /// kept by `on_head_change = "pin"`.
+    ci: Option<&'static str>,
+    /// Why it is red: `red`, `base-also-failing` or `other-addon`.
+    classification: Option<&'static str>,
+}
+
+/// Commits written to a bundle.
+#[derive(Debug, Serialize, JsonSchema)]
+struct BundledJson<'a> {
+    /// The repository URL.
+    url: &'a str,
+    /// Commits bundled.
+    commits: usize,
+    /// The bundle file.
+    file: &'a str,
 }
 
 /// `kept pos #1 at 1a2b3c4d5e6f: upstream head 6f5e4d3c2b1a is red (base also failing)`.

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx doctor",
+  "description": "What `odx --json doctor` prints.",
+  "type": "object",
+  "properties": {
+    "checks": {
+      "description": "Every check, in order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CheckJson"
+      }
+    },
+    "ok": {
+      "description": "Whether no check failed.",
+      "type": "boolean"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "ok",
+    "checks"
+  ],
+  "$defs": {
+    "CheckJson": {
+      "description": "One check.",
+      "type": "object",
+      "properties": {
+        "detail": {
+          "description": "What was found, or how to fix it.",
+          "type": "string"
+        },
+        "item": {
+          "description": "What was checked.",
+          "type": "string"
+        },
+        "level": {
+          "description": "How it came out.",
+          "$ref": "#/$defs/Level"
+        }
+      },
+      "required": [
+        "level",
+        "item",
+        "detail"
+      ]
+    },
+    "Level": {
+      "description": "How a check came out.",
+      "oneOf": [
+        {
+          "description": "Fine.",
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "description": "For information only.",
+          "type": "string",
+          "const": "info"
+        },
+        {
+          "description": "Works, but worth fixing.",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Must be fixed: the command fails.",
+          "type": "string",
+          "const": "fail"
+        }
+      ]
+    }
+  }
+}

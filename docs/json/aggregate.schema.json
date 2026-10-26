@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx aggregate",
+  "description": "What `odx --json aggregate` and `odx --json lock` print.",
+  "type": "object",
+  "properties": {
+    "built": {
+      "description": "Per repository, its working tree; absent with `--fetch-only`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BuiltJson"
+      }
+    },
+    "bundled": {
+      "description": "Commits written to bundles.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BundledJson"
+      }
+    },
+    "current": {
+      "description": "Repositories whose working tree was the locked result already;\nabsent with `--fetch-only`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CurrentJson"
+      }
+    },
+    "errors": {
+      "description": "Other failures, for people.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fetched": {
+      "description": "Per fetch, the repositories it served.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FetchedJson"
+      }
+    },
+    "kept": {
+      "description": "Pull requests kept at their locked commit although their head moved.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/KeptJson"
+      }
+    },
+    "lock": {
+      "description": "The changes to `odx.lock`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LockChangeJson"
+      }
+    },
+    "migrations": {
+      "description": "The migrations the locked repositories bring, as `odx sniff` reports\nthem."
+    },
+    "notes": {
+      "description": "Other things done, for people.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rewritten": {
+      "description": "Whether packages were pointed at the vault in `pyproject.toml`.",
+      "type": "boolean"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "vaulted": {
+      "description": "Repositories whose commits were pushed to the vault.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/VaultedJson"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "fetched",
+    "lock",
+    "vaulted",
+    "kept",
+    "rewritten",
+    "notes",
+    "migrations",
+    "bundled",
+    "errors"
+  ],
+  "$defs": {
+    "BuiltJson": {
+      "description": "One repository built.",
+      "anyOf": [
+        {
+          "description": "It was built.",
+          "type": "object",
+          "properties": {
+            "head": {
+              "description": "The resulting commit.",
+              "type": "string"
+            },
+            "merges": {
+              "description": "One outcome per merge, in order.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MergeJson"
+              }
+            },
+            "name": {
+              "description": "The repository.",
+              "type": "string"
+            },
+            "target_dir": {
+              "description": "Its working tree, relative to the project root; null for\n`odx lock`, which builds in scratch working trees.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tree": {
+              "description": "Its tree.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "head",
+            "tree",
+            "merges"
+          ]
+        },
+        {
+          "description": "It failed.",
+          "type": "object",
+          "properties": {
+            "error": {
+              "description": "Why.",
+              "type": "string"
+            },
+            "name": {
+              "description": "The repository.",
+              "type": "string"
+            },
+            "target_dir": {
+              "description": "Its working tree, relative to the project root; null for\n`odx lock`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "error"
+          ]
+        }
+      ]
+    },
+    "BundledJson": {
+      "description": "Commits written to a bundle.",
+      "type": "object",
+      "properties": {
+        "commits": {
+          "description": "Commits bundled.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "file": {
+          "description": "The bundle file.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The repository URL.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "commits",
+        "file"
+      ]
+    },
+    "CurrentJson": {
+      "description": "A working tree that was current already.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The repository.",
+          "type": "string"
+        },
+        "target_dir": {
+          "description": "Its working tree, relative to the project root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "target_dir"
+      ]
+    },
+    "FetchedJson": {
+      "description": "One fetch.",
+      "anyOf": [
+        {
+          "description": "It succeeded.",
+          "type": "object",
+          "properties": {
+            "cached": {
+              "description": "Of which already cached.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "from_mirror": {
+              "description": "Of which from the mirror.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "refs": {
+              "description": "Refs fetched.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "repositories": {
+              "description": "The repositories it served, comma-separated.",
+              "type": "string"
+            },
+            "through_clone": {
+              "description": "Of which through a local clone.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "repositories",
+            "refs",
+            "from_mirror",
+            "through_clone",
+            "cached"
+          ]
+        },
+        {
+          "description": "It failed.",
+          "type": "object",
+          "properties": {
+            "error": {
+              "description": "Why.",
+              "type": "string"
+            },
+            "repositories": {
+              "description": "The repositories it served, comma-separated.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "repositories",
+            "error"
+          ]
+        }
+      ]
+    },
+    "KeptJson": {
+      "description": "A pull request kept at its locked commit.",
+      "type": "object",
+      "properties": {
+        "ci": {
+          "description": "Its CI: `green`, `red`, `pending` or `unknown`; null when it was\nkept by `on_head_change = \"pin\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "classification": {
+          "description": "Why it is red: `red`, `base-also-failing` or `other-addon`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item": {
+          "description": "The merge, such as `#123`.",
+          "type": "string"
+        },
+        "locked": {
+          "description": "The locked commit.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The repository.",
+          "type": "string"
+        },
+        "upstream_head": {
+          "description": "The new upstream head.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "item",
+        "locked",
+        "upstream_head"
+      ]
+    },
+    "LockChangeJson": {
+      "description": "One change to `odx.lock`.",
+      "type": "object",
+      "properties": {
+        "change": {
+          "description": "`added`, `removed`, `rebased (same patch)` or `changed`.",
+          "type": "string"
+        },
+        "item": {
+          "description": "`base <branch>`, a merge label such as `#123`, or empty for the\nwhole repository.",
+          "type": "string"
+        },
+        "new": {
+          "description": "The new commit, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old": {
+          "description": "The old commit, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "description": "The repository.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "item",
+        "change"
+      ]
+    },
+    "MergeJson": {
+      "description": "How one merge went.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "The conflicting files; only when skipped.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "description": "The merge, such as `#123`.",
+          "type": "string"
+        },
+        "status": {
+          "description": "`merged`, `merge-commit`, `up-to-date` or `skipped`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "status"
+      ]
+    },
+    "VaultedJson": {
+      "description": "A repository vaulted.",
+      "type": "object",
+      "properties": {
+        "commits": {
+          "description": "Commits pushed to the vault.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "repository": {
+          "description": "The repository.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "commits"
+      ]
+    }
+  }
+}

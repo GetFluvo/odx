@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx cache info",
+  "description": "What `odx --json cache info` prints.",
+  "type": "object",
+  "properties": {
+    "dir": {
+      "description": "The shared cache directory.",
+      "type": "string"
+    },
+    "last_sync": {
+      "description": "Seconds since the epoch the last sync ended; null when there was none.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0
+    },
+    "repositories": {
+      "description": "Cached repositories.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "size": {
+      "description": "Its size in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "unused": {
+      "description": "Cached repositories no registered workspace uses.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "dir",
+    "size",
+    "repositories",
+    "unused"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx verify",
+  "description": "What `odx --json verify` prints.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Whether the checkout is what the lockfiles describe.",
+      "type": "boolean"
+    },
+    "problems": {
+      "description": "Every difference found, for people.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "ok",
+    "problems"
+  ]
+}

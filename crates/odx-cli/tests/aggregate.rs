@@ -840,7 +840,7 @@ fn lock_vaults_commits_and_aggregate_restores_from_the_vault() {
     let (exit, out, err) = run(&project, &["--json", "lock"]);
     assert_eq!(exit, Exit::Success, "{err}");
     assert!(
-        out.contains("\"vaulted\":[{\"commits\":2,\"repository\":\"pos\"}]"),
+        out.contains("\"vaulted\":[{\"repository\":\"pos\",\"commits\":2}]"),
         "{out}"
     );
     assert!(read_lock(&project).contains(&format!("mirror_ref = \"refs/odx/{}\"", project.pr)));
@@ -1097,7 +1097,7 @@ fn verify_checks_the_lock_and_the_working_trees() {
         "verified: odx.lock matches the configuration and 1 working trees\n"
     );
     let (_, json, _) = run(&project, &["--json", "verify"]);
-    assert_eq!(json, "{\"ok\":true,\"problems\":[],\"schema\":1}\n");
+    assert_eq!(json, "{\"schema\":1,\"ok\":true,\"problems\":[]}\n");
 
     std::fs::write(project.root.join("vendor/pos/a.txt"), "edited").unwrap();
     let (exit, _, err) = run(&project, &["verify"]);

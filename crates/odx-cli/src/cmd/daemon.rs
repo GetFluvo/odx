@@ -13,6 +13,8 @@ use odx_sync::schedule::{
     Job, Scheduler, Step, files, install_steps, status_step, uninstall_steps,
 };
 use odx_sync::set_sync;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::sync::{edit_user_config, last_sync, run_sync, shared};
 use super::{Report, human, run_checked, size};
@@ -194,6 +196,29 @@ fn uninstall(ctx: &Context<'_>) -> Result<Report, Report> {
     })
 }
 
+/// What `odx --json daemon status` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx daemon status")]
+pub(crate) struct DaemonStatusJson {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The scheduled job: `systemd user timer`, `launchd agent` or
+    /// `Task Scheduler task`.
+    scheduler: &'static str,
+    /// `not installed`, `active` or `installed, not active`.
+    state: &'static str,
+    /// How often it runs, such as `30m`.
+    interval: String,
+    /// When the last sync finished and of how many workspaces, for people;
+    /// `never` when there was none.
+    last_sync: String,
+    /// The shared cache directory.
+    cache: String,
+    /// Its size in bytes.
+    cache_size: u64,
+}
+
 fn status(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     let (_, cache) = shared(ctx)?;
     let (scheduler, settings, _, _) = job(ctx)?;
@@ -205,18 +230,15 @@ fn status(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     };
     let mut report = Report::default();
     if global.json {
-        report.out = format!(
-            "{}\n",
-            serde_json::json!({
-                "schema": 1,
-                "scheduler": scheduler.describe(),
-                "state": state,
-                "interval": every.to_string(),
-                "last_sync": last_sync(&cache),
-                "cache": cache.display().to_string(),
-                "cache_size": size(&cache),
-            })
-        );
+        report.out = super::to_json(&DaemonStatusJson {
+            schema: 1,
+            scheduler: scheduler.describe(),
+            state,
+            interval: every.to_string(),
+            last_sync: last_sync(&cache),
+            cache: cache.display().to_string(),
+            cache_size: size(&cache),
+        });
     } else {
         let _ = writeln!(report.out, "job: {} ({state})", scheduler.describe());
         let _ = writeln!(report.out, "interval: {every}");
