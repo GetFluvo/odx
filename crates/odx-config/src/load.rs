@@ -271,7 +271,26 @@ fn validate(config: &OdxConfig) -> Vec<Problem> {
         }
     }
     validate_environments(config, &mut report);
+    validate_wanted(config, &mut report);
     problems
+}
+
+fn validate_wanted(config: &OdxConfig, report: &mut Report<'_>) {
+    let mut addons = BTreeSet::new();
+    for (i, wanted) in config.wanted.iter().enumerate() {
+        let key = format!("tool.odx.wanted[{i}]");
+        if !addons.insert(wanted.addon.as_str()) {
+            report(format!("{key}.addon"), "the addon is already wanted");
+        }
+        for (j, series) in wanted.series.iter().flatten().enumerate() {
+            if !is_series(series) {
+                report(
+                    format!("{key}.series[{j}]"),
+                    "must be an Odoo series such as \"18.0\"",
+                );
+            }
+        }
+    }
 }
 
 fn validate_repositories(config: &OdxConfig, report: &mut Report<'_>) {
@@ -475,6 +494,29 @@ mod tests {
             err.ends_with("\n`dashboard.show_backports` was removed in odx 0.0.9, it had no effect; list `backport` in `sections`"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn wanted_addons_are_validated() {
+        let text = "[tool.odx]\nodoo_version = \"17.0\"\n\n[[tool.odx.wanted]]\naddon = \"contract\"\nseries = [\"18.0\", \"next\"]\n\n[[tool.odx.wanted]]\naddon = \"contract\"\n";
+        let err = parse_pyproject(text, Path::new("p.toml"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("tool.odx.wanted[0].series[1]: must be an Odoo series"),
+            "{err}"
+        );
+        assert!(
+            err.contains("tool.odx.wanted[1].addon: the addon is already wanted"),
+            "{err}"
+        );
+        let text = "[tool.odx]\nodoo_version = \"17.0\"\n\n[[tool.odx.wanted]]\naddon = \"contract\"\n\n[[tool.odx.wanted]]\naddon = \"agreement\"\nseries = [\"17.0\", \"18.0\"]\nnote = \"Q3\"\n";
+        let config = parse_pyproject(text, Path::new("p.toml"))
+            .unwrap()
+            .unwrap()
+            .config;
+        assert_eq!(config.wanted_series(&config.wanted[0]), ["17.0"]);
+        assert_eq!(config.wanted_series(&config.wanted[1]), ["17.0", "18.0"]);
     }
 
     #[test]

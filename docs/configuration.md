@@ -286,6 +286,7 @@ The automation bot (`odx bot`).
 | `promote_label` | string | Label that triggers a promotion pull request. Default: `promote`. |
 | `vault_heads` | boolean | Vault every observed tracked head. Default: off. |
 | `allow_public` | boolean | Run on a public project repository. Default: off. |
+| `notify` | list of strings | Forge users mentioned when a wanted addon's migration starts or lands. Default: none. |
 
 ## `[tool.odx.dev]`
 
@@ -331,3 +332,14 @@ Glue addons (`odx glue`).
 | Key | Type | Description |
 | --- | --- | --- |
 | `ignore` | table of strings | Glue addons the project does not want, each with why. Default: none. |
+
+## `[[tool.odx.wanted]]`
+
+An addon the project may need later. `odx wanted` says per series whether it is there, whether someone is migrating it, or neither.
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `addon` | string | The addon's technical name. |
+| `series` | list of strings | Series to watch it on. Default: `odoo_version`. |
+| `repository` | string | Its repository, as `owner/repo` on GitHub or a URL. Default: where the addon index finds it. |
+| `note` | string | Why it is wanted. Default: none. |

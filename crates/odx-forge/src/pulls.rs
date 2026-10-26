@@ -51,6 +51,10 @@ pub struct PullRequest {
     pub head_branch: String,
     /// Whether maintainers of the target may push to that branch.
     pub maintainer_can_modify: bool,
+    /// Who opened it.
+    pub author: String,
+    /// When it was opened (`YYYY-MM-DD…`).
+    pub created_at: String,
 }
 
 fn text(value: &Value, pointer: &str) -> String {
@@ -98,6 +102,8 @@ fn github_like(value: &Value) -> PullRequest {
         maintainer_can_modify: ["/maintainer_can_modify", "/allow_maintainer_edit"]
             .iter()
             .any(|key| value.pointer(key) == Some(&Value::Bool(true))),
+        author: text(value, "/user/login"),
+        created_at: text(value, "/created_at"),
     }
 }
 
@@ -134,6 +140,8 @@ fn gitlab(value: &Value) -> PullRequest {
         head_repository: None,
         head_branch: text(value, "/source_branch"),
         maintainer_can_modify: value.get("allow_collaboration") == Some(&Value::Bool(true)),
+        author: text(value, "/author/username"),
+        created_at: text(value, "/created_at"),
     }
 }
 
@@ -268,7 +276,8 @@ mod tests {
     fn github_pull_requests() {
         let open = r#"{"number":7,"title":"[17.0][FIX] pos","state":"open","merged":false,"merged_at":null,
             "head":{"sha":"abc","ref":"17.0-fix","repo":{"html_url":"https://github.com/me/pos"}},
-            "maintainer_can_modify":true,"base":{"ref":"17.0"},"labels":[{"name":"needs review"},{"name":"bug"}]}"#;
+            "maintainer_can_modify":true,"base":{"ref":"17.0"},"labels":[{"name":"needs review"},{"name":"bug"}],
+            "user":{"login":"joe"},"created_at":"2026-01-01T00:00:00Z"}"#;
         let (pr, urls) = pull("https://github.com/OCA/pos", ForgeKind::Github, 200, open);
         assert_eq!(
             pr.unwrap(),
@@ -283,6 +292,8 @@ mod tests {
                 head_repository: Some("https://github.com/me/pos".to_owned()),
                 head_branch: "17.0-fix".to_owned(),
                 maintainer_can_modify: true,
+                author: "joe".to_owned(),
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
             }
         );
         assert_eq!(urls, ["https://api.github.com/repos/OCA/pos/pulls/7"]);
@@ -315,7 +326,7 @@ mod tests {
             ("locked", PrState::Closed),
         ] {
             let body = format!(
-                r#"{{"title":"t","state":"{state}","sha":"f","target_branch":"16.0","labels":["b","a",1]}}"#
+                r#"{{"title":"t","state":"{state}","sha":"f","target_branch":"16.0","labels":["b","a",1],"author":{{"username":"ann"}}}}"#
             );
             let (pr, urls) = pull("https://gitlab.com/g/sub/r", ForgeKind::Gitlab, 200, &body);
             let pr = pr.unwrap();
@@ -324,6 +335,7 @@ mod tests {
                 (expected, "f", "16.0")
             );
             assert_eq!(pr.labels, ["a", "b"]);
+            assert_eq!(pr.author, "ann");
             assert_eq!(
                 urls,
                 ["https://gitlab.com/api/v4/projects/g%2Fsub%2Fr/merge_requests/7"]
