@@ -368,6 +368,13 @@ fn resolve_failures_propagate() {
     };
     let err = fetch(&Cache::new(tmp.path()), &Broken, &plan, Duration::ZERO).unwrap_err();
     assert!(err.to_string().starts_with("cannot run git"), "{err}");
+    // Offline as well, once the repository exists.
+    let offline = FetchPlan {
+        offline: true,
+        ..plan
+    };
+    let err = fetch(&Cache::new(tmp.path()), &Broken, &offline, Duration::ZERO).unwrap_err();
+    assert!(err.to_string().starts_with("cannot run git"), "{err}");
     let no_git = SystemGit::with_program(Arc::new(OsRunner), "odx-surely-missing-git");
     assert!(no_git.resolve(tmp.path(), "HEAD").is_err());
 }
@@ -758,6 +765,15 @@ fn a_vanished_clone_is_reported_instead_of_corrupting_the_cache() {
     fetch(&cache, &system(), &pos_plan(&up, Some(clone)), WAIT).unwrap();
     fs::rename(tmp.path().join("clones"), tmp.path().join("moved")).unwrap();
     let err = fetch(&cache, &system(), &pos_plan(&up, None), WAIT).unwrap_err();
+    assert!(
+        err.to_string().starts_with("git alternates failed: "),
+        "{err}"
+    );
+    let offline = FetchPlan {
+        offline: true,
+        ..pos_plan(&up, None)
+    };
+    let err = fetch(&cache, &system(), &offline, WAIT).unwrap_err();
     assert!(
         err.to_string().starts_with("git alternates failed: "),
         "{err}"
