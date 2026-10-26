@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx bot",
+  "description": "What `odx --json bot` prints (`odx bot plan` prints it always).",
+  "type": "object",
+  "properties": {
+    "apply": {
+      "description": "Whether the run acted, rather than only planned (`--apply`).",
+      "type": "boolean"
+    },
+    "base": {
+      "description": "The branch bot pull requests target.",
+      "type": "string"
+    },
+    "dashboards": {
+      "description": "Each dashboard and what the run did on it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DashboardRunJson"
+      }
+    },
+    "promotions": {
+      "description": "The promotions asked for by labelling merged pull requests.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PromotionJson"
+      }
+    },
+    "repository": {
+      "description": "The project repository: `<host>/<path>`.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "repository",
+    "apply",
+    "base",
+    "promotions",
+    "dashboards"
+  ],
+  "$defs": {
+    "Action": {
+      "description": "Something a person can do about an entry.",
+      "oneOf": [
+        {
+          "description": "Add the pull request to the project.",
+          "type": "string",
+          "const": "include"
+        },
+        {
+          "description": "Port the change upstream (always a person's decision).",
+          "type": "string",
+          "const": "port"
+        },
+        {
+          "description": "Record a mute or verdict.",
+          "type": "string",
+          "const": "mute"
+        },
+        {
+          "description": "Remove the override from the project.",
+          "type": "string",
+          "const": "drop"
+        },
+        {
+          "description": "Take the update.",
+          "type": "string",
+          "const": "follow"
+        },
+        {
+          "description": "Promote the addon into the next environment.",
+          "type": "string",
+          "const": "promote"
+        }
+      ]
+    },
+    "DashboardRunJson": {
+      "description": "A dashboard and what the run did on it.",
+      "anyOf": [
+        {
+          "description": "Its issue was written, or would be.",
+          "$ref": "#/$defs/WrittenJson"
+        },
+        {
+          "description": "Its issue is closed, or the dashboard is turned off: nothing done.",
+          "$ref": "#/$defs/PausedJson"
+        }
+      ]
+    },
+    "IssueJson": {
+      "description": "The dashboard issue.",
+      "type": "object",
+      "properties": {
+        "number": {
+          "description": "Its number; null when it is not created yet.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "url": {
+          "description": "Its page; null when it is not created yet.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "write": {
+          "description": "What was written: `#<n> created`, `#<n> updated`, `#<n> unchanged`,\nor `would be created`, `#<n> would be updated` without `--apply`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "write"
+      ]
+    },
+    "OutcomeJson": {
+      "description": "What became of a box, a routine change or a promotion.",
+      "oneOf": [
+        {
+          "description": "A dry run: what would be done.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "planned"
+            }
+          },
+          "required": [
+            "outcome"
+          ]
+        },
+        {
+          "description": "Left for the next run (`--max-prs`).",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "deferred"
+            }
+          },
+          "required": [
+            "outcome"
+          ]
+        },
+        {
+          "description": "Its pull request, opened.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "opened"
+            },
+            "pull_request": {
+              "description": "The pull request.",
+              "$ref": "#/$defs/PullJson"
+            }
+          },
+          "required": [
+            "outcome",
+            "pull_request"
+          ]
+        },
+        {
+          "description": "Its pull request, updated.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "updated"
+            },
+            "pull_request": {
+              "description": "The pull request.",
+              "$ref": "#/$defs/PullJson"
+            }
+          },
+          "required": [
+            "outcome",
+            "pull_request"
+          ]
+        },
+        {
+          "description": "Its pull request, open with the same change already.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "unchanged"
+            },
+            "pull_request": {
+              "description": "The pull request.",
+              "$ref": "#/$defs/PullJson"
+            }
+          },
+          "required": [
+            "outcome",
+            "pull_request"
+          ]
+        },
+        {
+          "description": "Its pull request, closed by a person: not proposed again.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "closed"
+            },
+            "pull_request": {
+              "description": "The pull request.",
+              "$ref": "#/$defs/PullJson"
+            }
+          },
+          "required": [
+            "outcome",
+            "pull_request"
+          ]
+        },
+        {
+          "description": "Done without a pull request, or nothing to propose.",
+          "type": "object",
+          "properties": {
+            "message": {
+              "description": "How.",
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "const": "recorded"
+            }
+          },
+          "required": [
+            "outcome",
+            "message"
+          ]
+        },
+        {
+          "description": "It failed; the box stays ticked.",
+          "type": "object",
+          "properties": {
+            "message": {
+              "description": "Why.",
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "outcome",
+            "message"
+          ]
+        }
+      ]
+    },
+    "PausedIssueJson": {
+      "description": "The issue of a paused dashboard.",
+      "type": "object",
+      "properties": {
+        "write": {
+          "description": "Always `paused`.",
+          "type": "string",
+          "const": "paused"
+        }
+      },
+      "required": [
+        "write"
+      ]
+    },
+    "PausedJson": {
+      "description": "A dashboard the run left alone.",
+      "type": "object",
+      "properties": {
+        "issue": {
+          "description": "Its issue.",
+          "$ref": "#/$defs/PausedIssueJson"
+        },
+        "series": {
+          "description": "The series.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "series",
+        "issue"
+      ]
+    },
+    "PromotionJson": {
+      "description": "A promotion asked for by label, and what became of it.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The environment it merged into.",
+          "type": "string"
+        },
+        "pull_request": {
+          "description": "The merged pull request carrying the label.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "result": {
+          "description": "What became of it.",
+          "$ref": "#/$defs/OutcomeJson"
+        },
+        "to": {
+          "description": "The environment it is promoted into.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pull_request",
+        "from",
+        "to",
+        "result"
+      ]
+    },
+    "PullJson": {
+      "description": "A pull request.",
+      "type": "object",
+      "properties": {
+        "number": {
+          "description": "Its number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "url": {
+          "description": "Its page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url"
+      ]
+    },
+    "RequestJson": {
+      "description": "A ticked box and what became of it.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action asked for.",
+          "$ref": "#/$defs/Action"
+        },
+        "id": {
+          "description": "The dashboard entry.",
+          "type": "string"
+        },
+        "result": {
+          "description": "What became of it.",
+          "$ref": "#/$defs/OutcomeJson"
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "result"
+      ]
+    },
+    "RoutineJson": {
+      "description": "A routine change and what became of it.",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "description": "The dashboard entries it takes care of.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "description": "`drop-override`, `repin` or `auto-update`.",
+          "type": "string"
+        },
+        "result": {
+          "description": "What became of it.",
+          "$ref": "#/$defs/OutcomeJson"
+        }
+      },
+      "required": [
+        "kind",
+        "entries",
+        "result"
+      ]
+    },
+    "WrittenJson": {
+      "description": "A dashboard whose issue was written, or would be.",
+      "type": "object",
+      "properties": {
+        "issue": {
+          "description": "Its issue.",
+          "$ref": "#/$defs/IssueJson"
+        },
+        "requests": {
+          "description": "Each box ticked on it and what became of it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequestJson"
+          }
+        },
+        "routine": {
+          "description": "Each routine change and what became of it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutineJson"
+          }
+        },
+        "series": {
+          "description": "The series.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "series",
+        "issue",
+        "requests",
+        "routine"
+      ]
+    }
+  }
+}

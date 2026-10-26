@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx dashboard",
+  "description": "What `odx --json dashboard` prints: the dashboard of each series.",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/Dashboard"
+  },
+  "$defs": {
+    "Action": {
+      "description": "Something a person can do about an entry.",
+      "oneOf": [
+        {
+          "description": "Add the pull request to the project.",
+          "type": "string",
+          "const": "include"
+        },
+        {
+          "description": "Port the change upstream (always a person's decision).",
+          "type": "string",
+          "const": "port"
+        },
+        {
+          "description": "Record a mute or verdict.",
+          "type": "string",
+          "const": "mute"
+        },
+        {
+          "description": "Remove the override from the project.",
+          "type": "string",
+          "const": "drop"
+        },
+        {
+          "description": "Take the update.",
+          "type": "string",
+          "const": "follow"
+        },
+        {
+          "description": "Promote the addon into the next environment.",
+          "type": "string",
+          "const": "promote"
+        }
+      ]
+    },
+    "Dashboard": {
+      "description": "The dashboard of one series.",
+      "type": "object",
+      "properties": {
+        "generated_at": {
+          "description": "Seconds since the epoch it was built.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "schema": {
+          "description": "The version of this layout.",
+          "type": "integer",
+          "format": "uint32",
+          "const": 1,
+          "minimum": 0
+        },
+        "sections": {
+          "description": "Its sections, in display order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Section"
+          }
+        },
+        "series": {
+          "description": "The series.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "series",
+        "generated_at",
+        "sections"
+      ]
+    },
+    "Entry": {
+      "description": "One line of a section.",
+      "type": "object",
+      "properties": {
+        "actions": {
+          "description": "What can be done.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Action"
+          }
+        },
+        "addon": {
+          "description": "The addon it concerns, if one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id, the same in every renderer.",
+          "type": "string"
+        },
+        "notes": {
+          "description": "More to know.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "state": {
+          "description": "Where it stands.",
+          "type": "string"
+        },
+        "subject": {
+          "description": "What it is about, for people.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "state",
+        "actions",
+        "notes"
+      ]
+    },
+    "Section": {
+      "description": "One section.",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "description": "Its entries.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Entry"
+          }
+        },
+        "fetched_at": {
+          "description": "Seconds since the epoch its data was read.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "kind": {
+          "description": "What it shows.",
+          "$ref": "#/$defs/SectionKind"
+        }
+      },
+      "required": [
+        "kind",
+        "fetched_at",
+        "entries"
+      ]
+    },
+    "SectionKind": {
+      "description": "What a section shows.",
+      "oneOf": [
+        {
+          "description": "Pull requests the project aggregates or pins, and their state.",
+          "type": "string",
+          "const": "pinned"
+        },
+        {
+          "description": "Overrides whose pull request is merged upstream.",
+          "type": "string",
+          "const": "droppable"
+        },
+        {
+          "description": "Open pull requests upstream that touch addons the project uses.",
+          "type": "string",
+          "const": "new-upstream"
+        },
+        {
+          "description": "Changes from lower series the project's series lacks.",
+          "type": "string",
+          "const": "forward-port"
+        },
+        {
+          "description": "Changes from higher series.",
+          "type": "string",
+          "const": "backport"
+        },
+        {
+          "description": "Index patch releases the auto-update policy would take.",
+          "type": "string",
+          "const": "auto-update"
+        },
+        {
+          "description": "Glue addons Odoo would install with what the project has, that it\ndoes not have.",
+          "type": "string",
+          "const": "glue"
+        },
+        {
+          "description": "What differs between environments.",
+          "type": "string",
+          "const": "drift"
+        },
+        {
+          "description": "What verdicts, mutes and blacklists hide.",
+          "type": "string",
+          "const": "suppressed"
+        }
+      ]
+    }
+  }
+}

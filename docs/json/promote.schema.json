@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx promote",
+  "description": "What `odx --json promote` prints.",
+  "type": "object",
+  "properties": {
+    "applied": {
+      "description": "What writing the plan did; null for a plan only.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AppliedJson"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "code": {
+      "description": "The source's commits on the closure's project addons the target\nlacks.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CommitJson"
+      }
+    },
+    "core": {
+      "description": "The Odoo core on both sides; null when it is not copied.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoreJson"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "external": {
+      "description": "Addons not copied: Odoo's own, or of aggregated repositories.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "from": {
+      "description": "The source environment.",
+      "$ref": "#/$defs/SideJson"
+    },
+    "items": {
+      "description": "Every addon of the closure, and how it differs.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ItemJson"
+      }
+    },
+    "noop": {
+      "description": "Whether the target has all of it.",
+      "type": "boolean"
+    },
+    "refused": {
+      "description": "Whether a conflict refuses the plan.",
+      "type": "boolean"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "selection": {
+      "description": "The addons asked for.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "to": {
+      "description": "The target environment.",
+      "$ref": "#/$defs/SideJson"
+    },
+    "warnings": {
+      "description": "What the plan warns about.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "from",
+    "to",
+    "selection",
+    "items",
+    "external",
+    "warnings",
+    "refused",
+    "noop",
+    "code"
+  ],
+  "$defs": {
+    "AppliedJson": {
+      "description": "What writing the plan did.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "The branch written.",
+          "type": "string"
+        },
+        "commit": {
+          "description": "Its head.",
+          "type": "string"
+        },
+        "included": {
+          "description": "Branch-specific paths included on request.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "picked": {
+          "description": "Commits cherry-picked onto it.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "pull_request": {
+          "description": "The pull request opened for it; null without `--open-pr`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenedJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "branch",
+        "commit",
+        "picked",
+        "included"
+      ]
+    },
+    "CommitJson": {
+      "description": "A commit.",
+      "type": "object",
+      "properties": {
+        "sha": {
+          "description": "Its hash.",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Its subject.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "subject"
+      ]
+    },
+    "CoreJson": {
+      "description": "The Odoo core on both sides.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "On the source.",
+          "$ref": "#/$defs/UnitJson"
+        },
+        "to": {
+          "description": "On the target; null when it lacks it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnitJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from"
+      ]
+    },
+    "ItemJson": {
+      "description": "An addon of the closure.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "allowed": {
+          "description": "Whether a flag allows the conflict.",
+          "type": "boolean"
+        },
+        "change": {
+          "description": "How the source differs from the target: `identical`, `ahead`,\n`behind`, `changed`, `source-changed`, `only-in-a` or `only-in-b`.",
+          "type": "string"
+        },
+        "conflict": {
+          "description": "`downgrade`, `source change` or `version conflict`; null when none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "description": "On the source.",
+          "$ref": "#/$defs/UnitJson"
+        },
+        "to": {
+          "description": "On the target; null when it lacks it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnitJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "addon",
+        "change",
+        "allowed",
+        "from"
+      ]
+    },
+    "OpenedJson": {
+      "description": "A pushed branch and the pull request opened for it.",
+      "type": "object",
+      "properties": {
+        "draft": {
+          "description": "Whether it was opened as a draft.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "The pull request number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "pushed_to": {
+          "description": "Where the branch went: a remote or a URL.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Always `opened`.",
+          "type": "string",
+          "const": "opened"
+        },
+        "url": {
+          "description": "The pull request page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "pushed_to",
+        "number",
+        "url",
+        "draft"
+      ]
+    },
+    "SideJson": {
+      "description": "An environment, as read.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "Its branch.",
+          "type": "string"
+        },
+        "env": {
+          "description": "The environment.",
+          "type": "string"
+        },
+        "from": {
+          "description": "The git ref it was read from.",
+          "type": "string"
+        },
+        "series": {
+          "description": "Its Odoo series.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "env",
+        "branch",
+        "series",
+        "from"
+      ]
+    },
+    "UnitJson": {
+      "description": "One thing an environment runs, and its exact pin.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "`odoo`, `addon`, `package` or `repository`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Addon, package or repository name.",
+          "type": "string"
+        },
+        "pin": {
+          "description": "What identifies its content: a wheel hash, a commit, a tree.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Where it comes from: `project`, `index`, `git <url>`, a URL.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Its version, when it has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "source",
+        "pin"
+      ]
+    }
+  }
+}

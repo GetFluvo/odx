@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx lock --auto-update",
+  "description": "What `odx --json lock --auto-update` prints.",
+  "type": "object",
+  "properties": {
+    "review": {
+      "description": "The updates left for review.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UpdateJson"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "updated": {
+      "description": "The updates taken.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UpdateJson"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "updated",
+    "review"
+  ],
+  "$defs": {
+    "UpdateJson": {
+      "description": "An update taken or left for review.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The locked version.",
+          "type": "string"
+        },
+        "package": {
+          "description": "The distribution.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "The paths that changed: all of them when taken, those outside\n`allowed_paths` when left for review.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "description": "Why it needs review; empty when taken.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The version offered; empty when the index could not be read.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package",
+        "from",
+        "to",
+        "reason",
+        "paths"
+      ]
+    }
+  }
+}

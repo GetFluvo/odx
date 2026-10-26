@@ -9,6 +9,8 @@ use odx_core::Exit;
 use odx_env::promote::{Addon, Conflict, Item, Options, Plan, PlanError, Snapshot, plan};
 use odx_env::search::{Candidate, search};
 use odx_env::{Change, Unit};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::prepare;
@@ -17,7 +19,7 @@ use super::env::model;
 use super::promote_apply::{Applied, addon_paths, apply, missing_commits};
 use super::promote_forge::{merged, touched};
 use super::promote_rollback::rollback;
-use super::propose::{opened_json, opened_text};
+use super::propose::{OpenedJson, opened_text};
 use crate::Context;
 use crate::cli::{GlobalArgs, PromoteArgs};
 
@@ -310,21 +312,23 @@ fn candidates(query: &str, from: &Checkout, json: bool) -> Report {
         .collect();
     hits.sort_by_key(|hit| std::cmp::Reverse(hit.2));
     let out = if json {
-        let listed: Vec<serde_json::Value> = hits
-            .iter()
-            .map(|(candidate, modules, score)| {
-                serde_json::json!({
-                    "kind": if candidate.feature { "feature" } else { "addon" },
-                    "name": candidate.name,
-                    "score": score,
-                    "modules": modules,
+        super::to_json(&SearchJson {
+            schema: 1,
+            query,
+            candidates: hits
+                .iter()
+                .map(|(candidate, modules, score)| CandidateJson {
+                    kind: if candidate.feature {
+                        CandidateKind::Feature
+                    } else {
+                        CandidateKind::Addon
+                    },
+                    name: &candidate.name,
+                    score: *score,
+                    modules,
                 })
-            })
-            .collect();
-        format!(
-            "{:#}\n",
-            serde_json::json!({ "schema": 1, "query": query, "candidates": listed })
-        )
+                .collect(),
+        })
     } else if hits.is_empty() {
         format!("nothing on {} matches {query:?}\n", from.env.name)
     } else {
@@ -508,67 +512,219 @@ fn text(from: &Checkout, to: &Checkout, plan: &Plan, done: &Done<'_>) -> String 
     out
 }
 
+/// What `odx --json promote --search` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx promote --search")]
+pub(crate) struct SearchJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// What was searched for.
+    query: &'a str,
+    /// What matches, best first.
+    candidates: Vec<CandidateJson<'a>>,
+}
+
+/// What a candidate is.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum CandidateKind {
+    /// A feature: a group of addons.
+    Feature,
+    /// One addon.
+    Addon,
+}
+
+/// Something `--select` can promote.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CandidateJson<'a> {
+    /// A feature or an addon.
+    kind: CandidateKind,
+    /// Its name, for `--select`.
+    name: &'a str,
+    /// How well it matches; higher is better.
+    score: u32,
+    /// The addons it promotes.
+    modules: &'a [String],
+}
+
+/// What `odx --json promote` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx promote")]
+pub(crate) struct PromoteJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The source environment.
+    from: SideJson<'a>,
+    /// The target environment.
+    to: SideJson<'a>,
+    /// The addons asked for.
+    selection: &'a [String],
+    /// Every addon of the closure, and how it differs.
+    items: Vec<ItemJson<'a>>,
+    /// Addons not copied: Odoo's own, or of aggregated repositories.
+    external: &'a [String],
+    /// The Odoo core on both sides; null when it is not copied.
+    core: Option<CoreJson<'a>>,
+    /// What the plan warns about.
+    warnings: &'a [String],
+    /// Whether a conflict refuses the plan.
+    refused: bool,
+    /// Whether the target has all of it.
+    noop: bool,
+    /// The source's commits on the closure's project addons the target
+    /// lacks.
+    code: Vec<CommitJson<'a>>,
+    /// What writing the plan did; null for a plan only.
+    applied: Option<AppliedJson<'a>>,
+}
+
+/// An environment, as read.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SideJson<'a> {
+    /// The environment.
+    env: &'a str,
+    /// Its branch.
+    branch: &'a str,
+    /// Its Odoo series.
+    series: &'a str,
+    /// The git ref it was read from.
+    from: &'a str,
+}
+
+impl<'a> SideJson<'a> {
+    fn of(checkout: &'a Checkout) -> Self {
+        Self {
+            env: &checkout.env.name,
+            branch: &checkout.env.branch,
+            series: &checkout.env.series,
+            from: &checkout.from,
+        }
+    }
+}
+
+/// One thing an environment runs, and its exact pin.
+#[derive(Debug, Serialize, JsonSchema)]
+struct UnitJson<'a> {
+    /// `odoo`, `addon`, `package` or `repository`.
+    kind: &'static str,
+    /// Addon, package or repository name.
+    name: &'a str,
+    /// Its version, when it has one.
+    version: Option<&'a str>,
+    /// Where it comes from: `project`, `index`, `git <url>`, a URL.
+    source: &'a str,
+    /// What identifies its content: a wheel hash, a commit, a tree.
+    pin: &'a str,
+}
+
+impl<'a> UnitJson<'a> {
+    fn of(unit: &'a Unit) -> Self {
+        Self {
+            kind: unit.kind.name(),
+            name: &unit.name,
+            version: unit.version.as_deref(),
+            source: &unit.source,
+            pin: &unit.pin,
+        }
+    }
+}
+
+/// An addon of the closure.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ItemJson<'a> {
+    /// The addon.
+    addon: &'a str,
+    /// How the source differs from the target: `identical`, `ahead`,
+    /// `behind`, `changed`, `source-changed`, `only-in-a` or `only-in-b`.
+    change: &'static str,
+    /// `downgrade`, `source change` or `version conflict`; null when none.
+    conflict: Option<&'static str>,
+    /// Whether a flag allows the conflict.
+    allowed: bool,
+    /// On the source.
+    from: UnitJson<'a>,
+    /// On the target; null when it lacks it.
+    to: Option<UnitJson<'a>>,
+}
+
+/// The Odoo core on both sides.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CoreJson<'a> {
+    /// On the source.
+    from: UnitJson<'a>,
+    /// On the target; null when it lacks it.
+    to: Option<UnitJson<'a>>,
+}
+
+/// A commit.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CommitJson<'a> {
+    /// Its hash.
+    sha: &'a str,
+    /// Its subject.
+    subject: &'a str,
+}
+
+/// What writing the plan did.
+#[derive(Debug, Serialize, JsonSchema)]
+struct AppliedJson<'a> {
+    /// The branch written.
+    branch: &'a str,
+    /// Its head.
+    commit: &'a str,
+    /// Commits cherry-picked onto it.
+    picked: usize,
+    /// Branch-specific paths included on request.
+    included: &'a [String],
+    /// The pull request opened for it; null without `--open-pr`.
+    pull_request: Option<OpenedJson<'a>>,
+}
+
 fn json(from: &Checkout, to: &Checkout, plan: &Plan, done: &Done<'_>) -> String {
-    let side = |checkout: &Checkout| {
-        serde_json::json!({
-            "env": checkout.env.name,
-            "branch": checkout.env.branch,
-            "series": checkout.env.series,
-            "from": checkout.from,
-        })
-    };
-    let unit = |unit: Option<&Unit>| {
-        unit.map(|unit| {
-            serde_json::json!({
-                "kind": unit.kind.name(),
-                "name": unit.name,
-                "version": unit.version,
-                "source": unit.source,
-                "pin": unit.pin,
+    let value = PromoteJson {
+        schema: 1,
+        from: SideJson::of(from),
+        to: SideJson::of(to),
+        selection: &plan.selection,
+        items: plan
+            .items
+            .iter()
+            .map(|item| ItemJson {
+                addon: &item.addon,
+                change: item.change.name(),
+                conflict: item.conflict.map(Conflict::name),
+                allowed: item.allowed,
+                from: UnitJson::of(&item.from),
+                to: item.to.as_ref().map(UnitJson::of),
             })
-        })
-    };
-    let items: Vec<serde_json::Value> = plan
-        .items
-        .iter()
-        .map(|item| {
-            serde_json::json!({
-                "addon": item.addon,
-                "change": item.change.name(),
-                "conflict": item.conflict.map(Conflict::name),
-                "allowed": item.allowed,
-                "from": unit(Some(&item.from)),
-                "to": unit(item.to.as_ref()),
+            .collect(),
+        external: &plan.external,
+        core: plan.core.as_ref().map(|(ours, theirs)| CoreJson {
+            from: UnitJson::of(ours),
+            to: theirs.as_ref().map(UnitJson::of),
+        }),
+        warnings: &plan.warnings,
+        refused: plan.refused(),
+        noop: plan.is_noop() && done.commits.is_empty(),
+        code: done
+            .commits
+            .iter()
+            .map(|commit| {
+                let (sha, subject) = commit.split_once(' ').unwrap_or((commit, ""));
+                CommitJson { sha, subject }
             })
-        })
-        .collect();
-    let value = serde_json::json!({
-        "schema": 1,
-        "from": side(from),
-        "to": side(to),
-        "selection": plan.selection,
-        "items": items,
-        "external": plan.external,
-        "core": plan.core.as_ref().map(|(ours, theirs)| serde_json::json!({
-            "from": unit(Some(ours)),
-            "to": unit(theirs.as_ref()),
-        })),
-        "warnings": plan.warnings,
-        "refused": plan.refused(),
-        "noop": plan.is_noop() && done.commits.is_empty(),
-        "code": done.commits.iter().map(|commit| {
-            let (sha, subject) = commit.split_once(' ').unwrap_or((commit, ""));
-            serde_json::json!({ "sha": sha, "subject": subject })
-        }).collect::<Vec<_>>(),
-        "applied": done.applied.map(|applied| serde_json::json!({
-            "branch": applied.branch,
-            "commit": applied.commit,
-            "picked": applied.picked,
-            "included": applied.included,
-            "pull_request": applied.pushed.as_ref().map(opened_json),
-        })),
-    });
-    format!("{value:#}\n")
+            .collect(),
+        applied: done.applied.map(|applied| AppliedJson {
+            branch: &applied.branch,
+            commit: &applied.commit,
+            picked: applied.picked,
+            included: &applied.included,
+            pull_request: applied.pushed.as_ref().map(OpenedJson::of),
+        }),
+    };
+    super::to_json(&value)
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation};
 use odx_forge::{ForgeClient, ForgeError, Http, Opened, Proposal, RepoUrl, ReqwestHttp};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::{Report, output_of};
 use crate::Context;
@@ -50,14 +52,36 @@ pub(crate) fn opened_text(pushed: &Pushed) -> String {
     )
 }
 
+/// A pushed branch and the pull request opened for it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub(crate) struct OpenedJson<'a> {
+    /// Always `opened`.
+    #[schemars(extend("const" = "opened"))]
+    status: &'static str,
+    /// Where the branch went: a remote or a URL.
+    pushed_to: &'a str,
+    /// The pull request number.
+    number: u64,
+    /// The pull request page.
+    url: &'a str,
+    /// Whether it was opened as a draft.
+    draft: bool,
+}
+
+impl<'a> OpenedJson<'a> {
+    pub(crate) fn of(pushed: &'a Pushed) -> Self {
+        Self {
+            status: "opened",
+            pushed_to: &pushed.to,
+            number: pushed.opened.number,
+            url: &pushed.opened.url,
+            draft: pushed.draft,
+        }
+    }
+}
+
 pub(crate) fn opened_json(pushed: &Pushed) -> serde_json::Value {
-    serde_json::json!({
-        "status": "opened",
-        "pushed_to": pushed.to,
-        "number": pushed.opened.number,
-        "url": pushed.opened.url,
-        "draft": pushed.draft,
-    })
+    serde_json::to_value(OpenedJson::of(pushed)).unwrap_or_default()
 }
 
 /// Where to push a branch for a fork: like the remote's URL, SSH or HTTPS.
