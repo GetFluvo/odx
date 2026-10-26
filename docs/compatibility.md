@@ -30,9 +30,11 @@ prints the equivalent `[[tool.odx.repositories]]` tables:
 
 Everything that cannot be represented is reported as a warning on standard
 error. `odx import --write` adds the repositories to `pyproject.toml` instead
-of printing them, skipping URLs that are already configured; when the file
-has no `[tool.odx]` table yet, it is created with `--odoo-version` or the
-first base branch as the series.
+of printing them, skipping URLs that are already configured. A directory
+without a `pyproject.toml`, as a git-aggregator project usually is, gets one
+with a `[project]` table named after the directory. When the file has no
+`[tool.odx]` table yet, it is created with `--odoo-version` or the first base
+branch as the series.
 
 ## Export
 

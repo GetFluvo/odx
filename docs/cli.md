@@ -1,20 +1,19 @@
 # Command line
 
-Every command supports `--help`. Commands that are not implemented yet say
-so, name the roadmap phase in which they land, and exit with code `2`.
+Every command supports `--help`; most end with examples.
 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | success |
 | `1` | operational failure: conflict, network, policy |
-| `2` | usage or configuration error |
+| `2` | usage or configuration error, such as a missing `[tool.odx]` project |
 
 ## Global options
 
 | Option | Effect |
 | --- | --- |
 | `-C, --project-dir <DIR>` | run as if started in `DIR` |
-| `-c, --config <FILE>` | the `pyproject.toml` or `repos.yaml` to use |
+| `-c, --config <FILE>` | the `pyproject.toml` to use (a `repos.yaml` for the commands that read one) |
 | `-j, --jobs <N>` | override the number of parallel jobs |
 | `--offline` | serve forge and index data from the cache only |
 | `--fresh` | ignore cached data; refresh everything first |
@@ -23,13 +22,9 @@ so, name the roadmap phase in which they land, and exit with code `2`.
 | `-v` / `-q` | more or less logging on stderr |
 
 `--offline` and `--no-refresh` save network time only: local work such as git,
-pre-commit and odoo-lint takes as long as before. In a measured migration they
+pre-commit and odoo-lint takes as long as before, and a repository that is not
+in the cache yet is still fetched. In a measured migration they
 saved about 3 % of a ten-second run.
-
-Exit codes are the same for every command: `0` success, `1` an operational
-failure (a conflict, the network, a policy refusing), `2` a usage or
-configuration error, such as a missing `[tool.odx]` project where a command
-needs one.
 
 ## Editing `pyproject.toml`
 
@@ -299,7 +294,7 @@ are listed. `--json` gives the same as data.
 $ odx suggest                         # every environment's series, from the series below and above
 $ odx suggest --env prod              # one environment
 $ odx suggest --series 17.0 --from 16.0,18.0
-$ odx suggest --addon 'pos_*' --show-suppressed
+$ odx suggest --addon 'pos_*' --show-muted
 ```
 
 `odx suggest` looks for changes the addons you use have on other series and
@@ -322,7 +317,7 @@ cache, and compares the commits that touch the addon:
   out, and `blacklisted` when the target branch's oca-port blacklist
   (`.oca/oca-port/blacklist/<addon>.json`) lists it.
 
-Blacklisted groups are hidden unless `--show-suppressed`. The series looked
+Blacklisted groups are hidden unless `--show-muted`. The series looked
 on default to `[tool.odx.port] default_from`, else the one below and the
 one above; each environment's series (`[tool.odx.environments.env.<name>]
 series`) is a target of its own. `--check-apply` replays every portable
@@ -578,7 +573,7 @@ records the files the change touches as they are on the target series.
 When they change, the suggestion comes back marked "previously declined"
 and `odx verdict list --stale` lists the entry: `confirm` keeps it,
 `revoke` withdraws it. Nothing is deleted; a revocation is recorded with
-who, when and why. `odx suggest --show-suppressed` shows what verdicts and
+who, when and why. `odx suggest --show-muted` shows what verdicts and
 mutes hide.
 
 
@@ -923,16 +918,6 @@ the branch.
 $ odx migrate plan --to 18.0
 ```
 
-```console
-$ odx migrate own --to 18.0
-```
-
-`odx migrate own` migrates the project's own addons (`project_addons`) in
-place, in the project's repository: for each, odoo-lint's upgrade fixes and
-version bump, the old `migrations/` scripts removed and pre-commit run, in a
-commit `[MIG] <addon>: Migration to <to>` when anything changed, then what
-odoo-lint leaves to fix by hand. No pull request: they are yours.
-
 In a project, `odx migrate plan` says what moving to the next series takes,
 addon by addon: what is already available there, which addons have an open
 migration pull request to review, test and contribute to instead of
@@ -950,6 +935,16 @@ dependency order (from the manifests on the source series). In both modes, every
 addon to migrate lists the dependencies the target lacks: `waits on
 module_analysis: open migration pull request OCA/server-tools#3631`. `odx migrate
 addon`, `odx migrate pr` and `odx port` never need a project.
+
+```console
+$ odx migrate own --to 18.0
+```
+
+`odx migrate own` migrates the project's own addons (`project_addons`) in
+place, in the project's repository: for each, odoo-lint's upgrade fixes and
+version bump, the old `migrations/` scripts removed and pre-commit run, in a
+commit `[MIG] <addon>: Migration to <to>` when anything changed, then what
+odoo-lint leaves to fix by hand. No pull request: they are yours.
 
 `odx migrate pr`, on the migration branch, pushes it and opens the pull
 request `[<to>][MIG] <addon>: Migration to <to>` against the target series:
@@ -1354,7 +1349,7 @@ same configuration:
 ```yaml
 repos:
   - repo: https://github.com/getfluvo/odx
-    rev: v0.0.5
+    rev: v0.0.8
     hooks:
       - id: odx-verify       # on lockfile and pyproject.toml changes
       - id: odx-check-deps   # on manifest and pyproject.toml changes
