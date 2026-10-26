@@ -93,6 +93,15 @@ pub(crate) fn output_of(invocation: &Invocation) -> Result<String, String> {
     }
 }
 
+/// `value` as one line of JSON, the way every `--json` output is printed.
+pub(crate) fn to_json(value: &impl serde::Serialize) -> String {
+    // The output types hold strings, numbers and lists only: serializing
+    // them cannot fail.
+    let mut text = serde_json::to_string(value).unwrap_or_default();
+    text.push('\n');
+    text
+}
+
 /// Bytes under `dir`.
 pub(crate) fn size(dir: &Path) -> u64 {
     std::fs::read_dir(dir)

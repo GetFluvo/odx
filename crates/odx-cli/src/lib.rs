@@ -7,6 +7,7 @@
 
 pub mod cli;
 mod cmd;
+pub mod json;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
