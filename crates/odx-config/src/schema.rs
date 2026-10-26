@@ -18,25 +18,27 @@ use crate::Span;
 pub struct OdxConfig {
     /// Odoo series of the project, e.g. `"17.0"`.
     pub odoo_version: String,
-    /// Languages the project is translated into besides English, as Odoo
-    /// codes (`"es"`, `"nl_BE"`).
+    /// Languages the project is translated into besides English, as Odoo codes (`"es"`, `"nl_BE"`).
+    /// Default: none (English only).
     #[serde(default)]
     pub languages: Vec<String>,
-    /// Neutral project identifier for the verdict repository.
+    /// Neutral project identifier for the verdict repository. Default: the first twelve hex digits
+    /// of the SHA-256 of the project's `origin` URL.
     pub project_id: Option<String>,
-    /// Maximum concurrent fetches and merge jobs.
+    /// Maximum concurrent fetches and merge jobs. Default: the number of CPUs.
     pub jobs: Option<u16>,
-    /// Shared cache directory.
+    /// Cache directory, relative to the project root. Default: the shared cache directory of the
+    /// user configuration, else `.odx/cache`.
     pub cache_dir: Option<PathBuf>,
-    /// How merges are applied on top of the base.
+    /// How merges are applied on top of the base. Default: `"rebase"`.
     pub merge_strategy: Option<MergeStrategy>,
-    /// When to use mergiraf for conflict resolution.
+    /// When to use mergiraf for conflict resolution. Default: `"auto"`.
     pub mergiraf: Option<MergirafMode>,
-    /// Default conflict policy for merges.
+    /// Default conflict policy for merges. Default: `"abort"`.
     pub on_conflict: Option<OnConflict>,
-    /// Default force-push guard-rail policy.
+    /// Default force-push guard-rail policy. Default: `"follow-if-green"`.
     pub on_head_change: Option<OnHeadChange>,
-    /// Lockfile path, relative to the project root.
+    /// Lockfile path, relative to the project root. Default: `odx.lock`.
     pub lockfile: Option<PathBuf>,
     /// Private vault repository for locked commits.
     pub mirror: Option<Mirror>,
@@ -48,10 +50,10 @@ pub struct OdxConfig {
     pub dashboard: Option<Dashboard>,
     /// Dependency groups and the directories their addons are vendored into.
     pub groups: Option<Groups>,
-    /// Repositories to aggregate.
+    /// Repositories to aggregate. Default: none.
     #[serde(default)]
     pub repositories: Vec<Repository>,
-    /// Packages not expressed as direct references, keyed by distribution name.
+    /// Packages not expressed as direct references, keyed by distribution name. Default: none.
     #[serde(default)]
     pub packages: BTreeMap<String, Package>,
     /// Vendoring options.
@@ -66,7 +68,7 @@ pub struct OdxConfig {
     pub port: Option<Port>,
     /// Upstream suggestions.
     pub suggest: Option<Suggest>,
-    /// Feature sets, keyed by name.
+    /// Feature sets, keyed by name. Default: none.
     #[serde(default)]
     pub features: BTreeMap<String, Feature>,
     /// Directory layout.
@@ -183,15 +185,16 @@ pub enum OnHeadChange {
 pub struct Mirror {
     /// Push URL of the vault repository; must be private.
     pub url: String,
-    /// Prefix of content-addressed refs.
+    /// Prefix of content-addressed refs. Default: `refs/odx`.
     pub ref_prefix: Option<String>,
-    /// Refs or tags.
+    /// Whether locked commits are kept under refs or tags. Default: `"refs"`, or `"tags"` when the
+    /// vault protects tags (GitLab, or created with `auto_create`).
     pub ref_style: Option<RefStyle>,
-    /// Push locked commits on `odx lock`.
+    /// Push locked commits on `odx lock`. Default: on.
     pub push_on_lock: Option<bool>,
-    /// Create the vault repository through the forge API.
+    /// Create the vault repository through the forge API. Default: off.
     pub auto_create: Option<bool>,
-    /// Allow a public vault repository.
+    /// Allow a public vault repository. Default: off.
     pub allow_public: Option<bool>,
 }
 
@@ -206,57 +209,59 @@ pub enum RefStyle {
     Tags,
 }
 
-/// `[tool.odx.http]`.
+/// `[tool.odx.http]`: how odx talks to forges over HTTP.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Http {
-    /// In-flight requests and fetches per host.
+    /// In-flight requests and fetches per host. Default: 6.
     pub per_host_concurrency: Option<u16>,
-    /// HTTP cache TTL before revalidation.
+    /// HTTP cache TTL before revalidation. Not used yet.
     pub cache_ttl: Option<Span>,
-    /// Serve from the cache only.
+    /// Serve from the cache only. Not used yet.
     pub offline: Option<bool>,
 }
 
-/// `[tool.odx.cache]`.
+/// `[tool.odx.cache]`: cache staleness and prefetching.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Cache {
     /// Staleness thresholds per kind of cached data.
     pub ttl: Option<CacheTtl>,
-    /// Let `odx sync` warm clean worktrees.
+    /// Let `odx sync` warm clean worktrees. Not used yet.
     pub warm_worktrees: Option<bool>,
-    /// Let `odx sync` prefetch wheels.
+    /// Let `odx sync` prefetch wheels. Default: on.
     pub prefetch_wheels: Option<bool>,
 }
 
-/// `[tool.odx.cache].ttl`.
+/// `[tool.odx.cache.ttl]`: how long cached data is used before it is refreshed.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheTtl {
-    /// Git refs.
+    /// How long fetched git refs are used before fetching again. Default: `"15m"`.
     pub refs: Option<Span>,
-    /// Pull request state.
+    /// How long a kept dashboard (pull request states) is shown before it is rebuilt. Default:
+    /// `"30m"`.
     pub pr_state: Option<Span>,
-    /// Addon index.
+    /// How long the addon index is used. Not used yet.
     pub index: Option<Span>,
-    /// Wheels.
+    /// How long cached wheels are used. Not used yet.
     pub wheels: Option<Span>,
-    /// Suggestions.
+    /// How long upstream suggestions are used. Not used yet.
     pub suggest: Option<Span>,
-    /// Environment drift.
+    /// How long environment drift is used. Not used yet.
     pub drift: Option<Span>,
 }
 
-/// `[tool.odx.dashboard]`.
+/// `[tool.odx.dashboard]`: what `odx dashboard` shows.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dashboard {
-    /// Sections shown, in order.
+    /// Sections shown, in order. Not used yet.
     pub sections: Option<Vec<DashboardSection>>,
-    /// Environment pairs compared in the drift section.
+    /// Environment pairs compared in the drift section. Default: every promotion edge between
+    /// environments that are not disposable.
     pub environment_pairs: Option<Vec<[String; 2]>>,
-    /// Show suggestions from higher series expanded.
+    /// Show suggestions from higher series expanded. Not used yet.
     pub show_backports: Option<bool>,
 }
 
@@ -281,34 +286,35 @@ pub enum DashboardSection {
 /// `[tool.odx.groups]`: dependency group name → vendor directory.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Groups {
-    /// Group used by `add` and `check-deps --fix`.
+    /// Group used by `add` and `check-deps --fix`, and by packages that name none. Default: none.
     pub default: Option<String>,
-    /// Committed project addon directories.
+    /// Committed project addon directories. Default: `[tool.odx.layout] project_addons`, else the
+    /// project root.
     pub project_addons: Option<Vec<PathBuf>>,
     /// Group name → directory.
     #[serde(flatten)]
     pub dirs: BTreeMap<String, PathBuf>,
 }
 
-/// `[[tool.odx.repositories]]`.
+/// `[[tool.odx.repositories]]`: a repository aggregated from its base and merges.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
-    /// Short name, unique in the project.
+    /// Short name, unique in the project. Default: `url`.
     pub name: Option<String>,
     /// Upstream URL.
     pub url: String,
-    /// Working tree directory.
+    /// Working tree directory. Default: `<aggregate_dir>/<last segment of name>`.
     pub target_dir: Option<PathBuf>,
-    /// Base branch.
+    /// Base branch. Default: `odoo_version`.
     pub base: Option<String>,
-    /// Aggregated branch.
+    /// Aggregated branch, as exported to `repos.yaml`. Default: `<base>-odx`.
     pub target_branch: Option<String>,
-    /// Forge kind when it cannot be derived from the URL.
+    /// Forge kind when it cannot be derived from the URL. Default: derived from the URL.
     pub forge: Option<ForgeKind>,
-    /// Addon globs to link (the doodba `addons.yaml` selection).
+    /// Addon globs to link (the doodba `addons.yaml` selection). Default: every addon.
     pub addons: Option<Vec<String>>,
-    /// Merges applied in order.
+    /// Merges applied in order. Default: none.
     #[serde(default)]
     pub merges: Vec<Merge>,
 }
@@ -338,13 +344,13 @@ pub struct Merge {
     pub sha: Option<String>,
     /// Branch name.
     pub branch: Option<String>,
-    /// Remote URL of `branch`; defaults to the repository URL.
+    /// Remote URL of `branch`. Default: the repository URL.
     pub remote: Option<String>,
-    /// Conflict policy for this merge.
+    /// Conflict policy for this merge. Default: `[tool.odx] on_conflict`.
     pub on_conflict: Option<OnConflict>,
-    /// Guard-rail policy for this merge.
+    /// Guard-rail policy for this merge. Default: `[tool.odx] on_head_change`.
     pub on_head_change: Option<OnHeadChange>,
-    /// Report when the pull request is merged upstream.
+    /// Report when the pull request is merged upstream. Default: on.
     pub track_upstream: Option<bool>,
 }
 
@@ -391,13 +397,13 @@ impl Merge {
     }
 }
 
-/// `[tool.odx.packages.<dist>]`.
+/// `[tool.odx.packages.<dist>]`: a package pinned to a git source.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Package {
-    /// Repository as `owner/repo` on the default forge.
+    /// Repository as `owner/repo` on GitHub.
     pub repo: Option<String>,
-    /// Repository URL.
+    /// Repository URL. Default: `https://github.com/<repo>.git`.
     pub url: Option<String>,
     /// Pull request number.
     pub pr: Option<u32>,
@@ -407,25 +413,25 @@ pub struct Package {
     pub tag: Option<String>,
     /// Commit.
     pub rev: Option<String>,
-    /// Subdirectory of the addon in the repository.
+    /// Subdirectory of the addon in the repository. Default: the repository root.
     pub subdirectory: Option<String>,
-    /// Dependency group; defaults to `groups.default`.
+    /// Dependency group. Default: `[tool.odx.groups] default`.
     pub group: Option<String>,
 }
 
-/// `[tool.odx.vendor]`.
+/// `[tool.odx.vendor]`: how addons are vendored into the project.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Vendor {
-    /// Bump the last manifest version segment on content changes.
+    /// Bump the last manifest version segment on content changes. Default: on.
     pub bump_on_content_change: Option<bool>,
-    /// Files removed from vendored addons.
+    /// Files removed from vendored addons. Default: `["static/description/index.html"]`.
     pub exclude: Option<Vec<String>>,
-    /// Vendor manifest path.
+    /// Vendor manifest path. Default: `[tool.odx.layout] vendor_manifest`, else `.odx/vendor.lock`.
     pub manifest: Option<PathBuf>,
 }
 
-/// `[tool.odx.lock]`.
+/// `[tool.odx.lock]`: lockfile options.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lock {
@@ -433,19 +439,20 @@ pub struct Lock {
     pub auto_update: Option<AutoUpdate>,
 }
 
-/// `[tool.odx.lock.auto_update]`.
+/// `[tool.odx.lock.auto_update]`: automatic re-lock of index packages.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AutoUpdate {
-    /// Which version changes are applied automatically.
+    /// Which version changes are applied automatically. Default: `"last-segment"`.
     pub policy: Option<AutoUpdatePolicy>,
-    /// Distribution globs allowed.
+    /// Distribution globs allowed. Default: `["odoo-addon-*"]`.
     pub allow: Option<Vec<String>>,
-    /// Distribution globs denied.
+    /// Distribution globs denied. Default: none.
     pub deny: Option<Vec<String>>,
-    /// Compare wheel contents before applying.
+    /// Compare wheel contents before applying. Default: on.
     pub content_check: Option<bool>,
-    /// Paths allowed to change when `content_check` is on.
+    /// Paths allowed to change when `content_check` is on. Default: `i18n/*.po`, `i18n/*.pot`,
+    /// `README.rst`, `readme/**` and `static/description/**`.
     pub allowed_paths: Option<Vec<String>>,
 }
 
@@ -459,32 +466,32 @@ pub enum AutoUpdatePolicy {
     None,
 }
 
-/// `[tool.odx.upgrade]`.
+/// `[tool.odx.upgrade]`: upgrade analysis (`odx migrate plan`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Upgrade {
-    /// Target Odoo series.
+    /// Target Odoo series. Default: none (pass `--target`).
     pub target_odoo_version: Option<String>,
-    /// Query the package index.
+    /// Query the package index. Not used yet.
     pub check_pypi: Option<bool>,
-    /// Organizations searched on GitHub.
+    /// Organizations searched on GitHub. Not used yet.
     pub github_orgs: Option<Vec<String>>,
 }
 
-/// `[tool.odx.index]`.
+/// `[tool.odx.index]`: the addon index that maps addons to repositories.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Index {
-    /// Index cache TTL.
+    /// How long the cached addon index is used. Default: `"7d"`.
     pub ttl: Option<Span>,
-    /// Organizations indexed.
+    /// Organizations whose forge listings are indexed, as names on GitHub or URLs. Default: none.
     pub orgs: Option<Vec<String>>,
-    /// Sources, in trust order.
+    /// Sources, in trust order. Default: all.
     pub sources: Option<Vec<IndexSource>>,
-    /// Addon → series → `owner/repo`.
+    /// Addon → series → `owner/repo`. Default: none.
     #[serde(default)]
     pub overrides: BTreeMap<String, BTreeMap<String, String>>,
-    /// Series → old name → new name.
+    /// Series → old name → new name. Default: none.
     #[serde(default)]
     pub renames: BTreeMap<String, BTreeMap<String, String>>,
 }
@@ -507,28 +514,27 @@ pub enum IndexSource {
     Openupgrade,
 }
 
-/// `[tool.odx.port]`.
+/// `[tool.odx.port]`: porting commits between series.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Port {
-    /// Where declined suggestions are recorded.
+    /// Where declined suggestions are recorded. Not used yet.
     pub blacklist: Option<BlacklistMode>,
-    /// Default source series.
+    /// Default source series. Default: the series just below and just above the target.
     pub default_from: Option<Vec<String>>,
-    /// Commits touching more addons are repo-wide.
+    /// Commits touching more addons are repo-wide. Default: 5.
     pub repo_wide_threshold: Option<u16>,
-    /// Commit subjects that are never proposed.
+    /// Commit subjects that are never proposed, as case-insensitive regular expressions. Default:
+    /// `^\[MIG\]` and `^\[ADD\].*\bmigration\b`.
     pub migration_commit_patterns: Option<Vec<String>>,
-    /// Migration step after cherry-picking.
+    /// Migration step after cherry-picking. Not used yet.
     pub migrate: Option<MigrateTool>,
-    /// Path prefix rewrites between series.
+    /// Path prefix rewrites between series. Not used yet.
     #[serde(default)]
     pub rewrites: BTreeMap<String, String>,
-    /// Author e-mails of bots whose commits `odx migrate` squashes
-    /// (default: the OCA bots).
+    /// Author e-mails of bots whose commits `odx migrate` squashes. Default: the OCA bots.
     pub squash_authors: Option<Vec<String>>,
-    /// Text in a subject that marks a bot commit to squash (default: the
-    /// OCA bots' commits).
+    /// Text in a subject that marks a bot commit to squash. Default: the OCA bots' commits.
     pub squash_subjects: Option<Vec<String>>,
 }
 
@@ -560,57 +566,59 @@ pub enum MigrateTool {
     None,
 }
 
-/// `[tool.odx.suggest]`.
+/// `[tool.odx.suggest]`: upstream suggestions.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Suggest {
-    /// Series scanned for suggestions.
+    /// Series scanned for suggestions. Not used yet.
     pub series: Option<Vec<String>>,
-    /// Project mutes file.
+    /// Project mutes file. Not used yet.
     pub mutes_file: Option<PathBuf>,
 }
 
-/// `[tool.odx.features.<name>]`.
+/// `[tool.odx.features.<name>]`: a named set of addons promoted together.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Feature {
     /// Addons that make up the feature.
     pub modules: Vec<String>,
-    /// Functional description.
+    /// Functional description. Default: none.
     pub description: Option<String>,
 }
 
-/// `[tool.odx.layout]`.
+/// `[tool.odx.layout]`: where the project keeps its files.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Layout {
-    /// Committed project addon directories.
+    /// Committed project addon directories. Default: the project root.
     pub project_addons: Option<Vec<PathBuf>>,
-    /// Parent of repository working trees.
+    /// Parent of repository working trees. Default: `vendor`.
     pub aggregate_dir: Option<PathBuf>,
-    /// Alias of `[tool.odx.groups]` directories.
+    /// Alias of `[tool.odx.groups]` directories. Default: none.
     pub groups: Option<BTreeMap<String, PathBuf>>,
-    /// Platform requirements file.
+    /// Platform requirements file. Default: `requirements.txt` for the `odoo-sh` profile, else
+    /// `dist/requirements.txt`.
     pub requirements: Option<PathBuf>,
-    /// Vendor manifest.
+    /// Vendor manifest. Default: `.odx/vendor.lock`.
     pub vendor_manifest: Option<PathBuf>,
 }
 
-/// `[tool.odx.platform]`.
+/// `[tool.odx.platform]`: the deployment platform.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Platform {
-    /// Platform profile.
+    /// Platform profile. Default: `"generic-wheels"`.
     pub profile: Option<PlatformProfile>,
-    /// Provided-package set name or constraints file.
+    /// Provided-package set name or constraints file. Default: `odoo-sh` for the `odoo-sh` profile,
+    /// else `odoo-standard`.
     pub provided: Option<String>,
-    /// Extra provided requirements.
+    /// Extra provided requirements. Default: none.
     pub provided_extra: Option<Vec<String>>,
-    /// Packages removed from the provided set.
+    /// Packages removed from the provided set. Default: none.
     pub provided_remove: Option<Vec<String>>,
-    /// Package index name for publishing.
+    /// Package index name for publishing. Default: `private`.
     pub index: Option<String>,
-    /// Emit SBOMs from `odx build`.
+    /// Emit SBOMs from `odx build`. Not used yet.
     pub sbom: Option<bool>,
     /// Hooks of the `custom` profile.
     pub custom: Option<CustomHooks>,
@@ -635,26 +643,27 @@ pub enum PlatformProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CustomHooks {
-    /// Command that prepares the deployment.
+    /// Command that prepares the deployment. Default: none.
     pub prepare: Option<String>,
-    /// Command that verifies the deployment.
+    /// Command that verifies the deployment. Default: none.
     pub verify: Option<String>,
 }
 
-/// `[tool.odx.environments]`.
+/// `[tool.odx.environments]`: environments and how changes are promoted between them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Environments {
-    /// Layout preset.
+    /// Layout preset. Default: `"explicit"` when environments are declared under `env`, else
+    /// `"major-branches"`.
     pub preset: Option<Preset>,
-    /// Default series of the environments.
+    /// Default series of the environments. Default: `odoo_version`.
     pub series: Option<String>,
-    /// Files that differ per environment.
+    /// Files that differ per environment. Default: none.
     pub branch_specific: Option<Vec<String>>,
-    /// Environments by name.
+    /// Environments by name. Default: the preset's.
     #[serde(default)]
     pub env: BTreeMap<String, Environment>,
-    /// Allowed promotion edges.
+    /// Allowed promotion edges. Default: the preset's.
     pub promotion: Option<Vec<[String; 2]>>,
 }
 
@@ -675,19 +684,22 @@ pub enum Preset {
     Explicit,
 }
 
-/// `[tool.odx.environments.env.<name>]`.
+/// `[tool.odx.environments.env.<name>]`: one environment.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
-    /// Branch name or pattern with `{series}` and `{major}`.
+    /// Branch name or pattern with `{series}` and `{major}`. Default: the preset's, else the
+    /// environment name.
     pub branch: Option<String>,
-    /// Environment role.
+    /// Environment role. Default: the preset's, else implied by a name `dev`, `test`, `uat` or
+    /// `prod`.
     pub role: Option<Role>,
-    /// Series of this environment.
+    /// Series of this environment. Default: `[tool.odx.environments] series`.
     pub series: Option<String>,
-    /// Separate repository of this environment.
+    /// Separate repository of this environment. Default: none (the project repository).
     pub repo: Option<String>,
-    /// Excluded as a promotion target unless named explicitly.
+    /// Excluded as a promotion target unless named explicitly. Default: on for the `uat` role, else
+    /// off.
     pub disposable: Option<bool>,
 }
 
@@ -705,44 +717,44 @@ pub enum Role {
     Prod,
 }
 
-/// `[tool.odx.promote]`.
+/// `[tool.odx.promote]`: defaults of `odx promote`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Promote {
-    /// Allow copying an older pin over a newer one.
+    /// Allow copying an older pin over a newer one. Default: off.
     pub allow_downgrade: Option<bool>,
-    /// Cherry-pick project addon commits by default.
+    /// Cherry-pick project addon commits by default. Not used yet.
     pub with_code: Option<bool>,
-    /// Promote the Odoo core revision together with the pins.
+    /// Promote the Odoo core revision together with the pins. Default: on.
     pub with_odoo: Option<bool>,
-    /// Extra synonyms for `--search`.
+    /// Extra synonyms for `--search`. Default: none.
     #[serde(default)]
     pub search_synonyms: BTreeMap<String, Vec<String>>,
 }
 
-/// `[tool.odx.bot]`.
+/// `[tool.odx.bot]`: the automation bot (`odx bot`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bot {
-    /// Environment that receives bot pull requests.
+    /// Environment that receives bot pull requests. Default: the branch checked out.
     pub environment: Option<String>,
-    /// Maintain the dashboard issue.
+    /// Maintain the dashboard issue. Default: on.
     pub dashboard: Option<bool>,
-    /// One pull request per kind per run.
+    /// One pull request per kind per run. Not used yet.
     pub group_prs: Option<bool>,
-    /// Maximum pull requests per run.
+    /// Maximum pull requests per run. Default: 10.
     pub max_prs_per_run: Option<u16>,
-    /// Labels on every bot pull request.
+    /// Extra labels on every bot pull request, besides odx's own. Default: none.
     pub labels: Option<Vec<String>>,
-    /// Expiry of mutes made from the dashboard.
+    /// Expiry of mutes made from the dashboard. Default: `"180d"`.
     pub mute_expiry: Option<Span>,
-    /// Kinds opened without a checkbox.
+    /// Kinds opened without a checkbox. Default: all.
     pub auto: Option<Vec<BotAction>>,
-    /// Label that triggers a promotion pull request.
+    /// Label that triggers a promotion pull request. Default: `promote`.
     pub promote_label: Option<String>,
-    /// Vault every observed tracked head.
+    /// Vault every observed tracked head. Default: off.
     pub vault_heads: Option<bool>,
-    /// Run on a public project repository.
+    /// Run on a public project repository. Default: off.
     pub allow_public: Option<bool>,
 }
 
@@ -758,54 +770,54 @@ pub enum BotAction {
     AutoUpdate,
 }
 
-/// `[tool.odx.dev]`.
+/// `[tool.odx.dev]`: local development (`odx dev`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dev {
-    /// Virtual environment directory.
+    /// Virtual environment directory. Default: `.venv`.
     pub venv: Option<PathBuf>,
-    /// File listing the addons path.
+    /// File listing the addons path. Default: `.odx/addons-path`.
     pub addons_path_file: Option<PathBuf>,
-    /// Odoo configuration file to update.
+    /// Odoo configuration file whose `addons_path` is updated. Default: none.
     pub odoo_conf: Option<PathBuf>,
-    /// Use editable installs.
+    /// Use editable installs. Default: on.
     pub editable: Option<bool>,
-    /// Directory for develop-mode clones.
+    /// Directory for develop-mode clones. Default: `.src`.
     pub dev_dir: Option<PathBuf>,
 }
 
-/// `[tool.odx.lint]`.
+/// `[tool.odx.lint]`: defaults of `odx lint`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lint {
-    /// Paths linted by default.
+    /// Paths linted by default. Default: the project addon directories.
     pub paths: Option<Vec<PathBuf>>,
-    /// Only lint changed addons.
+    /// Only lint changed addons. Default: off.
     pub only_changed: Option<bool>,
 }
 
-/// `[tool.odx.sniff]`.
+/// `[tool.odx.sniff]`: the migration script sniffer.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sniff {
-    /// Fail when merges introduce migration scripts.
+    /// Fail when merges introduce migration scripts. Default: off.
     pub fail_on_new: Option<bool>,
 }
 
-/// `[tool.odx.check_deps]`.
+/// `[tool.odx.check_deps]`: defaults of `odx check-deps`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CheckDeps {
-    /// Addons the platform provides beyond Odoo's community addons (for
-    /// example enterprise addons), counted as available.
+    /// Addons the platform provides beyond Odoo's community addons (for example enterprise addons),
+    /// counted as available. Default: none.
     pub provided: Option<Vec<String>>,
 }
 
-/// `[tool.odx.glue]`.
+/// `[tool.odx.glue]`: glue addons (`odx glue`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Glue {
-    /// Glue addons the project does not want, each with why.
+    /// Glue addons the project does not want, each with why. Default: none.
     #[serde(default)]
     pub ignore: BTreeMap<String, String>,
 }

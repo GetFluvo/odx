@@ -31,7 +31,7 @@ repos:
         name: sphinx docs
         entry: just docs
         language: system
-        files: ^(docs/|README\.md)
+        files: ^(docs/|README\.md|crates/odx-config/src/schema\.rs)
         pass_filenames: false
       - id: commit-msg
         name: conventional commit
