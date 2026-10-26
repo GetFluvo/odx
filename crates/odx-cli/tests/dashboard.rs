@@ -425,6 +425,14 @@ fn actions() {
     assert_eq!(code, 1);
     assert!(err.contains("git clone failed"), "{err}");
     std::fs::remove_file(&clone).unwrap();
+    // Nor while its lock cannot be taken.
+    let lock = setup.root.join("cache/ports/OCA-pos.lock");
+    std::fs::remove_file(&lock).unwrap();
+    std::fs::create_dir_all(&lock).unwrap();
+    let (code, _, err) = setup.odx(&port);
+    assert_eq!(code, 1);
+    assert!(err.contains("OCA-pos.lock: "), "{err}");
+    std::fs::remove_dir(&lock).unwrap();
     let (code, out, err) = setup.odx(&port);
     assert_eq!(code, 0, "{err}");
     assert!(

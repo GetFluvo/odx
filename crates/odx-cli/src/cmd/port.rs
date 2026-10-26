@@ -358,6 +358,9 @@ fn pull_request(
     Ok((kind, pr.title, pr.base, commits))
 }
 
+/// How long a port waits for another one in the same clone.
+const PORT_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// `odx dashboard act <id> --port`: the suggestion's commits ported in a
 /// clone of the target repository under the cache (sharing the cache's
 /// objects), on `<to>-port-<n>`, then its pull request with `open_pr`.
@@ -373,11 +376,23 @@ pub(crate) fn port_suggestion(
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let clone = prepared.cache.root().join("ports").join(name);
+    let clone = prepared.cache.root().join("ports").join(&name);
+    // One port at a time per clone: they share its branches and index.
+    let lock = prepared
+        .cache
+        .root()
+        .join("ports")
+        .join(format!("{name}.lock"));
+    let _lock = match odx_git::RepoLock::acquire(&lock, PORT_LOCK_TIMEOUT) {
+        Ok(lock) => lock,
+        Err(e) => return failed(format!("{}: {e}", lock.display())),
+    };
     if !clone.join(".git").exists() {
+        // Dissociated: the clone keeps its own objects, so collecting the
+        // cache never takes any from under it.
         let made = super::run_checked(
             &odx_core::Invocation::new("git")
-                .args(["clone", "--quiet", "--reference"])
+                .args(["clone", "--quiet", "--dissociate", "--reference"])
                 .arg(found.repo_dir.as_os_str())
                 .arg(&found.target_url)
                 .arg(clone.as_os_str()),

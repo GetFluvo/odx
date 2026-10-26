@@ -1,4 +1,4 @@
-//! Git object cache, fetching, worktrees, merges, cherry-picks and patch-ids for odx, on gix with a system git fallback.
+//! Git object cache, fetching, worktrees, merges, cherry-picks and patch-ids for odx, on the system git.
 //!
 //! The cache keeps one bare repository per upstream URL (see [`Cache`]).
 //! [`fetch()`] brings branches, pull requests and commits into it with one
