@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx stats",
+  "description": "What `odx --json stats` prints.",
+  "type": "object",
+  "properties": {
+    "languages": {
+      "description": "Per language, as tokei counts it.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/LanguageSchema"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "total": {
+      "description": "The sum of every language.",
+      "$ref": "#/$defs/RowSchema"
+    }
+  },
+  "required": [
+    "schema",
+    "languages",
+    "total"
+  ],
+  "$defs": {
+    "CodeStatsSchema": {
+      "description": "Lines of a file or of a blob of code in it.",
+      "type": "object",
+      "properties": {
+        "blanks": {
+          "description": "Blank lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "blobs": {
+          "description": "Code of other languages embedded in it, per language.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/CodeStatsSchema"
+          }
+        },
+        "code": {
+          "description": "Lines of code.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "comments": {
+          "description": "Comment lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "blanks",
+        "code",
+        "comments",
+        "blobs"
+      ]
+    },
+    "LanguageSchema": {
+      "description": "One language, as tokei counts it.",
+      "type": "object",
+      "properties": {
+        "blanks": {
+          "description": "Blank lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "children": {
+          "description": "Per language embedded in these files (such as code blocks in\nMarkdown), per file.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ReportSchema"
+            }
+          }
+        },
+        "code": {
+          "description": "Lines of code.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "comments": {
+          "description": "Comment lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "inaccurate": {
+          "description": "Whether some file could not be parsed.",
+          "type": "boolean"
+        },
+        "reports": {
+          "description": "Per file.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReportSchema"
+          }
+        }
+      },
+      "required": [
+        "blanks",
+        "code",
+        "comments",
+        "reports",
+        "children",
+        "inaccurate"
+      ]
+    },
+    "ReportSchema": {
+      "description": "One file, as tokei counts it.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Its path, relative to the project root.",
+          "type": "string"
+        },
+        "stats": {
+          "description": "Its lines.",
+          "$ref": "#/$defs/CodeStatsSchema"
+        }
+      },
+      "required": [
+        "stats",
+        "name"
+      ]
+    },
+    "RowSchema": {
+      "description": "Totals of one language, one addon or everything.",
+      "type": "object",
+      "properties": {
+        "blanks": {
+          "description": "Blank lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "code": {
+          "description": "Lines of code.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "comments": {
+          "description": "Comment lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "files": {
+          "description": "Files counted.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "lines": {
+          "description": "All lines.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "name": {
+          "description": "Language or addon name, or `Total`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "files",
+        "lines",
+        "code",
+        "comments",
+        "blanks"
+      ]
+    }
+  }
+}

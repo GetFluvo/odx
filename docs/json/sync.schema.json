@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx sync",
+  "description": "What `odx --json sync` prints; `last_sync.json` in the cache has the\nsame layout.",
+  "type": "object",
+  "properties": {
+    "finished": {
+      "description": "Seconds since the epoch it ended.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "started": {
+      "description": "Seconds since the epoch the run started.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "workspaces": {
+      "description": "Per workspace, in order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SyncedJson"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "started",
+    "finished",
+    "workspaces"
+  ],
+  "$defs": {
+    "SyncedJson": {
+      "description": "One workspace of a sync.",
+      "type": "object",
+      "properties": {
+        "detail": {
+          "description": "What happened, for people.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The workspace directory.",
+          "type": "string"
+        },
+        "status": {
+          "description": "`synced`, `failed` or `skipped`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status",
+        "detail"
+      ]
+    }
+  }
+}

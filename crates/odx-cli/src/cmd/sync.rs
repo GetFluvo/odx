@@ -17,6 +17,8 @@ use odx_sync::{
     CachedRepo, Presence, SyncRecord, SyncedWorkspace, busy, parse_size, register, to_collect,
     unregister,
 };
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::aggregate::{Prepared, prepare, run_aggregate};
 use super::vendor::prefetch_wheels;
@@ -60,6 +62,52 @@ fn idle(cache: &Path, deadline: Instant) -> bool {
         std::thread::sleep(Duration::from_millis(200));
     }
     true
+}
+
+/// What `odx --json sync` prints; `last_sync.json` in the cache has the
+/// same layout.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx sync")]
+pub(crate) struct SyncJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Seconds since the epoch the run started.
+    started: u64,
+    /// Seconds since the epoch it ended.
+    finished: u64,
+    /// Per workspace, in order.
+    workspaces: Vec<SyncedJson<'a>>,
+}
+
+/// One workspace of a sync.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SyncedJson<'a> {
+    /// The workspace directory.
+    path: &'a str,
+    /// `synced`, `failed` or `skipped`.
+    status: &'a str,
+    /// What happened, for people.
+    detail: &'a str,
+}
+
+/// What `odx --json cache info` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx cache info")]
+pub(crate) struct CacheInfoJson {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The shared cache directory.
+    dir: String,
+    /// Its size in bytes.
+    size: u64,
+    /// Cached repositories.
+    repositories: usize,
+    /// Cached repositories no registered workspace uses.
+    unused: usize,
+    /// Seconds since the epoch the last sync ended; null when there was none.
+    last_sync: Option<u64>,
 }
 
 /// `odx sync`.
@@ -154,7 +202,7 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
     let failures = keep(&record, &cache);
     let mut report = Report::default();
     if global.json {
-        report.out = format!("{}\n", serde_json::to_string(&record).unwrap_or_default());
+        report.out = sync_json(&record);
     } else {
         for workspace in &record.workspaces {
             let _ = writeln!(
@@ -168,6 +216,23 @@ fn sync(args: &SyncArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<Repor
         report.exit = Exit::Failure;
     }
     Ok(report)
+}
+
+fn sync_json(record: &SyncRecord) -> String {
+    super::to_json(&SyncJson {
+        schema: record.schema,
+        started: record.started,
+        finished: record.finished,
+        workspaces: record
+            .workspaces
+            .iter()
+            .map(|workspace| SyncedJson {
+                path: &workspace.path,
+                status: &workspace.status,
+                detail: &workspace.detail,
+            })
+            .collect(),
+    })
 }
 
 /// Write `last_sync.json` and append to `sync.log`; how many workspaces
@@ -478,17 +543,14 @@ fn cache(command: &CacheCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Resu
         CacheCommand::Info => {
             if global.json {
                 let last = SyncRecord::read(&cache.join("last_sync.json"));
-                report.out = format!(
-                    "{}\n",
-                    serde_json::json!({
-                        "schema": 1,
-                        "dir": cache.display().to_string(),
-                        "size": total,
-                        "repositories": repos.len(),
-                        "unused": repos.iter().filter(|r| !r.referenced).count(),
-                        "last_sync": last.as_ref().map(|record| record.finished),
-                    })
-                );
+                report.out = super::to_json(&CacheInfoJson {
+                    schema: 1,
+                    dir: cache.display().to_string(),
+                    size: total,
+                    repositories: repos.len(),
+                    unused: repos.iter().filter(|r| !r.referenced).count(),
+                    last_sync: last.as_ref().map(|record| record.finished),
+                });
             } else {
                 let _ = writeln!(report.out, "cache: {}", cache.display());
                 let _ = writeln!(report.out, "size: {}", human(total));

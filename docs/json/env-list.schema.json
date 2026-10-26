@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx env list",
+  "description": "What `odx --json env list` prints.",
+  "type": "object",
+  "properties": {
+    "branch_specific": {
+      "description": "Files that differ per environment and are never promoted.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "current": {
+      "description": "The environment of the current branch, if any.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "environments": {
+      "description": "Every environment, by name.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EnvironmentJson"
+      }
+    },
+    "preset": {
+      "description": "The preset in effect: `major-branches`, `series-branches`,\n`main-production`, `odoo-sh` or `explicit`.",
+      "type": "string"
+    },
+    "promotion": {
+      "description": "Allowed promotions, `[from, to]`.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 2,
+        "minItems": 2
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "preset",
+    "environments",
+    "promotion",
+    "branch_specific"
+  ],
+  "$defs": {
+    "EnvironmentJson": {
+      "description": "One environment.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "Its branch, or a pattern where `*` matches anything.",
+          "type": "string"
+        },
+        "disposable": {
+          "description": "Never chosen as the default source of a promotion.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Its name.",
+          "type": "string"
+        },
+        "repo": {
+          "description": "A separate repository; null for the project's.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "description": "`dev`, `test`, `uat` or `prod`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "series": {
+          "description": "The series it runs.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "branch",
+        "series",
+        "disposable"
+      ]
+    }
+  }
+}

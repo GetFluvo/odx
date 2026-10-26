@@ -1,16 +1,131 @@
 //! `odx stats`: lines of code of the project's addons, per language or per
 //! addon.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use odx_aggregate::plan_config;
 use odx_analyze::stats::{Row, addon_dirs, count, rows};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::prepare;
 use crate::Context;
 use crate::cli::{GlobalArgs, StatsArgs};
+
+/// What `odx --json stats` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx stats")]
+pub(crate) struct StatsJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Per language, as tokei counts it.
+    #[schemars(with = "BTreeMap<String, LanguageSchema>")]
+    languages: serde_json::Value,
+    /// The sum of every language.
+    #[schemars(with = "RowSchema")]
+    total: &'a Row,
+}
+
+/// What `odx --json stats --per-addon` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx stats --per-addon")]
+pub(crate) struct StatsPerAddonJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Per addon directory relative to the project root, per language.
+    #[schemars(with = "BTreeMap<String, BTreeMap<String, LanguageSchema>>")]
+    addons: BTreeMap<&'a str, serde_json::Value>,
+    /// The sum of every addon.
+    #[schemars(with = "RowSchema")]
+    total: &'a Row,
+}
+
+/// The counts of tokei as JSON.
+fn tokei_json(languages: &impl Serialize) -> serde_json::Value {
+    // Maps with string keys of numbers and lists: serializing cannot fail.
+    serde_json::to_value(languages).unwrap_or_default()
+}
+
+// The types below describe what tokei and `Row` serialize; they are never
+// built.
+
+/// Totals of one language, one addon or everything.
+#[derive(JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "only describes the JSON of a type of another crate"
+)]
+struct RowSchema {
+    /// Language or addon name, or `Total`.
+    name: String,
+    /// Files counted.
+    files: usize,
+    /// All lines.
+    lines: usize,
+    /// Lines of code.
+    code: usize,
+    /// Comment lines.
+    comments: usize,
+    /// Blank lines.
+    blanks: usize,
+}
+
+/// One language, as tokei counts it.
+#[derive(JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "only describes the JSON of a type of another crate"
+)]
+struct LanguageSchema {
+    /// Blank lines.
+    blanks: usize,
+    /// Lines of code.
+    code: usize,
+    /// Comment lines.
+    comments: usize,
+    /// Per file.
+    reports: Vec<ReportSchema>,
+    /// Per language embedded in these files (such as code blocks in
+    /// Markdown), per file.
+    children: BTreeMap<String, Vec<ReportSchema>>,
+    /// Whether some file could not be parsed.
+    inaccurate: bool,
+}
+
+/// One file, as tokei counts it.
+#[derive(JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "only describes the JSON of a type of another crate"
+)]
+struct ReportSchema {
+    /// Its lines.
+    stats: CodeStatsSchema,
+    /// Its path, relative to the project root.
+    name: String,
+}
+
+/// Lines of a file or of a blob of code in it.
+#[derive(JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "only describes the JSON of a type of another crate"
+)]
+struct CodeStatsSchema {
+    /// Blank lines.
+    blanks: usize,
+    /// Lines of code.
+    code: usize,
+    /// Comment lines.
+    comments: usize,
+    /// Code of other languages embedded in it, per language.
+    blobs: BTreeMap<String, Self>,
+}
 
 /// `odx stats`.
 pub(crate) fn run_stats(args: &StatsArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
@@ -53,10 +168,11 @@ fn per_language(addons: &[PathBuf], root: &Path, json: bool) -> String {
     let rows = rows(&languages);
     let total = Row::sum("Total", &rows);
     if json {
-        return format!(
-            "{}\n",
-            serde_json::json!({ "schema": 1, "languages": languages, "total": total })
-        );
+        return super::to_json(&StatsJson {
+            schema: 1,
+            languages: tokei_json(&languages),
+            total: &total,
+        });
     }
     table("Language", &rows, &total)
 }
@@ -80,14 +196,14 @@ fn per_addon(addons: &[PathBuf], root: &Path, json: bool) -> String {
         .collect();
     let total = Row::sum("Total", &rows);
     if json {
-        let addons: serde_json::Map<String, serde_json::Value> = counted
-            .iter()
-            .map(|(name, languages)| (name.clone(), serde_json::json!(languages)))
-            .collect();
-        return format!(
-            "{}\n",
-            serde_json::json!({ "schema": 1, "addons": addons, "total": total })
-        );
+        return super::to_json(&StatsPerAddonJson {
+            schema: 1,
+            addons: counted
+                .iter()
+                .map(|(name, languages)| (name.as_str(), tokei_json(languages)))
+                .collect(),
+            total: &total,
+        });
     }
     table("Addon", &rows, &total)
 }

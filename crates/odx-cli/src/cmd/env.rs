@@ -4,6 +4,8 @@ use std::fmt::Write as _;
 
 use odx_config::environments::{Environment, Model};
 use odx_core::{Exit, Invocation};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::aggregate::prepare;
 use super::{Report, output_of};
@@ -52,30 +54,63 @@ fn list(global: &GlobalArgs, ctx: &Context<'_>) -> Result<Report, Report> {
     })
 }
 
+/// What `odx --json env list` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx env list")]
+pub(crate) struct EnvListJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The preset in effect: `major-branches`, `series-branches`,
+    /// `main-production`, `odoo-sh` or `explicit`.
+    preset: &'static str,
+    /// Every environment, by name.
+    environments: Vec<EnvironmentJson<'a>>,
+    /// Allowed promotions, `[from, to]`.
+    promotion: &'a [[String; 2]],
+    /// Files that differ per environment and are never promoted.
+    branch_specific: &'a [String],
+    /// The environment of the current branch, if any.
+    current: Option<&'a str>,
+}
+
+/// One environment.
+#[derive(Debug, Serialize, JsonSchema)]
+struct EnvironmentJson<'a> {
+    /// Its name.
+    name: &'a str,
+    /// Its branch, or a pattern where `*` matches anything.
+    branch: &'a str,
+    /// `dev`, `test`, `uat` or `prod`.
+    role: Option<&'static str>,
+    /// The series it runs.
+    series: &'a str,
+    /// A separate repository; null for the project's.
+    repo: Option<&'a str>,
+    /// Never chosen as the default source of a promotion.
+    disposable: bool,
+}
+
 fn json(model: &Model, current: Option<&str>) -> String {
-    let environments: Vec<serde_json::Value> = model
-        .environments
-        .values()
-        .map(|env| {
-            serde_json::json!({
-                "name": env.name,
-                "branch": env.branch,
-                "role": env.role.map(odx_config::schema::Role::name),
-                "series": env.series,
-                "repo": env.repo,
-                "disposable": env.disposable,
+    super::to_json(&EnvListJson {
+        schema: 1,
+        preset: model.preset.name(),
+        environments: model
+            .environments
+            .values()
+            .map(|env| EnvironmentJson {
+                name: &env.name,
+                branch: &env.branch,
+                role: env.role.map(odx_config::schema::Role::name),
+                series: &env.series,
+                repo: env.repo.as_deref(),
+                disposable: env.disposable,
             })
-        })
-        .collect();
-    let value = serde_json::json!({
-        "schema": 1,
-        "preset": model.preset.name(),
-        "environments": environments,
-        "promotion": model.promotion,
-        "branch_specific": model.branch_specific,
-        "current": current,
-    });
-    format!("{value:#}\n")
+            .collect(),
+        promotion: &model.promotion,
+        branch_specific: &model.branch_specific,
+        current,
+    })
 }
 
 fn text(model: &Model, branch: Option<&str>, current: Option<&str>) -> String {

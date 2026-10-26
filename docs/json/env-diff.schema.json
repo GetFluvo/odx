@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx env diff",
+  "description": "What `odx --json env diff` prints.",
+  "type": "object",
+  "properties": {
+    "a": {
+      "description": "The first environment.",
+      "$ref": "#/$defs/SideJson"
+    },
+    "b": {
+      "description": "The second environment.",
+      "$ref": "#/$defs/SideJson"
+    },
+    "branch_specific": {
+      "description": "Branch-specific files that differ; they are never promoted.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "entries": {
+      "description": "Every unit either side runs.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntryJson"
+      }
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "series_differ": {
+      "description": "Whether they run different series.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema",
+    "a",
+    "b",
+    "series_differ",
+    "entries",
+    "branch_specific"
+  ],
+  "$defs": {
+    "EntryJson": {
+      "description": "One unit on both sides.",
+      "type": "object",
+      "properties": {
+        "a": {
+          "description": "It on the first side; null when that side does not run it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnitJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "b": {
+          "description": "It on the second side; null when that side does not run it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnitJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change": {
+          "description": "`identical`, `ahead`, `behind`, `changed`, `source-changed`,\n`only-in-a` or `only-in-b`.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`odoo`, `addon`, `package` or `repository`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Its name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "change"
+      ]
+    },
+    "SideJson": {
+      "description": "One side of the comparison.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "Its branch or branch pattern.",
+          "type": "string"
+        },
+        "env": {
+          "description": "The environment.",
+          "type": "string"
+        },
+        "from": {
+          "description": "The git ref or file it was read from.",
+          "type": "string"
+        },
+        "series": {
+          "description": "The series it runs.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "env",
+        "branch",
+        "series",
+        "from"
+      ]
+    },
+    "UnitJson": {
+      "description": "A unit on one side.",
+      "type": "object",
+      "properties": {
+        "pin": {
+          "description": "Its exact pin: a commit, a tree or a hash.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Where it comes from.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Its version, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "pin"
+      ]
+    }
+  }
+}

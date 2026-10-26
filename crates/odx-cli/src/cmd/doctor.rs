@@ -10,6 +10,8 @@ use odx_forge::{
     CachedHttp, ForgeClient, ForgeError, ForgeKind, RepoUrl, ReqwestHttp, Visibility, token,
 };
 use odx_platform::{profile, profile_name, provided_set};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::aggregate::{Prepared, prepare, uv_program};
 use super::{Report, human, in_project, size};
@@ -17,7 +19,8 @@ use crate::Context;
 use crate::cli::GlobalArgs;
 
 /// How a check came out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 enum Level {
     /// Fine.
     Ok,
@@ -56,6 +59,30 @@ fn check(level: Level, item: &str, detail: impl Into<String>) -> Check {
     }
 }
 
+/// What `odx --json doctor` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx doctor")]
+pub(crate) struct DoctorJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Whether no check failed.
+    ok: bool,
+    /// Every check, in order.
+    checks: Vec<CheckJson<'a>>,
+}
+
+/// One check.
+#[derive(Debug, Serialize, JsonSchema)]
+struct CheckJson<'a> {
+    /// How it came out.
+    level: Level,
+    /// What was checked.
+    item: &'a str,
+    /// What was found, or how to fix it.
+    detail: &'a str,
+}
+
 /// `odx doctor`.
 pub(crate) fn run_doctor(global: &GlobalArgs, ctx: &Context<'_>) -> Report {
     let loaded = prepare(global, ctx);
@@ -78,14 +105,18 @@ pub(crate) fn run_doctor(global: &GlobalArgs, ctx: &Context<'_>) -> Report {
     let failed = checks.iter().filter(|c| c.level == Level::Fail).count();
     let mut report = Report::default();
     if global.json {
-        let items: Vec<serde_json::Value> = checks
-            .iter()
-            .map(|c| serde_json::json!({ "level": c.level.label().to_lowercase(), "item": c.item, "detail": c.detail }))
-            .collect();
-        report.out = format!(
-            "{}\n",
-            serde_json::json!({ "schema": 1, "ok": failed == 0, "checks": items })
-        );
+        report.out = super::to_json(&DoctorJson {
+            schema: 1,
+            ok: failed == 0,
+            checks: checks
+                .iter()
+                .map(|c| CheckJson {
+                    level: c.level,
+                    item: &c.item,
+                    detail: &c.detail,
+                })
+                .collect(),
+        });
     } else {
         for c in &checks {
             let _ = writeln!(

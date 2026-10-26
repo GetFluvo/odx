@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx vendor",
+  "description": "What `odx --json vendor` prints.",
+  "type": "object",
+  "properties": {
+    "bumped": {
+      "description": "Addons whose version was bumped because their content changed;\nabsent when nothing was vendored.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BumpedJson"
+      }
+    },
+    "requirements": {
+      "description": "The platform requirements file; absent without `--requirements`.",
+      "$ref": "#/$defs/RequirementsJson"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "vendored": {
+      "description": "Per group, the addons installed; absent when nothing was vendored.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/VendoredJson"
+      }
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "BumpedJson": {
+      "description": "An addon whose version was bumped.",
+      "type": "object",
+      "properties": {
+        "addon": {
+          "description": "The addon.",
+          "type": "string"
+        },
+        "from": {
+          "description": "The version shipped.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The version written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "addon",
+        "from",
+        "to"
+      ]
+    },
+    "ConflictJson": {
+      "description": "A requirement the platform cannot satisfy.",
+      "type": "object",
+      "properties": {
+        "by": {
+          "description": "Who asks for it.",
+          "type": "string"
+        },
+        "package": {
+          "description": "Normalized distribution name.",
+          "type": "string"
+        },
+        "provided": {
+          "description": "The versions the platform provides.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "specifier": {
+          "description": "The requested range.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package",
+        "specifier",
+        "by",
+        "provided"
+      ]
+    },
+    "LineJson": {
+      "description": "One line of the requirements file.",
+      "type": "object",
+      "properties": {
+        "package": {
+          "description": "Normalized distribution name.",
+          "type": "string"
+        },
+        "specifier": {
+          "description": "`==<version>` from `uv.lock`, or the declared ranges.",
+          "type": "string"
+        },
+        "via": {
+          "description": "Who needs it, sorted.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "package",
+        "specifier",
+        "via"
+      ]
+    },
+    "RequirementsJson": {
+      "description": "The platform requirements file written.",
+      "type": "object",
+      "properties": {
+        "conflicts": {
+          "description": "Requirements whose range excludes what the platform provides.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConflictJson"
+          }
+        },
+        "file": {
+          "description": "Its path, relative to the project root.",
+          "type": "string"
+        },
+        "lines": {
+          "description": "Its lines, sorted by package.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LineJson"
+          }
+        },
+        "omitted": {
+          "description": "Packages the platform provides, left out.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unresolved": {
+          "description": "Packages without a single version in `uv.lock`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "file",
+        "lines",
+        "omitted",
+        "conflicts",
+        "unresolved"
+      ]
+    },
+    "VendoredJson": {
+      "description": "The addons of one group.",
+      "type": "object",
+      "properties": {
+        "addons": {
+          "description": "The addons installed into it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dir": {
+          "description": "Its directory, relative to the project root.",
+          "type": "string"
+        },
+        "group": {
+          "description": "The dependency group.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group",
+        "dir",
+        "addons"
+      ]
+    }
+  }
+}

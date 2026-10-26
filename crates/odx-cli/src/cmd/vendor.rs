@@ -28,6 +28,8 @@ use odx_vendor::archive::{download_error, fetch};
 use odx_vendor::plan::{Item, ItemSource, plan};
 use odx_vendor::record::VendorRecord;
 use odx_vendor::{Options, Vendored};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::{Prepared, prepare, uv_program};
@@ -45,6 +47,89 @@ pub(crate) struct Generated {
     pub(crate) warnings: Vec<Problem>,
     /// What the platform provides.
     pub(crate) provided: ProvidedSet,
+}
+
+/// What `odx --json vendor` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx vendor")]
+pub(crate) struct VendorJson {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Per group, the addons installed; absent when nothing was vendored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(default, with = "Vec<VendoredJson>")]
+    vendored: Option<Vec<VendoredJson>>,
+    /// Addons whose version was bumped because their content changed;
+    /// absent when nothing was vendored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(default, with = "Vec<BumpedJson>")]
+    bumped: Option<Vec<BumpedJson>>,
+    /// The platform requirements file; absent without `--requirements`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(default, with = "RequirementsJson")]
+    requirements: Option<RequirementsJson>,
+}
+
+/// The addons of one group.
+#[derive(Debug, Serialize, JsonSchema)]
+struct VendoredJson {
+    /// The dependency group.
+    group: String,
+    /// Its directory, relative to the project root.
+    dir: String,
+    /// The addons installed into it.
+    addons: Vec<String>,
+}
+
+/// An addon whose version was bumped.
+#[derive(Debug, Serialize, JsonSchema)]
+struct BumpedJson {
+    /// The addon.
+    addon: String,
+    /// The version shipped.
+    from: String,
+    /// The version written.
+    to: String,
+}
+
+/// The platform requirements file written.
+#[derive(Debug, Serialize, JsonSchema)]
+struct RequirementsJson {
+    /// Its path, relative to the project root.
+    file: String,
+    /// Its lines, sorted by package.
+    lines: Vec<LineJson>,
+    /// Packages the platform provides, left out.
+    omitted: Vec<String>,
+    /// Requirements whose range excludes what the platform provides.
+    conflicts: Vec<ConflictJson>,
+    /// Packages without a single version in `uv.lock`.
+    unresolved: Vec<String>,
+}
+
+/// One line of the requirements file.
+#[derive(Debug, Serialize, JsonSchema)]
+struct LineJson {
+    /// Normalized distribution name.
+    package: String,
+    /// `==<version>` from `uv.lock`, or the declared ranges.
+    specifier: String,
+    /// Who needs it, sorted.
+    via: Vec<String>,
+}
+
+/// A requirement the platform cannot satisfy.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ConflictJson {
+    /// Normalized distribution name.
+    package: String,
+    /// The requested range.
+    specifier: String,
+    /// Who asks for it.
+    by: String,
+    /// The versions the platform provides.
+    provided: Vec<String>,
 }
 
 /// `odx vendor`.
@@ -67,8 +152,12 @@ fn vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
         ));
     }
     let mut report = Report::default();
-    let mut json = serde_json::Map::new();
-    json.insert("schema".to_owned(), serde_json::json!(1));
+    let mut json = VendorJson {
+        schema: 1,
+        vendored: None,
+        bumped: None,
+        requirements: None,
+    };
     if install {
         install_addons(ctx, &prepared, &mut report, &mut json)?;
     }
@@ -95,7 +184,7 @@ fn vendor(args: &VendorArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
         }
     }
     if global.json {
-        report.out = format!("{}\n", serde_json::Value::Object(json));
+        report.out = super::to_json(&json);
     }
     Ok(report)
 }
@@ -106,7 +195,7 @@ fn install_addons(
     ctx: &Context<'_>,
     prepared: &Prepared,
     report: &mut Report,
-    json: &mut serde_json::Map<String, serde_json::Value>,
+    json: &mut VendorJson,
 ) -> Result<(), Report> {
     let config = &prepared.project.config;
     let root = &prepared.project.root;
@@ -238,16 +327,16 @@ fn describe_vendored(
     group_dirs: &BTreeMap<String, PathBuf>,
     root: &Path,
     report: &mut Report,
-    json: &mut serde_json::Map<String, serde_json::Value>,
+    json: &mut VendorJson,
 ) {
     let mut vendored_json = Vec::new();
     for (group, dir) in group_dirs {
-        let addons: Vec<&str> = vendored
+        let addons: Vec<String> = vendored
             .record
             .addons
             .iter()
             .filter(|addon| &addon.group == group)
-            .map(|addon| addon.name.as_str())
+            .map(|addon| addon.name.clone())
             .collect();
         let _ = writeln!(
             report.out,
@@ -255,9 +344,11 @@ fn describe_vendored(
             addons.len(),
             relative(dir, root)
         );
-        vendored_json.push(
-            serde_json::json!({ "group": group, "dir": relative(dir, root), "addons": addons }),
-        );
+        vendored_json.push(VendoredJson {
+            group: group.clone(),
+            dir: relative(dir, root),
+            addons,
+        });
     }
     for bumped in &vendored.bumped {
         let _ = writeln!(
@@ -270,16 +361,16 @@ fn describe_vendored(
         key: addon.clone(),
         message: "content changed without a version change, and the version has no numeric last segment to bump".to_owned(),
     }));
-    json.insert(
-        "vendored".to_owned(),
-        serde_json::Value::Array(vendored_json),
-    );
-    json.insert(
-        "bumped".to_owned(),
+    json.vendored = Some(vendored_json);
+    json.bumped = Some(
         vendored
             .bumped
             .iter()
-            .map(|bumped| serde_json::json!({ "addon": bumped.addon, "from": bumped.from, "to": bumped.to }))
+            .map(|bumped| BumpedJson {
+                addon: bumped.addon.clone(),
+                from: bumped.from.clone(),
+                to: bumped.to.clone(),
+            })
             .collect(),
     );
 }
@@ -307,7 +398,7 @@ fn write_requirements(
     target: Option<&Path>,
     strict: bool,
     report: &mut Report,
-    json: &mut serde_json::Map<String, serde_json::Value>,
+    json: &mut VendorJson,
 ) -> Result<(), Report> {
     let root = &prepared.project.root;
     let file = root.join(target.map_or_else(
@@ -340,16 +431,30 @@ fn write_requirements(
     }
     let found = &generated.requirements;
     report.warnings.extend(problems(found));
-    json.insert(
-        "requirements".to_owned(),
-        serde_json::json!({
-            "file": relative(&file, root),
-            "lines": found.lines,
-            "omitted": found.omitted,
-            "conflicts": found.conflicts,
-            "unresolved": found.unresolved,
-        }),
-    );
+    json.requirements = Some(RequirementsJson {
+        file: relative(&file, root),
+        lines: found
+            .lines
+            .iter()
+            .map(|line| LineJson {
+                package: line.package.clone(),
+                specifier: line.specifier.clone(),
+                via: line.via.clone(),
+            })
+            .collect(),
+        omitted: found.omitted.clone(),
+        conflicts: found
+            .conflicts
+            .iter()
+            .map(|conflict| ConflictJson {
+                package: conflict.package.clone(),
+                specifier: conflict.specifier.clone(),
+                by: conflict.by.clone(),
+                provided: conflict.provided.clone(),
+            })
+            .collect(),
+        unresolved: found.unresolved.clone(),
+    });
     let _ = writeln!(
         report.out,
         "wrote {}: {} requirements, {} provided by the platform left out",

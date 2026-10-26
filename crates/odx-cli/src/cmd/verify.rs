@@ -23,6 +23,8 @@ use odx_platform::{profile, requirements_path};
 use odx_vendor::archive::{download_error, fetch};
 use odx_vendor::check;
 use odx_vendor::record::VendorRecord;
+use schemars::JsonSchema;
+use serde::Serialize;
 use toml_edit::{DocumentMut, Item};
 
 use super::Report;
@@ -31,6 +33,19 @@ use super::hooks::{Hook, Ran, run_hook};
 use super::vendor::{describe_conflict, generate, provided_lines, vendor_manifest};
 use crate::Context;
 use crate::cli::{GlobalArgs, VerifyArgs};
+
+/// What `odx --json verify` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx verify")]
+pub(crate) struct VerifyJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// Whether the checkout is what the lockfiles describe.
+    ok: bool,
+    /// Every difference found, for people.
+    problems: &'a [String],
+}
 
 /// `odx verify`.
 pub(crate) fn run_verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
@@ -76,10 +91,11 @@ fn verify(args: &VerifyArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
     }
     let mut report = if global.json {
         Report {
-            out: format!(
-                "{}\n",
-                serde_json::json!({ "schema": 1, "ok": problems.is_empty(), "problems": problems })
-            ),
+            out: super::to_json(&VerifyJson {
+                schema: 1,
+                ok: problems.is_empty(),
+                problems: &problems,
+            }),
             ..Report::default()
         }
     } else if problems.is_empty() {

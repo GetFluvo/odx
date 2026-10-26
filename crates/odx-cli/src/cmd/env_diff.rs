@@ -9,6 +9,8 @@ use odx_core::Exit;
 use odx_env::{Change, Entry, Kind, Unit, diff, locked, packages};
 use odx_platform::installed::{record_hash, scan, site_packages};
 use odx_vendor::record::VendorRecord;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::Report;
 use super::aggregate::prepare;
@@ -308,45 +310,98 @@ fn text(sides: &[Side; 2], entries: &[Entry], branch_specific: &[String]) -> Str
     out
 }
 
+/// What `odx --json env diff` prints.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(title = "odx env diff")]
+pub(crate) struct EnvDiffJson<'a> {
+    /// The version of this layout.
+    #[schemars(extend("const" = 1))]
+    schema: u32,
+    /// The first environment.
+    a: SideJson<'a>,
+    /// The second environment.
+    b: SideJson<'a>,
+    /// Whether they run different series.
+    series_differ: bool,
+    /// Every unit either side runs.
+    entries: Vec<EntryJson<'a>>,
+    /// Branch-specific files that differ; they are never promoted.
+    branch_specific: &'a [String],
+}
+
+/// One side of the comparison.
+#[derive(Debug, Serialize, JsonSchema)]
+struct SideJson<'a> {
+    /// The environment.
+    env: &'a str,
+    /// Its branch or branch pattern.
+    branch: &'a str,
+    /// The series it runs.
+    series: &'a str,
+    /// The git ref or file it was read from.
+    from: &'a str,
+}
+
+/// One unit on both sides.
+#[derive(Debug, Serialize, JsonSchema)]
+struct EntryJson<'a> {
+    /// `odoo`, `addon`, `package` or `repository`.
+    kind: &'static str,
+    /// Its name.
+    name: &'a str,
+    /// `identical`, `ahead`, `behind`, `changed`, `source-changed`,
+    /// `only-in-a` or `only-in-b`.
+    change: &'static str,
+    /// It on the first side; null when that side does not run it.
+    a: Option<UnitJson<'a>>,
+    /// It on the second side; null when that side does not run it.
+    b: Option<UnitJson<'a>>,
+}
+
+/// A unit on one side.
+#[derive(Debug, Serialize, JsonSchema)]
+struct UnitJson<'a> {
+    /// Its version, when known.
+    version: Option<&'a str>,
+    /// Where it comes from.
+    source: &'a str,
+    /// Its exact pin: a commit, a tree or a hash.
+    pin: &'a str,
+}
+
 fn json(sides: &[Side; 2], entries: &[Entry], branch_specific: &[String]) -> String {
-    let side = |side: &Side| {
-        serde_json::json!({
-            "env": side.env.name,
-            "branch": side.env.branch,
-            "series": side.env.series,
-            "from": side.from,
-        })
-    };
-    let unit = |unit: &Option<Unit>| {
-        unit.as_ref().map(|unit| {
-            serde_json::json!({
-                "version": unit.version,
-                "source": unit.source,
-                "pin": unit.pin,
+    fn side(side: &Side) -> SideJson<'_> {
+        SideJson {
+            env: &side.env.name,
+            branch: &side.env.branch,
+            series: &side.env.series,
+            from: &side.from,
+        }
+    }
+    fn unit(unit: &Unit) -> UnitJson<'_> {
+        UnitJson {
+            version: unit.version.as_deref(),
+            source: &unit.source,
+            pin: &unit.pin,
+        }
+    }
+    super::to_json(&EnvDiffJson {
+        schema: 1,
+        a: side(&sides[0]),
+        b: side(&sides[1]),
+        series_differ: sides[0].env.series != sides[1].env.series,
+        entries: entries
+            .iter()
+            .map(|entry| EntryJson {
+                kind: entry.kind.name(),
+                name: &entry.name,
+                change: entry.change.name(),
+                a: entry.a.as_ref().map(unit),
+                b: entry.b.as_ref().map(unit),
             })
-        })
-    };
-    let entries: Vec<serde_json::Value> = entries
-        .iter()
-        .map(|entry| {
-            serde_json::json!({
-                "kind": entry.kind.name(),
-                "name": entry.name,
-                "change": entry.change.name(),
-                "a": unit(&entry.a),
-                "b": unit(&entry.b),
-            })
-        })
-        .collect();
-    let value = serde_json::json!({
-        "schema": 1,
-        "a": side(&sides[0]),
-        "b": side(&sides[1]),
-        "series_differ": sides[0].env.series != sides[1].env.series,
-        "entries": entries,
-        "branch_specific": branch_specific,
-    });
-    format!("{value:#}\n")
+            .collect(),
+        branch_specific,
+    })
 }
 
 #[cfg(test)]

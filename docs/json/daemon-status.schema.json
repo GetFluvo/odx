@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "odx daemon status",
+  "description": "What `odx --json daemon status` prints.",
+  "type": "object",
+  "properties": {
+    "cache": {
+      "description": "The shared cache directory.",
+      "type": "string"
+    },
+    "cache_size": {
+      "description": "Its size in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "interval": {
+      "description": "How often it runs, such as `30m`.",
+      "type": "string"
+    },
+    "last_sync": {
+      "description": "When the last sync finished and of how many workspaces, for people;\n`never` when there was none.",
+      "type": "string"
+    },
+    "scheduler": {
+      "description": "The scheduled job: `systemd user timer`, `launchd agent` or\n`Task Scheduler task`.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "The version of this layout.",
+      "type": "integer",
+      "format": "uint32",
+      "const": 1,
+      "minimum": 0
+    },
+    "state": {
+      "description": "`not installed`, `active` or `installed, not active`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "scheduler",
+    "state",
+    "interval",
+    "last_sync",
+    "cache",
+    "cache_size"
+  ]
+}
