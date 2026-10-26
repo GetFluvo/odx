@@ -7,20 +7,11 @@ Check that the working tree, lockfiles, vendored content or installed wheels mat
 Usage: odx verify [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --vendored
           Check the vendored addon directories against the vendor manifest
 
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --installed <DIR>
           Check the wheels installed in a virtual environment (or site-packages) against uv.lock
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --requirements
           Check the platform requirements file against the provided-package set
@@ -28,11 +19,27 @@ Options:
       --deployed <DIR>
           Check the addon directories of a deployment checkout against the vendor manifest
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --allow-shell
           Run the `custom` profile's verify hook (also allowed by `[trust]` in the user configuration)
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -51,9 +58,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

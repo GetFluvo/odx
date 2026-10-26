@@ -7,26 +7,33 @@ Module availability and code readiness for the next Odoo series
 Usage: odx upgrade [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --target <SERIES>
           Target Odoo series, for example `19.0` (default: `[tool.odx.upgrade] target_odoo_version`)
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --only-missing
           Only addons not available on the target series
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
       --no-lint
           Skip odoo-lint's readiness counts for the project's own addons
 
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -45,9 +52,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

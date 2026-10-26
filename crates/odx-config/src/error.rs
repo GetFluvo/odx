@@ -18,7 +18,7 @@ impl fmt::Display for Problem {
 }
 
 /// What works without a project, and how to make one.
-pub(crate) const HINT: &str = "; odx migrate, odx port and odx migrate plan --to also work in a plain clone of an addons repository, and `odx import` or a [tool.odx] table makes this directory an odx project";
+pub(crate) const HINT: &str = "\nhint: `odx import repos.yaml --write` makes this directory an odx project; `odx port`, `odx migrate` and `odx migrate plan --to` also work in a plain clone of an addons repository";
 
 /// Errors from locating, reading or validating a project configuration.
 #[derive(Debug, thiserror::Error)]

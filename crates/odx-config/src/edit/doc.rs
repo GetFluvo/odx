@@ -62,6 +62,24 @@ impl PyprojectEdit {
             .map_err(|e: toml_edit::TomlError| EditError::Toml(e.to_string()))
     }
 
+    /// A new `pyproject.toml` with only a `[project]` table naming `name`.
+    ///
+    /// ```
+    /// use odx_config::edit::PyprojectEdit;
+    ///
+    /// let edit = PyprojectEdit::new_project("crm");
+    /// assert_eq!(edit.to_string(), "[project]\nname = \"crm\"\nversion = \"0.1.0\"\n");
+    /// ```
+    #[must_use]
+    pub fn new_project(name: &str) -> Self {
+        let mut project = Table::new();
+        project.insert("name", toml_edit::value(name));
+        project.insert("version", toml_edit::value("0.1.0"));
+        let mut doc = DocumentMut::new();
+        doc.insert("project", Item::Table(project));
+        Self { doc }
+    }
+
     /// The document being edited.
     ///
     /// ```

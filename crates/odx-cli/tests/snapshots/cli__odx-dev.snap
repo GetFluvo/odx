@@ -11,38 +11,45 @@ Arguments:
           Package to switch to an editable local clone
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --restore
           Put the locked source back (one package, or every one in develop mode)
 
       --branch <NAME>
           Branch to create or switch to in the package's clone
 
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
       --no-editable
           Do not install addons in editable mode
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --venv <DIR>
           The virtual environment for editable installs (default: `[tool.odx.dev] venv`, else `.venv`)
-
-      --fresh
-          Ignore cached data; refresh everything before answering
 
       --print-addons-path
           Only print the addons path
 
       --dry-run
           Show what would change without changing anything
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
@@ -58,9 +65,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

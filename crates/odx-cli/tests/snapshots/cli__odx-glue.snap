@@ -7,20 +7,27 @@ Glue addons Odoo would install with what the project has, that it does not have
 Usage: odx glue [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --fail
           Exit 1 when glue addons are missing
 
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
   -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
 
   -j, --jobs <N>
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -39,9 +46,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

@@ -10,28 +10,35 @@ Options:
       --apply
           Write to the forge; without it nothing is written and the plan is printed
 
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --series <SERIES>
           Only the dashboard of this series
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --remote <NAME>
           The remote of the project repository, on the forge the bot writes to
           
           [default: origin]
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
       --reopen
           Reopen a dashboard issue a person closed (closing it pauses the dashboard)
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -50,9 +57,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

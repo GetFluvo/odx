@@ -7,14 +7,8 @@ Upstream changes on other series that touch your modules
 Usage: odx suggest [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --env <ENV>
           Environment whose series is used; defaults to all
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --series <SERIES>
           Target series instead of the environments' (for example `18.0`)
@@ -22,17 +16,8 @@ Options:
       --from <SERIES>
           Series to look on (default: `[tool.odx.port] default_from`, else the series below and above)
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
       --addon <GLOB>
           Only addons matching this glob
-
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
-      --fresh
-          Ignore cached data; refresh everything before answering
 
       --show-muted
           Include suggestions suppressed by blacklists, verdicts and mutes
@@ -41,6 +26,28 @@ Options:
 
       --check-apply
           Tell for each portable suggestion whether its commits apply cleanly on the target
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
@@ -56,9 +63,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

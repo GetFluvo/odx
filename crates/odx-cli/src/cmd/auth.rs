@@ -1,7 +1,7 @@
 //! `odx auth`: forge tokens in the system keyring.
 
 use std::fmt::Write as _;
-use std::io::Read as _;
+use std::io::{IsTerminal as _, Read as _, Write as _};
 
 use odx_core::Exit;
 use odx_core::system::OsRunner;
@@ -13,14 +13,30 @@ use super::aggregate::prepare;
 use crate::Context;
 use crate::cli::{AuthCommand, GlobalArgs};
 
+/// The token on standard input: one pasted line on a terminal, after a
+/// prompt, else everything piped in.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn read_token(host: &str) -> String {
+    let mut token = String::new();
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        let mut err = std::io::stderr();
+        let _ = write!(err, "Paste the token for {host} and press Enter: ");
+        let _ = err.flush();
+        let _ = stdin.read_line(&mut token);
+    } else {
+        let _ = stdin.lock().read_to_string(&mut token);
+    }
+    token
+}
+
 /// `odx auth`.
 pub(crate) fn run_auth(command: &AuthCommand, global: &GlobalArgs, ctx: &Context<'_>) -> Report {
     let store = secrets(ctx.env);
     let mut report = Report::default();
     match command {
         AuthCommand::Login { host } => {
-            let mut token = String::new();
-            let _ = std::io::stdin().read_to_string(&mut token);
+            let token = read_token(host);
             let token = token.trim();
             if token.is_empty() {
                 return Report::error(

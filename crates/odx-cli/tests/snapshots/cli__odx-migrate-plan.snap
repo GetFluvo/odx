@@ -9,26 +9,33 @@ In a plain clone of an addons repository (no `[tool.odx]` project), the addons o
 Usage: odx migrate plan [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --to <SERIES>
           Target series [default: `[tool.odx.upgrade] target_odoo_version`; mandatory outside a project]
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --from <SERIES>
           Outside a project: the source series [default: the series before --to]
 
-  -j, --jobs <N>
-          Override the number of parallel jobs
-
       --remote <NAME>
           Outside a project: the remote both series come from [default: `upstream` when it exists, else `origin`]
 
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -47,9 +54,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-  -V, --version
-          Print version

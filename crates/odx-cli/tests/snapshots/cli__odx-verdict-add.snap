@@ -14,20 +14,11 @@ Options:
       --addon <ADDON>
           The addon it is about
 
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --target <SERIES>
           The series it is judged for (default: the project's)
 
       --from <SERIES>
           The series the suggestion came from, when several have it
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --kind <KIND>
           Kind of verdict
@@ -41,17 +32,8 @@ Options:
           - not-wanted:      Not wanted in this project
           - deferred:        Review later; re-checked on expiry and on target code changes
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
-      --fresh
-          Ignore cached data; refresh everything before answering
-
       --reason <REASON>
           Why; mandatory
-
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
 
       --scope <SCOPE>
           Scope; the default depends on the kind
@@ -64,26 +46,45 @@ Options:
       --env <ENV>
           Environments of an environment-scope mute
 
-      --refresh-index
-          Rebuild the addon index for the series involved
-
-      --json
-          Machine-readable output on stdout
-
       --until <DATE>
           Expiry date (YYYY-MM-DD)
 
       --no-recheck
           Do not resurface when the target code changes
 
-  -v, --verbose...
-          Increase log verbosity (repeatable)
-
-  -q, --quiet
-          Errors only
-
   -h, --help
           Print help (see a summary with '-h')
 
   -V, --version
           Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
+
+      --refresh-index
+          Rebuild the addon index for the series involved
+
+      --json
+          Machine-readable output on stdout
+
+  -v, --verbose...
+          Increase log verbosity (repeatable)
+
+  -q, --quiet
+          Errors only

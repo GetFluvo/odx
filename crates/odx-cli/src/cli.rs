@@ -35,6 +35,7 @@ pub struct Cli {
 
 /// Options accepted by every command.
 #[derive(Debug, Clone, Args)]
+#[command(next_help_heading = "Global options")]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "command-line flags are independent switches"
@@ -44,7 +45,7 @@ pub struct GlobalArgs {
     #[arg(short = 'C', long, global = true, value_name = "DIR")]
     pub project_dir: Option<PathBuf>,
 
-    /// The pyproject.toml or repos.yaml to use.
+    /// The pyproject.toml to use (a repos.yaml for the commands that read one).
     #[arg(short, long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
@@ -52,8 +53,8 @@ pub struct GlobalArgs {
     #[arg(short, long, global = true, value_name = "N")]
     pub jobs: Option<usize>,
 
-    /// Serve forge and index data from the cache only. Only network calls are skipped:
-    /// local work (git, pre-commit, odoo-lint) takes as long as before.
+    /// Serve forge and index data from the cache only; a repository not in the cache
+    /// yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before.
     #[arg(long, global = true)]
     pub offline: bool,
 
@@ -87,8 +88,18 @@ pub struct GlobalArgs {
 pub enum Command {
     // Workspace & dependencies
     /// Fetch and merge the configured PRs and branches.
+    #[command(after_help = "\
+Examples:
+  odx aggregate                 build every repository from the merges in pyproject.toml
+  odx aggregate --locked        build exactly what odx.lock pins (CI, deployments)
+  odx aggregate --repo pos      only one repository")]
     Aggregate(AggregateArgs),
     /// Resolve every merge and package to a SHA, vault it, write odx.lock.
+    #[command(after_help = "\
+Examples:
+  odx lock                      pin what odx.lock does not pin yet
+  odx lock --update             resolve every branch and pull request again
+  odx lock --check              fail when odx.lock is out of date (CI)")]
     Lock(LockArgs),
     /// Install the locked packages into the addon directories; write the platform requirements.
     Vendor(VendorArgs),
@@ -99,10 +110,20 @@ pub enum Command {
     /// Prepare a local development workspace, or develop one package.
     Dev(DevArgs),
     /// Add a repository, merge or package to pyproject.toml.
+    #[command(after_help = "\
+Examples:
+  odx add OCA/pos#123            merge a pull request (the repository is added if new)
+  odx add OCA/pos@17.0-fix       merge a branch, or @<sha> a commit
+  odx add OCA/pos#45 --package odoo-addon-pos_vouchers --subdirectory pos_vouchers
+                                 one addon of a pull request as a package")]
     Add(AddArgs),
     /// Remove a merge or package from pyproject.toml and odx.lock.
     Drop(DropArgs),
     /// Convert repos.yaml (and addons.yaml) into [tool.odx].
+    #[command(after_help = "\
+Examples:
+  odx import                    print the [tool.odx] tables for ./repos.yaml
+  odx import repos.yaml --write add them to pyproject.toml (created when missing)")]
     Import(ImportArgs),
     /// Write repos.yaml / addons.yaml from [tool.odx].
     Export(ExportArgs),
@@ -453,7 +474,7 @@ pub struct ExportArgs {
 pub enum DashboardFormat {
     /// Terminal table.
     Table,
-    /// Interactive terminal UI.
+    /// Interactive terminal UI (in builds with the `tui` feature: `cargo install odx-cli --features tui`).
     Tui,
     /// Markdown, as used for the dashboard issue.
     Markdown,

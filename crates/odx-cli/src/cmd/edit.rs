@@ -16,21 +16,27 @@ use crate::cli::{AddArgs, DropArgs};
 /// The `pyproject.toml` to edit: `--config`, the project found upwards, or
 /// `pyproject.toml` in the working directory.
 fn locate(ctx: &Context<'_>) -> Result<PathBuf, Report> {
+    existing(ctx)?.ok_or_else(|| {
+        Report::error(
+            Exit::Usage,
+            format!(
+                "{}: no such file\nhint: `odx import repos.yaml --write` creates it from a git-aggregator file; `uv init --bare` makes an empty one",
+                ctx.dir.join("pyproject.toml").display()
+            ),
+        )
+    })
+}
+
+/// The `pyproject.toml` that [`locate`] finds, `None` when there is none.
+fn existing(ctx: &Context<'_>) -> Result<Option<PathBuf>, Report> {
     if let Some(config) = ctx.config {
-        return Ok(ctx.dir.join(config));
+        return Ok(Some(ctx.dir.join(config)));
     }
     match find_pyproject(ctx.fs, &ctx.dir) {
-        Ok(project) => Ok(project.file),
+        Ok(project) => Ok(Some(project.file)),
         Err(ConfigError::NotFound { .. }) => {
             let file = ctx.dir.join("pyproject.toml");
-            if ctx.fs.exists(&file) {
-                Ok(file)
-            } else {
-                Err(Report::error(
-                    Exit::Usage,
-                    format!("{}: no such file", file.display()),
-                ))
-            }
+            Ok(ctx.fs.exists(&file).then_some(file))
         }
         Err(e @ ConfigError::Io { .. }) => Err(Report::error(Exit::Failure, e.to_string())),
         Err(e) => Err(Report::error(Exit::Usage, e.to_string())),
@@ -56,14 +62,43 @@ pub(crate) fn save(ctx: &Context<'_>, file: &Path, doc: &PyprojectEdit) -> Resul
         .map_err(|e| Report::error(Exit::Failure, format!("{}: {e}", file.display())))
 }
 
-/// Write imported repositories into the project's `pyproject.toml`.
+/// The project name of a `pyproject.toml` that `odx import --write`
+/// creates: the directory's name as a distribution name.
+fn project_name(dir: &Path) -> String {
+    let name: String = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let name = name.trim_matches('-');
+    if name.is_empty() {
+        "odoo-project".to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
+/// Write imported repositories into the project's `pyproject.toml`, which
+/// is created when the directory has none: a git-aggregator project starts
+/// without one.
 pub(crate) fn write_repositories(
     ctx: &Context<'_>,
     repos: &[Repository],
     odoo_version: Option<&str>,
 ) -> Result<Report, Report> {
-    let file = locate(ctx)?;
-    let mut doc = open(ctx, &file)?;
+    let (file, mut doc, created) = match existing(ctx)? {
+        Some(file) => {
+            let doc = open(ctx, &file)?;
+            (file, doc, false)
+        }
+        None => (
+            ctx.dir.join("pyproject.toml"),
+            PyprojectEdit::new_project(&project_name(&ctx.dir)),
+            true,
+        ),
+    };
     let series = odoo_version.or_else(|| repos.first().and_then(|r| r.base.as_deref()));
     let skipped = doc
         .add_repositories(repos, series)
@@ -76,11 +111,17 @@ pub(crate) fn write_repositories(
             message: "already configured; skipped".to_owned(),
         });
     }
-    report.out = format!(
-        "wrote {} repositories to {}\n",
-        repos.len() - skipped.len(),
-        file.display()
-    );
+    let written = repos.len() - skipped.len();
+    report.out = if created {
+        format!("created {} with {written} repositories\n", file.display())
+    } else if written == 0 {
+        format!("{} is up to date\n", file.display())
+    } else {
+        format!("wrote {written} repositories to {}\n", file.display())
+    };
+    if written > 0 {
+        report.out.push_str("next: odx aggregate, then odx lock\n");
+    }
     Ok(report)
 }
 

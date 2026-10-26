@@ -11,27 +11,18 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --format <FORMAT>
           Output format (`--json` overrides it)
 
           Possible values:
           - table:    Terminal table
-          - tui:      Interactive terminal UI
+          - tui:      Interactive terminal UI (in builds with the `tui` feature: `cargo install odx-cli --features tui`)
           - markdown: Markdown, as used for the dashboard issue
           
           [default: table]
 
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --env <ENV>
           Environment to show; defaults to all
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --section <SECTION>
           Only these sections (pinned, droppable, new-upstream, forward-port, backport, auto-update, glue, drift, suppressed)
@@ -39,8 +30,24 @@ Options:
       --checkboxes
           With `--format markdown`, a box per action for the bot to read back
 
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
@@ -59,9 +66,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-  -V, --version
-          Print version

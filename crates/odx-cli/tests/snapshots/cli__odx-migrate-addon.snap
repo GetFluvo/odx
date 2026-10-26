@@ -11,20 +11,11 @@ Arguments:
           Addon name
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --to <SERIES>
           Target series
 
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
-
       --from <SERIES>
           Source series [default: the series before --to]
-
-  -j, --jobs <N>
-          Override the number of parallel jobs
 
       --remote <NAME>
           The remote both series come from [default: `upstream` when it exists, else `origin`]
@@ -32,23 +23,42 @@ Options:
       --no-pre-commit
           Leave out the repository's pre-commit fixes
 
-      --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
-      --fresh
-          Ignore cached data; refresh everything before answering
-
       --no-squash
           Keep the administrative commits (bots, Weblate) of the history as they are instead of squashing them
 
       --force
           Migrate even when an open pull request already migrates the addon
 
-      --no-refresh
-          Use cached data even when stale. Like --offline, this saves network time only
-
       --pin-unreleased
           Pin dependencies that only exist as an open migration pull request upstream in `test-requirements.txt`, the OCA way (`odx migrate pin`)
+
+      --open-pr
+          Then push the branch and open a draft pull request (`odx migrate pr`)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
+  -j, --jobs <N>
+          Override the number of parallel jobs
+
+      --offline
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
+
+      --fresh
+          Ignore cached data; refresh everything before answering
+
+      --no-refresh
+          Use cached data even when stale. Like --offline, this saves network time only
 
       --refresh-index
           Rebuild the addon index for the series involved
@@ -56,20 +66,11 @@ Options:
       --json
           Machine-readable output on stdout
 
-      --open-pr
-          Then push the branch and open a draft pull request (`odx migrate pr`)
-
   -v, --verbose...
           Increase log verbosity (repeatable)
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-  -V, --version
-          Print version
 
 The steps, on a new branch `<to>-mig-<addon>` made from `<remote>/<to>` in the clone you run it in:
   1. stop when an open pull request on the forge already migrates the addon (--force, --offline)

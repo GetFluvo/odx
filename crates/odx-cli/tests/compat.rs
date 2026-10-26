@@ -77,10 +77,13 @@ fn import_errors() {
         ("/w/badaddons.yaml", "web: [\n"),
     ]);
     let (exit, _, err) = run(&fs, &["import", "missing.yaml"]);
-    assert_eq!(exit, Exit::Failure);
-    assert!(
-        err.starts_with(&format!("error: {}: ", w("missing.yaml"))),
-        "{err}"
+    assert_eq!(exit, Exit::Usage);
+    assert_eq!(
+        err,
+        format!(
+            "error: {}: no such file\nhint: pass the git-aggregator file: odx import path/to/repos.yaml\n",
+            w("missing.yaml")
+        )
     );
     let (exit, _, err) = run(&fs, &["import", "bad.yaml"]);
     assert_eq!(exit, Exit::Usage);
@@ -100,6 +103,8 @@ fn import_errors() {
         err.starts_with(&format!("error: {}: ", w("badaddons.yaml"))),
         "{err}"
     );
+    fs.fail_on("/w/repos.yaml", std::io::ErrorKind::PermissionDenied);
+    assert_eq!(run(&fs, &["import"]).0, Exit::Failure);
 }
 
 #[test]

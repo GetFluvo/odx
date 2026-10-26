@@ -7,14 +7,8 @@ The return trip of a pin: where the pull requests `test-requirements.txt` pins s
 Usage: odx migrate unpin [OPTIONS]
 
 Options:
-  -C, --project-dir <DIR>
-          Run as if started in DIR
-
       --to <SERIES>
           The target series the dependencies must be released for [default: the series the migration branch's name starts with]
-
-  -c, --config <FILE>
-          The pyproject.toml or repos.yaml to use
 
       --pr <PR>
           The pull request of the branch, for example `OCA/contract#1234` [default: the one `odx migrate pr` or `odx migrate update` recorded]
@@ -22,20 +16,33 @@ Options:
       --check
           Only say where the pins stand; change nothing
 
+      --push
+          Then push the branch where its pull request comes from
+
+      --merge
+          Then merge the pull request, when no pin is left, the branch is pushed and its checks are green. Nothing is merged without this flag
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+Global options:
+  -C, --project-dir <DIR>
+          Run as if started in DIR
+
+  -c, --config <FILE>
+          The pyproject.toml to use (a repos.yaml for the commands that read one)
+
   -j, --jobs <N>
           Override the number of parallel jobs
 
       --offline
-          Serve forge and index data from the cache only. Only network calls are skipped: local work (git, pre-commit, odoo-lint) takes as long as before
-
-      --push
-          Then push the branch where its pull request comes from
+          Serve forge and index data from the cache only; a repository not in the cache yet is still fetched. Local work (git, pre-commit, odoo-lint) takes as long as before
 
       --fresh
           Ignore cached data; refresh everything before answering
-
-      --merge
-          Then merge the pull request, when no pin is left, the branch is pushed and its checks are green. Nothing is merged without this flag
 
       --no-refresh
           Use cached data even when stale. Like --offline, this saves network time only
@@ -51,9 +58,3 @@ Options:
 
   -q, --quiet
           Errors only
-
-  -h, --help
-          Print help
-
-  -V, --version
-          Print version

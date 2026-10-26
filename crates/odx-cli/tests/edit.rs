@@ -155,7 +155,10 @@ fn add_errors() {
         (exit, err),
         (
             Exit::Usage,
-            format!("error: {}: no such file\n", w("pyproject.toml"))
+            format!(
+                "error: {}: no such file\nhint: `odx import repos.yaml --write` creates it from a git-aggregator file; `uv init --bare` makes an empty one\n",
+                w("pyproject.toml")
+            )
         )
     );
     let (exit, _, err) = run(&empty, &["add", "nonsense"]);
@@ -280,13 +283,19 @@ fn import_write() {
     assert_eq!(exit, Exit::Success);
     assert_eq!(
         out,
-        format!("wrote 1 repositories to {}\n", w("pyproject.toml"))
+        format!(
+            "wrote 1 repositories to {}\nnext: odx aggregate, then odx lock\n",
+            w("pyproject.toml")
+        )
     );
     assert_eq!(
         err,
         "warning: https://github.com/OCA/pos.git: already configured; skipped\n"
     );
     assert!(read(&fs, "/w/pyproject.toml").contains("name = \"crm\""));
+    let (exit, out, _) = run(&fs, &["import", "--write"]);
+    assert_eq!(exit, Exit::Success);
+    assert_eq!(out, format!("{} is up to date\n", w("pyproject.toml")));
 
     let plain = fs_with(&[
         ("/w/pyproject.toml", "[project]\nname = \"x\"\n"),
@@ -314,8 +323,52 @@ fn import_write() {
     );
     assert_eq!(exit, Exit::Usage);
     assert!(err.contains("[tool] has an unexpected type"), "{err}");
-    let missing = fs_with(&[("/w/repos.yaml", repos)]);
-    assert_eq!(run(&missing, &["import", "--write"]).0, Exit::Usage);
+    // Found upwards, unreadable as a project: not replaced by a new one.
+    let broken = fs_with(&[
+        ("/w/pyproject.toml", "[tool.odx\n"),
+        ("/w/repos.yaml", repos),
+    ]);
+    assert_eq!(run(&broken, &["import", "--write"]).0, Exit::Usage);
+    assert_eq!(read(&broken, "/w/pyproject.toml"), "[tool.odx\n");
+}
+
+#[test]
+fn import_write_creates_the_pyproject() {
+    let repos = "./crm:\n  remotes:\n    o: https://github.com/OCA/crm.git\n  merges: [o 17.0]\n";
+    let fs = fs_with(&[("/w/repos.yaml", repos)]);
+    let (exit, out, err) = run(&fs, &["import", "--write"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""));
+    assert_eq!(
+        out,
+        format!(
+            "created {} with 1 repositories\nnext: odx aggregate, then odx lock\n",
+            w("pyproject.toml")
+        )
+    );
+    let text = read(&fs, "/w/pyproject.toml");
+    assert!(
+        text.starts_with("[project]\nname = \"w\"\nversion = \"0.1.0\"\n"),
+        "{text}"
+    );
+    assert!(text.contains("odoo_version = \"17.0\""), "{text}");
+    // A directory name that is no distribution name, and the root.
+    for (dir, name) in [("/My Shop_17/", "my-shop-17"), ("/", "odoo-project")] {
+        let fs = fs_with(&[(&format!("{dir}repos.yaml"), repos)]);
+        let mut out = Vec::new();
+        let exit = odx_cli::run_in(
+            ["odx", "import", "--write"],
+            &fs,
+            Path::new(dir),
+            &mut out,
+            &mut Vec::new(),
+        );
+        assert_eq!(exit, Exit::Success);
+        let text = read(&fs, &format!("{dir}pyproject.toml"));
+        assert!(text.contains(&format!("name = \"{name}\"")), "{text}");
+    }
+    // `--config` names a file that must exist.
+    let (exit, _, err) = run(&fs, &["--config", "other.toml", "import", "--write"]);
+    assert_eq!(exit, Exit::Failure, "{err}");
 }
 
 const SHA: &str = "a1b2c3d4e5f67890123456789012345678901234";
