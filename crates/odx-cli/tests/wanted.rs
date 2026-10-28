@@ -160,7 +160,7 @@ fn where_wanted_addons_stand() {
     assert_eq!(
         out,
         format!(
-            "contract (customer asks in Q3)\n  17.0  released in OCA/contract\n        odx add {api}/OCA/contract@17.0 --package odoo-addon-contract --subdirectory contract\nagreement\n  17.0  migrating: OCA/agreement#12 by joe, opened 2026-05-06\n        {api}/OCA/agreement/pull/12\n        odx add {api}/OCA/agreement#12 --package odoo-addon-agreement --subdirectory agreement\n  18.0  migrating: OCA/agreement#14 by kim, opened 2026-06-01\n        {api}/OCA/agreement/pull/14\nrma\n  17.0  not started; last on 16.0 in OCA/rma\nghost\n  17.0  not started; not found on an earlier series\n"
+            "contract (customer asks in Q3)\n  17.0  released in OCA/contract\n        odx add {api}/OCA/contract@17.0 --package odoo-addon-contract --subdirectory contract\nagreement\n  17.0  migrating: OCA/agreement#12 by joe, opened 2026-05-06\n        {api}/OCA/agreement/pull/12\n        odx add {api}/OCA/agreement#12 --package odoo-addon-agreement --subdirectory agreement\n  18.0  migrating: OCA/agreement#14 by kim, opened 2026-06-01\n        {api}/OCA/agreement/pull/14\nrma\n  17.0  not started; last on 16.0 in OCA/rma\nghost\n  17.0  not started; not found on an earlier series (set `repository` to watch for a migration)\n"
         )
     );
     let (exit, out, _) = setup.odx(&["--json", "wanted"]);
@@ -184,11 +184,9 @@ fn offline_only_the_cache_answers() {
     let setup = Setup::new();
     let (exit, out, err) = setup.odx(&["--offline", "wanted"]);
     assert_eq!(exit, Exit::Success, "{err}");
-    // Nothing is cached yet: odx cannot find where the addons live.
+    // Nothing is cached yet: odx cannot tell where the addons stand.
     assert!(
-        out.contains(
-            "contract (customer asks in Q3)\n  17.0  not started; not found on an earlier series\n"
-        ),
+        out.contains("contract (customer asks in Q3)\n  17.0  not checked (offline)\n"),
         "{out}"
     );
     // With an index from an earlier run, a known repository is not asked.
@@ -203,6 +201,7 @@ fn offline_only_the_cache_answers() {
     let value: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(value["addons"][1]["state"], "unchecked");
     assert_eq!(value["addons"][1]["repository"], serde_json::Value::Null);
+    assert_eq!(value["addons"][1]["reason"], "offline");
 }
 
 #[test]
@@ -218,8 +217,9 @@ fn a_configured_repository_and_a_forge_that_fails() {
     assert_eq!(exit, Exit::Success, "{err}");
     let (exit, out, err) = setup.odx(&["wanted"]);
     assert_eq!(exit, Exit::Success);
+    // A forge that does not answer leaves it unchecked, not "not started".
     assert!(
-        out.ends_with("ghost\n  17.0  not started; not found on an earlier series\n"),
+        out.ends_with("ghost\n  17.0  not checked (127.0.0.1 did not answer)\n"),
         "{out}"
     );
     assert!(err.contains("wanted OCA/ghost"), "{err}");
@@ -231,9 +231,36 @@ fn a_configured_repository_and_a_forge_that_fails() {
         "--repository",
         "file:///srv/git/ghost",
     ]);
+    let (_, out, err) = setup.odx(&["wanted"]);
+    assert!(
+        out.ends_with(
+            "ghost\n  17.0  not checked (file:///srv/git/ghost is no forge repository)\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        err.contains("cannot look for a migration in file:///srv/git/ghost"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_release_since_the_last_run_is_seen_at_once() {
+    let setup = Setup::new();
+    let (_, out, _) = setup.odx(&["wanted"]);
+    assert!(out.contains("ghost\n  17.0  not started"), "{out}");
+    // Released after the index learnt it was not: the next run asks again.
+    setup.route(
+        "/pypi/odoo-addon-ghost/json",
+        r#"{"releases":{"17.0.1.0.0":[]}}"#,
+    );
+    setup.route(
+        "/pypi/odoo-addon-ghost/17.0.1.0.0/json",
+        &format!(r#"{{"info":{{"home_page":"{}/OCA/ghost"}}}}"#, setup.api),
+    );
     let (_, out, _) = setup.odx(&["wanted"]);
     assert!(
-        out.ends_with("ghost\n  17.0  not started; not found on an earlier series\n"),
+        out.contains("ghost\n  17.0  released in OCA/ghost\n"),
         "{out}"
     );
 }
@@ -254,6 +281,16 @@ fn adding_and_removing() {
     ]);
     assert_eq!(exit, Exit::Success, "{err}");
     assert!(out.starts_with("helpdesk_mgmt is wanted in "), "{out}");
+    assert!(!out.contains("without a repository"), "{out}");
+    // Changing the note keeps the series and the repository.
+    let (_, out, _) = setup.odx(&["wanted", "add", "helpdesk_mgmt", "--note", "next year"]);
+    assert!(!out.contains("without a repository"), "{out}");
+    let (_, out, _) = setup.odx(&["wanted", "add", "rma_sale"]);
+    assert!(
+        out.ends_with("without a repository, odx looks for one on the 3 series before; pass --repository for an addon that did not live there\n"),
+        "{out}"
+    );
+    setup.odx(&["wanted", "remove", "rma_sale"]);
     assert!(
         setup.pyproject().ends_with(
             "[[tool.odx.wanted]]\naddon = \"helpdesk_mgmt\"\nseries = [\"17.0\", \"18.0\"]\nrepository = \"OCA/helpdesk\"\nnote = \"next year\"\n"

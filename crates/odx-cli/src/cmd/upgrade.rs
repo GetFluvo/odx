@@ -510,7 +510,7 @@ impl Run<'_> {
                     })
                     .as_ref()?
                     .iter()
-                    .find(|pr| super::deps::migrates(&pr.title, &new_name))
+                    .find(|pr| super::deps::migrates(pr, &new_name))
                     .map(|pr| pr.number)
             });
         row.status = if pull_request.is_some() {

@@ -210,8 +210,8 @@ impl ForgeClient<'_> {
             .collect())
     }
 
-    /// The open pull requests of `repo` that target branch `base` (the
-    /// first hundred).
+    /// The open pull requests of `repo` that target branch `base`, page
+    /// after page (at most ten pages).
     ///
     /// # Errors
     ///
@@ -224,23 +224,26 @@ impl ForgeClient<'_> {
         base: &str,
     ) -> Result<Vec<PullRequest>, ForgeError> {
         let api = Self::repo_api(repo, kind);
-        let url = match kind {
-            ForgeKind::Gitlab => {
-                format!("{api}/merge_requests?state=opened&target_branch={base}&per_page=100")
-            }
-            ForgeKind::Github => format!("{api}/pulls?state=open&base={base}&per_page=100"),
-            ForgeKind::Gitea => format!("{api}/pulls?state=open&limit=50"),
+        let (url, size) = match kind {
+            ForgeKind::Gitlab => (
+                format!("{api}/merge_requests?state=opened&target_branch={base}&per_page=100"),
+                100,
+            ),
+            ForgeKind::Github => (
+                format!("{api}/pulls?state=open&base={base}&per_page=100"),
+                100,
+            ),
+            // Gitea/Forgejo cannot filter by base: every open one is read.
+            ForgeKind::Gitea => (format!("{api}/pulls?state=open&limit=50"), 50),
         };
-        let value = self
-            .json(&url, repo, kind)?
+        let listed = self
+            .pages(&url, size, repo, kind)?
             .ok_or_else(|| ForgeError::NotVisible(format!("{}/{}", repo.host, repo.path)))?;
         let parse = match kind {
             ForgeKind::Gitlab => gitlab,
             ForgeKind::Github | ForgeKind::Gitea => github_like,
         };
-        Ok(value
-            .as_array()
-            .map_or(&[][..], Vec::as_slice)
+        Ok(listed
             .iter()
             .map(parse)
             .filter(|pr| pr.base == base)
@@ -416,13 +419,13 @@ mod tests {
         assert_eq!((prs.len(), prs[0].number), (1, 3));
         assert_eq!(
             urls,
-            ["https://api.github.com/repos/OCA/pos/pulls?state=open&base=19.0&per_page=100"]
+            ["https://api.github.com/repos/OCA/pos/pulls?state=open&base=19.0&per_page=100&page=1"]
         );
         let (prs, urls) = list("https://codeberg.org/o/r", ForgeKind::Gitea, 200, github);
         assert_eq!(prs.unwrap().len(), 1);
         assert_eq!(
             urls,
-            ["https://codeberg.org/api/v1/repos/o/r/pulls?state=open&limit=50"]
+            ["https://codeberg.org/api/v1/repos/o/r/pulls?state=open&limit=50&page=1"]
         );
         let gitlab =
             r#"[{"iid":9,"title":"[19.0][MIG] x","state":"opened","target_branch":"19.0"}]"#;
@@ -431,7 +434,7 @@ mod tests {
         assert_eq!(
             urls,
             [
-                "https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?state=opened&target_branch=19.0&per_page=100"
+                "https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?state=opened&target_branch=19.0&per_page=100&page=1"
             ]
         );
         let (prs, _) = list("https://github.com/o/r", ForgeKind::Github, 200, "{}");
@@ -444,6 +447,31 @@ mod tests {
                 .to_string()
                 .starts_with("cannot see github.com/o/r")
         );
+    }
+
+    #[test]
+    fn open_pull_requests_are_read_page_after_page() {
+        let full: Vec<String> = (1..=50)
+            .map(|number| {
+                format!(r#"{{"number":{number},"state":"open","base":{{"ref":"19.0"}}}}"#)
+            })
+            .collect();
+        let full = format!("[{}]", full.join(","));
+        let read = |replies: Vec<HttpResponse>| {
+            let http = Scripted::new(replies.into_iter().map(Ok).collect());
+            let env = MapEnv::default();
+            let runner = ScriptedRunner::default();
+            let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
+            let repo = RepoUrl::parse("https://codeberg.org/o/r").unwrap();
+            let prs = client.open_pull_requests(&repo, ForgeKind::Gitea, "19.0");
+            (prs.unwrap().len(), http.urls().len())
+        };
+        let last = r#"[{"number":51,"state":"open","base":{"ref":"19.0"}}]"#;
+        assert_eq!(read(vec![reply(200, &full), reply(200, last)]), (51, 2));
+        // A page past the end that the forge does not show ends the listing.
+        assert_eq!(read(vec![reply(200, &full), reply(404, "")]), (50, 2));
+        let pages: Vec<HttpResponse> = (0..12).map(|_| reply(200, &full)).collect();
+        assert_eq!(read(pages), (500, 10));
     }
 
     #[test]

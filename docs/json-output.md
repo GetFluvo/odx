@@ -34,7 +34,6 @@ contract.
 | `env-diff` | odx env diff | [env-diff.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/env-diff.schema.json) |
 | `env-list` | odx env list | [env-list.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/env-list.schema.json) |
 | `glue` | odx glue | [glue.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/glue.schema.json) |
-| `wanted` | odx wanted | [wanted.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/wanted.schema.json) |
 | `lock-auto-update` | odx lock --auto-update | [lock-auto-update.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/lock-auto-update.schema.json) |
 | `migrate` | odx migrate | [migrate.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/migrate.schema.json) |
 | `migrate-own` | odx migrate own | [migrate-own.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/migrate-own.schema.json) |
@@ -58,3 +57,4 @@ contract.
 | `upgrade` | odx upgrade | [upgrade.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/upgrade.schema.json) |
 | `vendor` | odx vendor | [vendor.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/vendor.schema.json) |
 | `verify` | odx verify | [verify.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/verify.schema.json) |
+| `wanted` | odx wanted | [wanted.schema.json](https://github.com/getfluvo/odx/blob/main/docs/json/wanted.schema.json) |

@@ -1291,10 +1291,12 @@ fn a_wanted_addon_whose_migration_starts_is_announced_once() {
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
-    // Without --apply, it says what it would post.
+    // Without --apply, it says what it would post, on the issue to be.
+    let dry = bot(&["bot", "dashboard"]);
     assert!(
-        bot(&["bot", "dashboard"]).ends_with("17.0: dashboard issue would be created\n"),
-        "nothing to comment on before the issue exists"
+        dry.contains("17.0: dashboard issue would be created\n")
+            && dry.ends_with("migrating OCA/pos#7 would comment on the new issue\n"),
+        "{dry}"
     );
     let writes = setup.writes(|| {
         let out = bot(&["bot", "dashboard", "--apply"]);

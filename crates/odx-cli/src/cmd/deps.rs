@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use odx_core::system::OsRunner;
-use odx_forge::{ForgeClient, ForgeKind, Http, RepoUrl, ReqwestHttp};
+use odx_forge::{ForgeClient, ForgeKind, Http, PullRequest, RepoUrl, ReqwestHttp};
 use odx_index::sources::package_index;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -110,9 +110,26 @@ pub(crate) fn names(title: &str, addon: &str) -> bool {
         })
 }
 
-/// Whether `title` is that of a migration pull request (`[MIG]`) of `addon`.
-pub(crate) fn migrates(title: &str, addon: &str) -> bool {
-    title.contains("[MIG]") && names(title, addon)
+/// Whether `pr` migrates `addon`: its title says `[MIG]` (in any case),
+/// and it is about `addon`. The `mod:<addon>` labels the OCA bot puts on a
+/// pull request say which addons it touches, more reliably than a title
+/// typed by hand; when it touches several, the title says which one it
+/// migrates. Without such labels, the title must name `addon`.
+pub(crate) fn migrates(pr: &PullRequest, addon: &str) -> bool {
+    let title = pr.title.to_ascii_lowercase();
+    if !title.contains("[mig]") {
+        return false;
+    }
+    let touched: Vec<&str> = pr
+        .labels
+        .iter()
+        .filter_map(|label| label.strip_prefix("mod:"))
+        .collect();
+    if touched.is_empty() {
+        return names(&title, addon);
+    }
+    touched.contains(&addon)
+        && (names(&title, addon) || !touched.iter().any(|other| names(&title, other)))
 }
 
 /// Looks dependencies up on the package index and the forges, remembering
@@ -122,7 +139,7 @@ pub(crate) struct Lookup<'a> {
     http: Option<ReqwestHttp>,
     pypi: String,
     /// Open pull requests per repository URL and target.
-    open: BTreeMap<String, Vec<(u64, String)>>,
+    open: BTreeMap<String, Vec<PullRequest>>,
 }
 
 impl<'a> Lookup<'a> {
@@ -184,7 +201,7 @@ impl<'a> Lookup<'a> {
 fn migration(
     ctx: &Context<'_>,
     http: &dyn Http,
-    open: &mut BTreeMap<String, Vec<(u64, String)>>,
+    open: &mut BTreeMap<String, Vec<PullRequest>>,
     url: &str,
     addon: &str,
     to: &str,
@@ -197,11 +214,8 @@ fn migration(
         client
             .open_pull_requests(&repo, kind, to)
             .unwrap_or_default()
-            .into_iter()
-            .map(|pr| (pr.number, pr.title))
-            .collect()
     });
-    let (number, _) = prs.iter().find(|(_, title)| migrates(title, addon))?;
+    let number = &prs.iter().find(|pr| migrates(pr, addon))?.number;
     let (page, head) = refs(kind, &format!("{}/{}", repo.origin(), repo.path), *number);
     Some(Migration {
         origin: repo.origin(),
@@ -216,22 +230,90 @@ fn migration(
 mod tests {
     use super::*;
 
+    fn pr(title: &str, labels: &[&str]) -> PullRequest {
+        PullRequest {
+            number: 1,
+            title: title.to_owned(),
+            state: odx_forge::PrState::Open,
+            head_sha: String::new(),
+            base: "18.0".to_owned(),
+            merged_at: None,
+            labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+            head_repository: None,
+            head_branch: String::new(),
+            maintainer_can_modify: false,
+            author: String::new(),
+            created_at: String::new(),
+        }
+    }
+
     #[test]
     fn titles_name_addons_as_words() {
-        assert!(migrates(
-            "[18.0][MIG] contract: Migration to 18.0",
-            "contract"
-        ));
-        assert!(migrates("[MIG] contract_sale, contract", "contract"));
-        assert!(!migrates(
-            "[18.0][MIG] contract_sale: Migration",
-            "contract"
-        ));
-        assert!(!migrates("[18.0][MIG] sale_contract", "contract"));
-        assert!(!migrates("[18.0][FIX] contract", "contract"));
+        let titled = |title: &str| migrates(&pr(title, &[]), "contract");
+        assert!(titled("[18.0][MIG] contract: Migration to 18.0"));
+        assert!(titled("[MIG] contract_sale, contract"));
+        assert!(titled("[18.0][mig]contract"));
+        assert!(!titled("[18.0][MIG] contract_sale: Migration"));
+        assert!(!titled("[18.0][MIG] sale_contract"));
+        assert!(!titled("[18.0][FIX] contract"));
+        assert!(!titled("Migration of contract to 18.0"));
         assert!(names("[17.0][FIX] pos_x", "pos_x"));
         assert!(!names("[17.0][FIX] pos_x", "pos"));
         assert!(!names("anything", ""));
+    }
+
+    #[test]
+    fn labels_say_which_addons_a_pull_request_touches() {
+        let labelled = |title: &str, labels: &[&str], addon: &str| {
+            migrates(
+                &pr(
+                    title,
+                    &["series:18.0", "approved"]
+                        .iter()
+                        .chain(labels)
+                        .copied()
+                        .collect::<Vec<_>>(),
+                ),
+                addon,
+            )
+        };
+        // A title that misspells the addon, labelled by the bot.
+        assert!(labelled(
+            "[18.0][MIG] contrat",
+            &["mod:contract"],
+            "contract"
+        ));
+        // A dependency the migration touches is not what it migrates.
+        let both = [
+            "mod:dbfilter_from_header",
+            "mod:base_view_inheritance_extension",
+        ];
+        assert!(labelled(
+            "[18.0][MIG] dbfilter_from_header",
+            &both,
+            "dbfilter_from_header"
+        ));
+        assert!(!labelled(
+            "[18.0][MIG] dbfilter_from_header",
+            &both,
+            "base_view_inheritance_extension"
+        ));
+        // A title naming none of them leaves every labelled addon.
+        assert!(labelled(
+            "[18.0][MIG] subscriptions",
+            &["mod:contract_sale", "mod:contract"],
+            "contract_sale"
+        ));
+        assert!(!labelled(
+            "[18.0][MIG] contract",
+            &["mod:contract_sale"],
+            "contract"
+        ));
+        assert!(!labelled(
+            "[18.0][IMP] contract",
+            &["mod:contract"],
+            "contract"
+        ));
     }
 
     #[test]

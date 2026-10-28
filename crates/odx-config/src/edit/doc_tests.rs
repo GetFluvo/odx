@@ -372,7 +372,7 @@ fn glue_is_ignored_with_a_reason() {
 }
 
 #[test]
-fn wanted_addons_are_added_replaced_and_removed() {
+fn wanted_addons_are_added_changed_and_removed() {
     let mut edit = PyprojectEdit::parse("[tool.odx]\nodoo_version = \"17.0\"\n").unwrap();
     edit.want("contract", &[], None, None).unwrap();
     edit.want(
@@ -383,9 +383,12 @@ fn wanted_addons_are_added_replaced_and_removed() {
     )
     .unwrap();
     edit.want("contract", &[], None, Some("later")).unwrap();
+    // Only what is given changes.
+    edit.want("agreement", &["18.0".to_owned()], None, None)
+        .unwrap();
     assert_eq!(
         edit.to_string(),
-        "[tool.odx]\nodoo_version = \"17.0\"\n\n[[tool.odx.wanted]]\naddon = \"contract\"\nnote = \"later\"\n\n[[tool.odx.wanted]]\naddon = \"agreement\"\nseries = [\"17.0\", \"18.0\"]\nrepository = \"OCA/contract\"\nnote = \"customer asks in Q3\"\n"
+        "[tool.odx]\nodoo_version = \"17.0\"\n\n[[tool.odx.wanted]]\naddon = \"contract\"\nnote = \"later\"\n\n[[tool.odx.wanted]]\naddon = \"agreement\"\nseries = [\"18.0\"]\nrepository = \"OCA/contract\"\nnote = \"customer asks in Q3\"\n"
     );
     edit.unwant("contract").unwrap();
     assert!(!edit.to_string().contains("\"contract\""));

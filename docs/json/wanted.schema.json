@@ -104,6 +104,13 @@
             }
           ]
         },
+        "reason": {
+          "description": "Why it was not checked, when it is unchecked: `offline`, or which\nforge did not answer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "repository": {
           "description": "The repository it is in, is migrated in or was last in.",
           "type": [

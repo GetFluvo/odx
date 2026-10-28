@@ -646,13 +646,21 @@ fn announce(
         .flat_map(|section| &section.entries)
         .filter_map(|entry| wanted::milestone(entry).map(|milestone| (entry, milestone)))
         .collect();
-    let Some(issue) = issue.filter(|_| !reached.is_empty()) else {
+    if reached.is_empty() {
         return Ok(Vec::new());
+    }
+    // Before the issue exists (a dry run), nothing was announced yet.
+    let comments = match issue {
+        Some(issue) => forge
+            .client
+            .issue_comments(&forge.repo, forge.kind, issue.number)
+            .map_err(forge_failure)?,
+        None => Vec::new(),
     };
-    let comments = forge
-        .client
-        .issue_comments(&forge.repo, forge.kind, issue.number)
-        .map_err(forge_failure)?;
+    let on = issue.map_or_else(
+        || "the new issue".to_owned(),
+        |issue| format!("#{}", issue.number),
+    );
     let mut notices = Vec::new();
     for (entry, milestone) in reached {
         let marker = wanted::marker(&entry.id, &milestone);
@@ -662,25 +670,22 @@ fn announce(
         {
             continue;
         }
-        let write = if bot.apply {
-            forge
-                .client
-                .comment(
-                    &forge.repo,
-                    forge.kind,
-                    issue.number,
-                    &wanted::notice(entry, &milestone, notify),
-                )
-                .map_err(forge_failure)?;
-            "commented"
-        } else {
-            "would comment"
+        let write = match issue.filter(|_| bot.apply) {
+            Some(issue) => {
+                forge
+                    .client
+                    .comment(
+                        &forge.repo,
+                        forge.kind,
+                        issue.number,
+                        &wanted::notice(entry, &milestone, notify),
+                    )
+                    .map_err(forge_failure)?;
+                "commented"
+            }
+            None => "would comment",
         };
-        let _ = writeln!(
-            out,
-            "{}: {} {write} on #{}",
-            entry.id, milestone, issue.number
-        );
+        let _ = writeln!(out, "{}: {} {write} on {on}", entry.id, milestone);
         notices.push(NoticeJson {
             id: entry.id.clone(),
             milestone,
