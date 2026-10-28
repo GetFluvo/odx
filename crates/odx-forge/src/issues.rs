@@ -249,8 +249,8 @@ impl ForgeClient<'_> {
         done(response.status, repo)
     }
 
-    /// The comments on issue `number` of `repo`, oldest first (the first
-    /// hundred).
+    /// The comments on issue `number` of `repo`, oldest first: all of them
+    /// on Gitea/Forgejo, page after page (at most ten) on GitHub.
     ///
     /// # Errors
     ///
@@ -264,19 +264,25 @@ impl ForgeClient<'_> {
         number: u64,
     ) -> Result<Vec<Comment>, ForgeError> {
         let api = issues_api(repo, kind)?;
-        let url = match kind {
-            ForgeKind::Gitea => format!("{api}/{number}/comments"),
-            _ => format!("{api}/{number}/comments?per_page=100"),
+        let listed = match kind {
+            // Gitea/Forgejo answer every comment of an issue at once.
+            ForgeKind::Gitea => self
+                .json(&format!("{api}/{number}/comments"), repo, kind)?
+                .map(|value| match value {
+                    Value::Array(listed) => listed,
+                    _ => Vec::new(),
+                }),
+            _ => self.pages(
+                &format!("{api}/{number}/comments?per_page=100"),
+                100,
+                repo,
+                kind,
+            )?,
         };
-        let value = self.json(&url, repo, kind)?.ok_or_else(|| {
+        let listed = listed.ok_or_else(|| {
             ForgeError::NotVisible(format!("{}/{}#{number}", repo.host, repo.path))
         })?;
-        Ok(value
-            .as_array()
-            .map_or(&[][..], Vec::as_slice)
-            .iter()
-            .map(comment)
-            .collect())
+        Ok(listed.iter().map(comment).collect())
     }
 
     /// Comment `body` on issue (or pull request) `number` of `repo`.
@@ -705,7 +711,7 @@ mod tests {
         );
         assert_eq!(
             urls,
-            ["https://api.github.com/repos/acme/project/issues/1/comments?per_page=100"]
+            ["https://api.github.com/repos/acme/project/issues/1/comments?per_page=100&page=1"]
         );
         let (found, urls) = run(vec![Ok(reply(200, "{}"))], |c| {
             c.issue_comments(&gitea(), ForgeKind::Gitea, 1)
@@ -715,6 +721,14 @@ mod tests {
             urls,
             ["https://git.acme.test/api/v1/repos/acme/project/issues/1/comments"]
         );
+        let (found, _) = run(vec![Ok(reply(200, r#"[{"id":3}]"#))], |c| {
+            c.issue_comments(&gitea(), ForgeKind::Gitea, 1)
+        });
+        assert_eq!(found.unwrap().len(), 1);
+        let (found, _) = run(vec![Ok(reply(500, ""))], |c| {
+            c.issue_comments(&gitea(), ForgeKind::Gitea, 1)
+        });
+        assert!(found.is_err());
         let (found, _) = run(vec![], |c| {
             c.issue_comments(&github(), ForgeKind::Github, 1)
         });

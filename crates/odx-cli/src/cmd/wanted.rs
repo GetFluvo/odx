@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::path::Path;
 
 use odx_config::Problem;
 use odx_config::edit::{EditError, PyprojectEdit};
@@ -13,7 +14,7 @@ use odx_core::system::OsRunner;
 use odx_dashboard::{Action, Entry};
 use odx_forge::{CachedHttp, ForgeClient, ForgeKind, Http, PullRequest, RepoUrl, ReqwestHttp};
 use odx_index::sources::distribution;
-use odx_index::{Origin, Renames, series_key};
+use odx_index::{Origin, Renames, SeriesIndex, series_key};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -23,6 +24,9 @@ use super::deps::{migrates, refs};
 use super::glue::repo_spec;
 use crate::Context;
 use crate::cli::{GlobalArgs, WantedArgs, WantedCommand};
+
+/// Why a wanted addon was not checked, offline.
+const OFFLINE: &str = "offline";
 
 /// How many series below a wanted one are searched for where the addon
 /// lived last.
@@ -56,8 +60,9 @@ pub(crate) enum State {
     /// Neither; `last` says on which series and in which repository it
     /// lived last.
     Missing { last: Option<(String, String)> },
-    /// Not there as far as the cache knows; offline, odx cannot tell more.
-    Unchecked,
+    /// Not there as far as the index knows, and odx could not ask further:
+    /// `reason` says why (offline, or the forge did not answer).
+    Unchecked { reason: String },
 }
 
 impl State {
@@ -70,7 +75,7 @@ impl State {
             Self::Available { released: true, .. } => "released",
             Self::Migrating(_) => "migrating",
             Self::Missing { .. } => "not-started",
-            Self::Unchecked => "unchecked",
+            Self::Unchecked { .. } => "unchecked",
         }
     }
 }
@@ -108,7 +113,7 @@ impl Watched {
                 dist,
                 self.addon.clone(),
             )),
-            State::Missing { .. } | State::Unchecked => None,
+            State::Missing { .. } | State::Unchecked { .. } => None,
         }
     }
 
@@ -140,9 +145,10 @@ impl Watched {
                 format!("not started; last on {series} in {}", short(url))
             }
             State::Missing { last: None } => {
-                "not started; not found on an earlier series".to_owned()
+                "not started; not found on an earlier series (set `repository` to watch for a migration)"
+                    .to_owned()
             }
-            State::Unchecked => "not checked (offline)".to_owned(),
+            State::Unchecked { reason } => format!("not checked ({reason})"),
         }
     }
 }
@@ -172,8 +178,9 @@ fn earlier(series: &str) -> Vec<String> {
 }
 
 /// The open migration pull request of `addon` on `series` in the
-/// repository at `url`; the repository's open pull requests are asked once
-/// per run, and a forge that does not answer is a warning.
+/// repository at `url`, if there is one; the repository's open pull
+/// requests are asked once per run. A repository that cannot be asked is a
+/// warning, and the error says why.
 fn migration(
     client: &ForgeClient<'_>,
     open: &mut BTreeMap<String, Option<(ForgeKind, Vec<PullRequest>)>>,
@@ -181,8 +188,14 @@ fn migration(
     addon: &str,
     series: &str,
     warnings: &mut Vec<Problem>,
-) -> Option<Migration> {
-    let repo = RepoUrl::parse(url)?;
+) -> Result<Option<Migration>, String> {
+    let Some(repo) = RepoUrl::parse(url) else {
+        warnings.push(Problem {
+            key: format!("wanted {addon}"),
+            message: format!("cannot look for a migration in {url}: no forge repository"),
+        });
+        return Err(format!("{url} is no forge repository"));
+    };
     let listed = open.entry(format!("{url} {series}")).or_insert_with(|| {
         client
             .kind(&repo)
@@ -199,21 +212,24 @@ fn migration(
             })
             .ok()
     });
-    let (kind, prs) = listed.as_ref()?;
-    let pr = prs.iter().find(|pr| migrates(&pr.title, addon))?;
-    let (page, _) = refs(
-        *kind,
-        &format!("{}/{}", repo.origin(), repo.path),
-        pr.number,
-    );
-    Some(Migration {
-        url: url.to_owned(),
-        number: pr.number,
-        title: pr.title.clone(),
-        author: pr.author.clone(),
-        opened: pr.created_at.chars().take(10).collect(),
-        page,
-    })
+    let (kind, prs) = listed
+        .as_ref()
+        .ok_or_else(|| format!("{} did not answer", repo.host))?;
+    Ok(prs.iter().find(|pr| migrates(pr, addon)).map(|pr| {
+        let (page, _) = refs(
+            *kind,
+            &format!("{}/{}", repo.origin(), repo.path),
+            pr.number,
+        );
+        Migration {
+            url: url.to_owned(),
+            number: pr.number,
+            title: pr.title.clone(),
+            author: pr.author.clone(),
+            opened: pr.created_at.chars().take(10).collect(),
+            page,
+        }
+    }))
 }
 
 /// Where every wanted addon stands on each of its series.
@@ -234,8 +250,12 @@ pub(crate) fn watch(
     let online = http.as_ref().map(|http| http as &dyn Http);
     // Each wanted series and the ones below it, with every wanted addon.
     let mut lookups: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut own: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for wanted in &config.wanted {
         for series in config.wanted_series(wanted) {
+            own.entry(series.clone())
+                .or_default()
+                .insert(wanted.addon.clone());
             for indexed in std::iter::once(series.clone()).chain(earlier(&series)) {
                 lookups
                     .entry(indexed)
@@ -248,6 +268,9 @@ pub(crate) fn watch(
         .into_iter()
         .map(|(series, addons)| (series, addons.into_iter().collect()))
         .collect();
+    if online.is_some() {
+        ask_again(prepared.cache.root(), &own);
+    }
     let index = super::upgrade::addon_index(
         ctx,
         prepared,
@@ -263,10 +286,11 @@ pub(crate) fn watch(
     let mut watched = Vec::new();
     for wanted in &config.wanted {
         for series in config.wanted_series(wanted) {
-            let standing = standing(&index, wanted, &series, |url| {
-                client.as_ref().map(|client| {
-                    migration(client, &mut open, url, &wanted.addon, &series, warnings)
-                })
+            let standing = standing(&index, wanted, &series, client.is_some(), |url| {
+                client.as_ref().map_or_else(
+                    || Err(OFFLINE.to_owned()),
+                    |client| migration(client, &mut open, url, &wanted.addon, &series, warnings),
+                )
             });
             watched.push(Watched {
                 addon: wanted.addon.clone(),
@@ -279,13 +303,28 @@ pub(crate) fn watch(
     watched
 }
 
+/// Forget that the package index did not know the wanted addons on their
+/// own series, so this run asks it again: a migration merged since is seen
+/// once it is released, not only when the cached index expires.
+fn ask_again(cache: &Path, wanted: &BTreeMap<String, BTreeSet<String>>) {
+    for (series, addons) in wanted {
+        if let Some(mut index) = SeriesIndex::load(cache, series) {
+            index.unknown.retain(|addon| !addons.contains(addon));
+            // A cache that cannot be written only costs lookups next time.
+            let _ = index.save(cache);
+        }
+    }
+}
+
 /// Where `wanted` stands on `series`: there, else migrating in its
-/// repository (`find` asks the forge; `None` offline), else not started.
+/// repository (`find` asks the forge, or says why it cannot), else not
+/// started.
 fn standing(
     index: &odx_index::AddonIndex,
     wanted: &Wanted,
     series: &str,
-    mut find: impl FnMut(&str) -> Option<Option<Migration>>,
+    online: bool,
+    mut find: impl FnMut(&str) -> Result<Option<Migration>, String>,
 ) -> State {
     let addon = &wanted.addon;
     if let Some(location) = index.locate(addon, series) {
@@ -306,12 +345,19 @@ fn standing(
         .map(repository_url)
         .or_else(|| last.as_ref().map(|(_, url)| url.clone()));
     let Some(url) = repository else {
-        return State::Missing { last };
+        // Offline, the index only knows what it learnt before.
+        return if online {
+            State::Missing { last }
+        } else {
+            State::Unchecked {
+                reason: OFFLINE.to_owned(),
+            }
+        };
     };
     match find(&url) {
-        None => State::Unchecked,
-        Some(Some(migration)) => State::Migrating(migration),
-        Some(None) => State::Missing { last },
+        Err(reason) => State::Unchecked { reason },
+        Ok(Some(migration)) => State::Migrating(migration),
+        Ok(None) => State::Missing { last },
     }
 }
 
@@ -397,6 +443,9 @@ struct WatchedJson<'a> {
     last_series: Option<&'a str>,
     /// The migration pull request, when it is migrating.
     pull_request: Option<MigrationJson<'a>>,
+    /// Why it was not checked, when it is unchecked: `offline`, or which
+    /// forge did not answer.
+    reason: Option<&'a str>,
     /// The `odx add` command that adds it, on the project's series.
     add: Option<String>,
 }
@@ -441,7 +490,11 @@ fn json(watched: &[Watched], series: &str) -> String {
                         last.as_ref().map(|(series, _)| series.as_str()),
                         None,
                     ),
-                    State::Unchecked => (None, None, None),
+                    State::Unchecked { .. } => (None, None, None),
+                };
+                let reason = match &watched.standing {
+                    State::Unchecked { reason } => Some(reason.as_str()),
+                    _ => None,
                 };
                 WatchedJson {
                     addon: &watched.addon,
@@ -451,6 +504,7 @@ fn json(watched: &[Watched], series: &str) -> String {
                     repository,
                     last_series,
                     pull_request,
+                    reason,
                     add: watched.add_command(series),
                 }
             })
@@ -529,8 +583,23 @@ fn wanted(args: &WantedArgs, global: &GlobalArgs, ctx: &Context<'_>) -> Result<R
                     edit.want(addon, series, repository.as_deref(), note.as_deref())
                 }),
             )?;
+            let mut out =
+                format!("{addon} is wanted in {file}; `odx wanted` shows where it stands\n");
+            let located = repository.is_some()
+                || prepared
+                    .project
+                    .config
+                    .wanted
+                    .iter()
+                    .any(|known| known.addon == *addon && known.repository.is_some());
+            if !located {
+                let _ = writeln!(
+                    out,
+                    "without a repository, odx looks for one on the {LOOKBACK} series before; pass --repository for an addon that did not live there"
+                );
+            }
             Ok(Report {
-                out: format!("{addon} is wanted in {file}; `odx wanted` shows where it stands\n"),
+                out,
                 ..Report::default()
             })
         }
@@ -689,10 +758,15 @@ mod tests {
         let missing = watched("18.0", State::Missing { last: None });
         assert_eq!(
             missing.describe(),
-            "not started; not found on an earlier series"
+            "not started; not found on an earlier series (set `repository` to watch for a migration)"
         );
         assert_eq!(missing.add_command("18.0"), None);
-        let unchecked = watched("18.0", State::Unchecked);
+        let unchecked = watched(
+            "18.0",
+            State::Unchecked {
+                reason: OFFLINE.to_owned(),
+            },
+        );
         assert_eq!(
             (unchecked.standing.name(), unchecked.describe().as_str()),
             ("unchecked", "not checked (offline)")

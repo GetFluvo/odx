@@ -338,8 +338,8 @@ $ odx wanted remove contract
 
 A customer will want an addon some day, but not yet; on the project's
 series, or on the next one, it may not even exist yet. `odx wanted add`
-records it in `pyproject.toml`, and `odx wanted` says per series where it
-stands:
+records it in `pyproject.toml` (run again, it changes only what it is
+given), and `odx wanted` says per series where it stands:
 
 ```toml
 [[tool.odx.wanted]]
@@ -360,21 +360,32 @@ contract (customer asks in Q3)
 | State | Means |
 | --- | --- |
 | `available`, `released` | on the series: in a repository the addon index knows, or released on the package index |
-| `migrating` | not on the series yet, but a `[MIG]` pull request naming the addon is open in its repository |
+| `migrating` | not on the series yet, but a migration pull request of the addon is open in its repository |
 | `not-started` | neither; odx says on which series it was last, up to three series back |
-| `unchecked` | offline, and the cache cannot tell |
+| `unchecked` | odx could not ask: offline, or the forge did not answer; `--json` says why in `reason` |
 
 The repository is where the addon lived on an earlier series, unless
-`repository` names it. Only the open pull requests of that repository are
-read, and a title must name the addon as a whole word: `[17.0][MIG]
-contract_sale` does not count for `contract`. What the index learnt is kept
-for `[tool.odx.index] ttl`; `--fresh` asks again.
+`repository` names it; an addon that is new, or lived more than three
+series back, needs `repository` to be watched for a migration. The open
+pull requests of that repository targeting the series are read (up to ten
+pages). A migration pull request says `[MIG]` in its title, in any case.
+Which addon it is about comes from the `mod:<addon>` labels the OCA bot
+puts on pull requests, and the title picks among them when there are
+several; without such labels, the title must name the addon as a whole
+word: `[17.0][MIG] contract_sale` does not count for `contract`.
 
-On the project's series, a wanted addon that is there or being migrated is
-offered in the dashboard's `wanted` section: `odx dashboard act
-want:contract@17.0 --include` adds it as a package, from the migration pull
-request when it is not merged yet, so the project need not migrate it
-itself. The bot announces each step with a comment on the dashboard issue,
+Every run asks the package index again for a wanted addon it did not know
+on the wanted series, so a migration merged since is seen as soon as it is
+released; the rest of what the index learnt is kept for `[tool.odx.index]
+ttl`, and `--fresh` asks again. Between the merge and the release the
+addon is `not-started` for a while, unless the organization's listing
+(`[tool.odx.index] orgs`) finds it on the branch.
+
+A wanted addon that is there or being migrated is listed in the dashboard's
+`wanted` section, on each series it is watched on. On the project's series
+it is also offered: `odx dashboard act want:contract@17.0 --include` adds
+it as a package, from the migration pull request when it is not merged yet,
+so the project need not migrate it itself. The bot announces each step with a comment on the dashboard issue,
 once per step, since an edited issue notifies nobody; the people in
 `[tool.odx.bot] notify` are mentioned:
 
@@ -386,5 +397,7 @@ notify = ["jane"]
 The comment for a new migration pull request reads `@jane Someone started
 migrating the wanted addon contract on 17.0: OCA/contract#1234 by joe,
 opened 2026-05-06.` A later pull request, or the addon arriving on the
-series, makes another. Outside the bot, `odx --json wanted` gives the same
+series, makes another; `available` and `released` are one step, so a
+release after the addon is on the branch makes no second comment. A dry run (`odx bot dashboard` without `--apply`) lists the
+comments it would post. Outside the bot, `odx --json wanted` gives the same
 states to a scheduler of your own.

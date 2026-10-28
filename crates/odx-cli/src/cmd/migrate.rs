@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 use odx_config::Problem;
 use odx_core::Exit;
 use odx_core::system::OsRunner;
-use odx_forge::{ForgeClient, Http, ReqwestHttp};
+use odx_forge::{ForgeClient, Http, PullRequest, ReqwestHttp};
 use odx_port::migrate::{Finding, InPlace, Outcome, Plan, State, Summary, Tools, Worktree};
 use odx_port::squash::Rules;
 use schemars::JsonSchema;
@@ -468,8 +468,8 @@ fn repository_plan(
     };
     let pr_of = |addon: &str| {
         open.iter()
-            .find(|(_, title)| super::deps::migrates(title, addon))
-            .map(|(number, _)| *number)
+            .find(|pr| super::deps::migrates(pr, addon))
+            .map(|pr| pr.number)
     };
     let (prs, todo): (Vec<&str>, Vec<&str>) = missing
         .into_iter()
@@ -582,14 +582,14 @@ impl RepositoryPlan<'_> {
     }
 }
 
-/// The open pull requests targeting `to` on `remote`'s forge, as number
-/// and title; a forge that cannot be asked is a warning.
+/// The open pull requests targeting `to` on `remote`'s forge; a forge that
+/// cannot be asked is a warning.
 fn open_migrations(
     ctx: &Context<'_>,
     remote: &str,
     to: &str,
     warnings: &mut Vec<Problem>,
-) -> Vec<(u64, String)> {
+) -> Vec<PullRequest> {
     let Some(repo) = forge_repo(ctx, remote) else {
         return Vec::new();
     };
@@ -603,7 +603,7 @@ fn open_migrations(
         })
         .map_err(|e| e.to_string());
     match open {
-        Ok(prs) => prs.into_iter().map(|pr| (pr.number, pr.title)).collect(),
+        Ok(prs) => prs,
         Err(e) => {
             warnings.push(Problem {
                 key: "migrate".to_owned(),
@@ -674,9 +674,7 @@ fn migration_pr(ctx: &Context<'_>, plan: &Plan, warnings: &mut Vec<Problem>) -> 
         .map_err(|e| e.to_string());
     match open {
         Ok(prs) => {
-            let existing = prs
-                .iter()
-                .find(|pr| super::deps::migrates(&pr.title, &plan.addon));
+            let existing = prs.iter().find(|pr| super::deps::migrates(pr, &plan.addon));
             if let Some(pr) = existing {
                 return Err(Report::error(
                     Exit::Failure,

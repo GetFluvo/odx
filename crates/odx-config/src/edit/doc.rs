@@ -231,8 +231,9 @@ impl PyprojectEdit {
         Ok(())
     }
 
-    /// Add `addon` as a `[[tool.odx.wanted]]` entry, or replace the entry
-    /// it has; `series` empty watches the project's series.
+    /// Add `addon` as a `[[tool.odx.wanted]]` entry, or change the entry
+    /// it has: what is given replaces what it says, the rest stays. A new
+    /// entry without `series` watches the project's series.
     ///
     /// # Errors
     ///
@@ -245,8 +246,16 @@ impl PyprojectEdit {
         repository: Option<&str>,
         note: Option<&str>,
     ) -> Result<(), EditError> {
-        let mut table = Table::new();
-        table.insert("addon", Item::Value(Value::from(addon)));
+        let wanted = self.wanted()?;
+        let known = wanted.iter().position(|known| is_addon(known, addon));
+        let mut table = known
+            .and_then(|at| wanted.get(at))
+            .cloned()
+            .unwrap_or_else(|| {
+                let mut table = Table::new();
+                table.insert("addon", Item::Value(Value::from(addon)));
+                table
+            });
         if !series.is_empty() {
             table.insert(
                 "series",
@@ -259,8 +268,6 @@ impl PyprojectEdit {
         if let Some(note) = note {
             table.insert("note", Item::Value(Value::from(note)));
         }
-        let wanted = self.wanted()?;
-        let known = wanted.iter().position(|known| is_addon(known, addon));
         match known.and_then(|at| wanted.get_mut(at)) {
             Some(known) => *known = table,
             None => wanted.push(table),

@@ -66,6 +66,9 @@ const ATTEMPTS: usize = 3;
 /// The longest wait for a rate limit to reset.
 const MAX_WAIT: Duration = Duration::from_secs(60);
 
+/// How many pages of a listing (pull requests, comments) are read at most.
+pub(crate) const LIST_PAGES: u32 = 10;
+
 /// The token for `host`: `ODX_TOKEN_<HOST>` (upper case, other characters
 /// as `_`), then the forge's conventional variables, then for GitHub
 /// `gh auth token`. Empty values are ignored.
@@ -283,6 +286,34 @@ impl<'a> ForgeClient<'a> {
                 status,
             }),
         }
+    }
+
+    /// The items of the listing at `url`, whose query asks for pages of
+    /// `size`, read page after page until a short one (at most
+    /// [`LIST_PAGES`]); `None` when the forge answers 404 on the first.
+    pub(crate) fn pages(
+        &self,
+        url: &str,
+        size: usize,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+    ) -> Result<Option<Vec<Value>>, ForgeError> {
+        let mut items = Vec::new();
+        for page in 1..=LIST_PAGES {
+            let Some(value) = self.json(&format!("{url}&page={page}"), repo, kind)? else {
+                return Ok((page > 1).then_some(items));
+            };
+            let listed = match value {
+                Value::Array(listed) => listed,
+                _ => Vec::new(),
+            };
+            let last = listed.len() < size;
+            items.extend(listed);
+            if last {
+                break;
+            }
+        }
+        Ok(Some(items))
     }
 
     /// The API URL of `repo` itself, under which its pull requests,
