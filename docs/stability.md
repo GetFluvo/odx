@@ -16,8 +16,9 @@ so a typo never passes as a setting that does nothing.
 
 - A new key is optional and has a default, so a configuration that worked
   keeps working.
-- A removed key is still recognised: the error says which release removed
-  it and what replaces it, if anything.
+- A removed key is still recognised, under its own header or in an inline
+  table: the error says which release removed it and what replaces it, if
+  anything.
 
   ```console
   $ odx status
@@ -25,12 +26,15 @@ so a typo never passes as a setting that does nothing.
   `dashboard.show_backports` was removed in odx 0.0.9, it had no effect; list `backport` in `sections`
   ```
 
-- A renamed key keeps its old name for at least one release, with a warning
-  that names the new one.
+- When a key is renamed, its old name is accepted for at least one more
+  release, with a warning that names the new one. No key has been renamed
+  so far.
 
 The [configuration reference](configuration.md) is generated from the code,
-so it lists exactly the keys a release accepts. The same rules apply to the
-[user configuration](user-config.md).
+so it lists exactly the keys a release accepts. The
+[user configuration](user-config.md) is strict in the same way, and keeps
+to the same rules for new, renamed and removed keys; none of its keys has
+been removed so far.
 
 ## `odx.lock`
 
