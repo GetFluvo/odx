@@ -68,16 +68,26 @@ fn table_at(text: &str, offset: usize) -> Option<&str> {
 }
 
 /// `message` with what replaced the key, when the parser's `message` at
-/// `offset` of `text` is an unknown field that a release removed.
+/// `offset` of `text` is an unknown field that a release removed. The key
+/// may sit under its own header, or in an inline or dotted table below the
+/// header in force (`dashboard = { show_backports = true }` under
+/// `[tool.odx]`).
 pub(crate) fn explain(text: &str, offset: usize, message: &str) -> Option<String> {
     let key = message.strip_prefix("unknown field `")?.split_once('`')?.0;
     let table = table_at(text, offset)?;
+    let below = |removed: &Removed| {
+        table.is_empty()
+            || removed
+                .table
+                .strip_prefix(table)
+                .is_some_and(|rest| rest.starts_with('.'))
+    };
     let removed = REMOVED
         .iter()
-        .find(|removed| removed.table == table && removed.key == key)?;
+        .find(|removed| removed.key == key && (removed.table == table || below(removed)))?;
     let mut note = format!(
-        "`{table}.{key}` was removed in odx {}, it had no effect",
-        removed.release
+        "`{}.{key}` was removed in odx {}, it had no effect",
+        removed.table, removed.release
     );
     if let Some(instead) = removed.instead {
         note.push_str("; ");
@@ -114,17 +124,19 @@ mod tests {
     #[test]
     fn every_removed_key_is_rejected_with_its_note() {
         for removed in REMOVED {
-            let text = format!(
-                "[tool.odx]\nodoo_version = \"17.0\"\n\n[tool.odx.{}]\n{} = 1\n",
-                removed.table, removed.key
-            );
-            let err = crate::parse_pyproject(&text, std::path::Path::new("p.toml"))
-                .unwrap_err()
-                .to_string();
-            assert!(
-                err.contains(&format!("`{}.{}` was removed", removed.table, removed.key)),
-                "{err}"
-            );
+            let (table, key) = (removed.table, removed.key);
+            for text in [
+                format!("[tool.odx]\nodoo_version = \"17.0\"\n\n[tool.odx.{table}]\n{key} = 1\n"),
+                format!("[tool.odx]\nodoo_version = \"17.0\"\n{table}.{key} = 1\n"),
+            ] {
+                let err = crate::parse_pyproject(&text, std::path::Path::new("p.toml"))
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    err.contains(&format!("`{table}.{key}` was removed")),
+                    "{err}"
+                );
+            }
         }
     }
 
@@ -152,6 +164,26 @@ mod tests {
             None
         );
         assert_eq!(explain(text, at, "unknown field `retries`"), None);
+        // Inline and dotted tables below the header in force.
+        for text in [
+            "[tool.odx]\ndashboard = { show_backports = true }\n",
+            "[tool.odx.cache]\nttl.index = \"1d\"\n",
+        ] {
+            let key = if text.contains("ttl") {
+                "index"
+            } else {
+                "show_backports"
+            };
+            let explained = explain(text, text.len() - 2, &format!("unknown field `{key}`"));
+            assert!(
+                explained.unwrap().contains("was removed in odx 0.0.9"),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            explain("[tool.odx.cache]\nhttp = { offline = 1 }\n", 30, message),
+            None
+        );
         assert_eq!(explain(text, at, "invalid type: integer"), None);
         assert_eq!(explain(text, at, "unknown field `offline"), None);
         assert_eq!(explain("offline = 1\n", 0, message), None);
