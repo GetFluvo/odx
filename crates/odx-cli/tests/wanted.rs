@@ -194,13 +194,17 @@ fn offline_only_the_cache_answers() {
     let (_, out, _) = setup.odx(&["--offline", "wanted"]);
     assert!(out.contains("  17.0  released in OCA/contract\n"), "{out}");
     assert!(
-        out.contains("agreement\n  17.0  not checked (offline)\n"),
+        out.contains("agreement\n  17.0  not checked (offline); last on 16.0 in OCA/agreement\n"),
         "{out}"
     );
     let (_, out, _) = setup.odx(&["--offline", "--json", "wanted"]);
     let value: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(value["addons"][1]["state"], "unchecked");
-    assert_eq!(value["addons"][1]["repository"], serde_json::Value::Null);
+    assert_eq!(
+        value["addons"][1]["repository"],
+        format!("{}/OCA/agreement", setup.api)
+    );
+    assert_eq!(value["addons"][1]["last_series"], "16.0");
     assert_eq!(value["addons"][1]["reason"], "offline");
 }
 
@@ -270,8 +274,16 @@ fn a_merged_migration_is_available_before_its_release() {
     let setup = Setup::new();
     let (_, out, _) = setup.odx(&["wanted"]);
     assert!(out.contains("rma\n  17.0  not started"), "{out}");
+    // On the series branch but not installable yet: not there.
+    let manifest = "/api/v3/repos/OCA/rma/contents/rma/__manifest__.py";
+    setup.route(
+        manifest,
+        r#"{"content":"eyduYW1lJzogJ3JtYScsICdpbnN0YWxsYWJsZSc6IEZhbHNlfQ=="}"#,
+    );
+    let (_, out, _) = setup.odx(&["wanted"]);
+    assert!(out.contains("rma\n  17.0  not started"), "{out}");
     // Merged on the series branch, not released yet.
-    setup.route("/api/v3/repos/OCA/rma/contents/rma/__manifest__.py", "{}");
+    setup.route(manifest, r#"{"content":"eyduYW1lJzogJ3JtYSd9"}"#);
     let (_, out, _) = setup.odx(&["wanted"]);
     let api = &setup.api;
     assert!(
@@ -279,13 +291,16 @@ fn a_merged_migration_is_available_before_its_release() {
         "{out}"
     );
     // A forge that fails to say leaves it unchecked.
-    setup.routes.lock().unwrap().insert(
-        "/api/v3/repos/OCA/rma/contents/rma/__manifest__.py".to_owned(),
-        (500, String::new()),
-    );
+    setup
+        .routes
+        .lock()
+        .unwrap()
+        .insert(manifest.to_owned(), (500, String::new()));
     let (_, out, err) = setup.odx(&["wanted"]);
     assert!(
-        out.contains("rma\n  17.0  not checked (127.0.0.1 did not answer)\n"),
+        out.contains(
+            "rma\n  17.0  not checked (127.0.0.1 did not answer); last on 16.0 in OCA/rma\n"
+        ),
         "{out}"
     );
     assert!(err.contains("wanted OCA/rma"), "{err}");

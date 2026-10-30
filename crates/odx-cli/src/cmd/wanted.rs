@@ -61,8 +61,12 @@ pub(crate) enum State {
     /// lived last.
     Missing { last: Option<(String, String)> },
     /// Not there as far as the index knows, and odx could not ask further:
-    /// `reason` says why (offline, or the forge did not answer).
-    Unchecked { reason: String },
+    /// `reason` says why (offline, or the forge did not answer); `last` as
+    /// for [`State::Missing`].
+    Unchecked {
+        reason: String,
+        last: Option<(String, String)>,
+    },
 }
 
 impl State {
@@ -148,7 +152,11 @@ impl Watched {
                 "not started; not found on an earlier series (set `repository` to watch for a migration)"
                     .to_owned()
             }
-            State::Unchecked { reason } => format!("not checked ({reason})"),
+            State::Unchecked {
+                reason,
+                last: Some((series, url)),
+            } => format!("not checked ({reason}); last on {series} in {}", short(url)),
+            State::Unchecked { reason, last: None } => format!("not checked ({reason})"),
         }
     }
 }
@@ -192,7 +200,7 @@ fn upstream(
 ) -> Result<Option<State>, String> {
     let Some(repo) = RepoUrl::parse(url) else {
         warnings.push(Problem {
-            key: format!("wanted {addon}"),
+            key: format!("wanted {}", short(url)),
             message: format!("cannot look for a migration in {url}: no forge repository"),
         });
         return Err(format!("{url} is no forge repository"));
@@ -230,14 +238,18 @@ fn upstream(
             page,
         })));
     }
-    let merged = client.has_addon(&repo, *kind, series, addon).map_err(|e| {
+    let manifest = client.manifest(&repo, *kind, series, addon).map_err(|e| {
         warnings.push(Problem {
             key: format!("wanted {}", short(url)),
             message: e.to_string(),
         });
         silent()
     })?;
-    Ok(merged.then(|| State::Available {
+    // An addon kept on the branch but not installable is not there yet.
+    let installable = manifest.is_some_and(|text| {
+        odx_analyze::manifest::parse_manifest(&text).map_or(true, |manifest| manifest.installable)
+    });
+    Ok(installable.then(|| State::Available {
         url: url.to_owned(),
         path: addon.to_owned(),
         released: false,
@@ -363,11 +375,12 @@ fn standing(
         } else {
             State::Unchecked {
                 reason: OFFLINE.to_owned(),
+                last,
             }
         };
     };
     match find(&url) {
-        Err(reason) => State::Unchecked { reason },
+        Err(reason) => State::Unchecked { reason, last },
         Ok(Some(found)) => found,
         Ok(None) => State::Missing { last },
     }
@@ -451,7 +464,7 @@ struct WatchedJson<'a> {
     state: &'static str,
     /// The repository it is in, is migrated in or was last in.
     repository: Option<&'a str>,
-    /// The series it was last on, when it is not started.
+    /// The series it was last on, when it is not started or unchecked.
     last_series: Option<&'a str>,
     /// The migration pull request, when it is migrating.
     pull_request: Option<MigrationJson<'a>>,
@@ -497,15 +510,14 @@ fn json(watched: &[Watched], series: &str) -> String {
                             url: &migration.page,
                         }),
                     ),
-                    State::Missing { last } => (
+                    State::Missing { last } | State::Unchecked { last, .. } => (
                         last.as_ref().map(|(_, url)| url.as_str()),
                         last.as_ref().map(|(series, _)| series.as_str()),
                         None,
                     ),
-                    State::Unchecked { .. } => (None, None, None),
                 };
                 let reason = match &watched.standing {
-                    State::Unchecked { reason } => Some(reason.as_str()),
+                    State::Unchecked { reason, .. } => Some(reason.as_str()),
                     _ => None,
                 };
                 WatchedJson {
@@ -777,12 +789,28 @@ mod tests {
             "18.0",
             State::Unchecked {
                 reason: OFFLINE.to_owned(),
+                last: None,
             },
         );
         assert_eq!(
             (unchecked.standing.name(), unchecked.describe().as_str()),
             ("unchecked", "not checked (offline)")
         );
+        let known = watched(
+            "18.0",
+            State::Unchecked {
+                reason: OFFLINE.to_owned(),
+                last: Some((
+                    "17.0".to_owned(),
+                    "https://github.com/OCA/contract".to_owned(),
+                )),
+            },
+        );
+        assert_eq!(
+            known.describe(),
+            "not checked (offline); last on 17.0 in OCA/contract"
+        );
+        assert_eq!(known.add_command("18.0"), None);
         assert_eq!(unchecked.add_command("18.0"), None);
     }
 }

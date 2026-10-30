@@ -38,6 +38,7 @@ odx-bot = { path = "crates/odx-bot", version = "0.0.10" }
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
+base64 = "0.22"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "blocking", "json", "http2", "charset", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
