@@ -266,6 +266,32 @@ fn a_release_since_the_last_run_is_seen_at_once() {
 }
 
 #[test]
+fn a_merged_migration_is_available_before_its_release() {
+    let setup = Setup::new();
+    let (_, out, _) = setup.odx(&["wanted"]);
+    assert!(out.contains("rma\n  17.0  not started"), "{out}");
+    // Merged on the series branch, not released yet.
+    setup.route("/api/v3/repos/OCA/rma/contents/rma/__manifest__.py", "{}");
+    let (_, out, _) = setup.odx(&["wanted"]);
+    let api = &setup.api;
+    assert!(
+        out.contains(&format!("rma\n  17.0  available in OCA/rma\n        odx add {api}/OCA/rma@17.0 --package odoo-addon-rma --subdirectory rma\n")),
+        "{out}"
+    );
+    // A forge that fails to say leaves it unchecked.
+    setup.routes.lock().unwrap().insert(
+        "/api/v3/repos/OCA/rma/contents/rma/__manifest__.py".to_owned(),
+        (500, String::new()),
+    );
+    let (_, out, err) = setup.odx(&["wanted"]);
+    assert!(
+        out.contains("rma\n  17.0  not checked (127.0.0.1 did not answer)\n"),
+        "{out}"
+    );
+    assert!(err.contains("wanted OCA/rma"), "{err}");
+}
+
+#[test]
 fn adding_and_removing() {
     let setup = Setup::new();
     let (exit, out, err) = setup.odx(&[

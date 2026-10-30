@@ -177,18 +177,19 @@ fn earlier(series: &str) -> Vec<String> {
         .collect()
 }
 
-/// The open migration pull request of `addon` on `series` in the
-/// repository at `url`, if there is one; the repository's open pull
-/// requests are asked once per run. A repository that cannot be asked is a
-/// warning, and the error says why.
-fn migration(
+/// Where `addon` stands on `series` in the repository at `url`: migrating
+/// in an open pull request, else on the branch already (merged but not
+/// released yet), else nowhere. The repository's open pull requests are
+/// asked once per run. A repository that cannot be asked is a warning, and
+/// the error says why.
+fn upstream(
     client: &ForgeClient<'_>,
     open: &mut BTreeMap<String, Option<(ForgeKind, Vec<PullRequest>)>>,
     url: &str,
     addon: &str,
     series: &str,
     warnings: &mut Vec<Problem>,
-) -> Result<Option<Migration>, String> {
+) -> Result<Option<State>, String> {
     let Some(repo) = RepoUrl::parse(url) else {
         warnings.push(Problem {
             key: format!("wanted {addon}"),
@@ -212,23 +213,34 @@ fn migration(
             })
             .ok()
     });
-    let (kind, prs) = listed
-        .as_ref()
-        .ok_or_else(|| format!("{} did not answer", repo.host))?;
-    Ok(prs.iter().find(|pr| migrates(pr, addon)).map(|pr| {
+    let silent = || format!("{} did not answer", repo.host);
+    let (kind, prs) = listed.as_ref().ok_or_else(silent)?;
+    if let Some(pr) = prs.iter().find(|pr| migrates(pr, addon)) {
         let (page, _) = refs(
             *kind,
             &format!("{}/{}", repo.origin(), repo.path),
             pr.number,
         );
-        Migration {
+        return Ok(Some(State::Migrating(Migration {
             url: url.to_owned(),
             number: pr.number,
             title: pr.title.clone(),
             author: pr.author.clone(),
             opened: pr.created_at.chars().take(10).collect(),
             page,
-        }
+        })));
+    }
+    let merged = client.has_addon(&repo, *kind, series, addon).map_err(|e| {
+        warnings.push(Problem {
+            key: format!("wanted {}", short(url)),
+            message: e.to_string(),
+        });
+        silent()
+    })?;
+    Ok(merged.then(|| State::Available {
+        url: url.to_owned(),
+        path: addon.to_owned(),
+        released: false,
     }))
 }
 
@@ -289,7 +301,7 @@ pub(crate) fn watch(
             let standing = standing(&index, wanted, &series, client.is_some(), |url| {
                 client.as_ref().map_or_else(
                     || Err(OFFLINE.to_owned()),
-                    |client| migration(client, &mut open, url, &wanted.addon, &series, warnings),
+                    |client| upstream(client, &mut open, url, &wanted.addon, &series, warnings),
                 )
             });
             watched.push(Watched {
@@ -317,14 +329,14 @@ fn ask_again(cache: &Path, wanted: &BTreeMap<String, BTreeSet<String>>) {
 }
 
 /// Where `wanted` stands on `series`: there, else migrating in its
-/// repository (`find` asks the forge, or says why it cannot), else not
-/// started.
+/// repository or merged there (`find` asks the forge, or says why it
+/// cannot), else not started.
 fn standing(
     index: &odx_index::AddonIndex,
     wanted: &Wanted,
     series: &str,
     online: bool,
-    mut find: impl FnMut(&str) -> Result<Option<Migration>, String>,
+    mut find: impl FnMut(&str) -> Result<Option<State>, String>,
 ) -> State {
     let addon = &wanted.addon;
     if let Some(location) = index.locate(addon, series) {
@@ -356,7 +368,7 @@ fn standing(
     };
     match find(&url) {
         Err(reason) => State::Unchecked { reason },
-        Ok(Some(migration)) => State::Migrating(migration),
+        Ok(Some(found)) => found,
         Ok(None) => State::Missing { last },
     }
 }

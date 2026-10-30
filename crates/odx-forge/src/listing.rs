@@ -67,6 +67,31 @@ impl ForgeClient<'_> {
         }
     }
 
+    /// Whether branch `series` of `repo` has addon `addon`: a manifest at
+    /// `<addon>/__manifest__.py`. A missing branch has none.
+    ///
+    /// # Errors
+    ///
+    /// Network, status, JSON and rate-limit errors.
+    pub fn has_addon(
+        &self,
+        repo: &RepoUrl,
+        kind: ForgeKind,
+        series: &str,
+        addon: &str,
+    ) -> Result<bool, ForgeError> {
+        let api = Self::repo_api(repo, kind);
+        let url = match kind {
+            ForgeKind::Gitlab => {
+                format!("{api}/repository/files/{addon}%2F__manifest__.py?ref={series}")
+            }
+            ForgeKind::Github | ForgeKind::Gitea => {
+                format!("{api}/contents/{addon}/__manifest__.py?ref={series}")
+            }
+        };
+        Ok(self.json(&url, repo, kind)?.is_some())
+    }
+
     fn github_listing(
         &self,
         site: &RepoUrl,
@@ -411,6 +436,43 @@ mod tests {
             result,
             Err(ForgeError::NotVisible("codeberg.org/o".to_owned()))
         );
+    }
+
+    #[test]
+    fn an_addon_on_a_branch_is_its_manifest() {
+        for (url, kind, status, asked) in [
+            (
+                "https://github.com/OCA/rma",
+                ForgeKind::Github,
+                200,
+                "https://api.github.com/repos/OCA/rma/contents/rma/__manifest__.py?ref=17.0",
+            ),
+            (
+                "https://gitlab.com/g/rma",
+                ForgeKind::Gitlab,
+                404,
+                "https://gitlab.com/api/v4/projects/g%2Frma/repository/files/rma%2F__manifest__.py?ref=17.0",
+            ),
+            (
+                "https://codeberg.org/o/rma",
+                ForgeKind::Gitea,
+                500,
+                "https://codeberg.org/api/v1/repos/o/rma/contents/rma/__manifest__.py?ref=17.0",
+            ),
+        ] {
+            let http = Scripted::new(vec![Ok(reply(status, "{}"))]);
+            let env = MapEnv::default();
+            let runner = ScriptedRunner::default();
+            let client = ForgeClient::new(&http, &env, &runner, &std::thread::sleep);
+            let repo = RepoUrl::parse(url).unwrap();
+            let found = client.has_addon(&repo, kind, "17.0", "rma");
+            assert_eq!(http.urls(), [asked]);
+            match status {
+                200 => assert_eq!(found, Ok(true)),
+                404 => assert_eq!(found, Ok(false)),
+                _ => assert!(found.is_err()),
+            }
+        }
     }
 
     #[test]
