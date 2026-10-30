@@ -8,6 +8,8 @@
 //! organizations). GitLab and Gitea/Forgejo list the repositories and then
 //! read each series tree, where only directories with a manifest count.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 
 use crate::{ForgeClient, ForgeError, ForgeKind, RepoUrl};
@@ -67,19 +69,21 @@ impl ForgeClient<'_> {
         }
     }
 
-    /// Whether branch `series` of `repo` has addon `addon`: a manifest at
-    /// `<addon>/__manifest__.py`. A missing branch has none.
+    /// The manifest of addon `addon` on branch `series` of `repo`
+    /// (`<addon>/__manifest__.py`); `None` when it is not there, or the
+    /// branch is missing.
     ///
     /// # Errors
     ///
-    /// Network, status, JSON and rate-limit errors.
-    pub fn has_addon(
+    /// Network, status, JSON and rate-limit errors, and a file that is not
+    /// base64-encoded UTF-8.
+    pub fn manifest(
         &self,
         repo: &RepoUrl,
         kind: ForgeKind,
         series: &str,
         addon: &str,
-    ) -> Result<bool, ForgeError> {
+    ) -> Result<Option<String>, ForgeError> {
         let api = Self::repo_api(repo, kind);
         let url = match kind {
             ForgeKind::Gitlab => {
@@ -89,7 +93,22 @@ impl ForgeClient<'_> {
                 format!("{api}/contents/{addon}/__manifest__.py?ref={series}")
             }
         };
-        Ok(self.json(&url, repo, kind)?.is_some())
+        let Some(file) = self.json(&url, repo, kind)? else {
+            return Ok(None);
+        };
+        // Every forge sends the file base64-encoded, GitHub in lines.
+        let encoded: String = file
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect();
+        STANDARD
+            .decode(encoded)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(Some)
+            .ok_or_else(|| ForgeError::Json(format!("{}: {url}", repo.host)))
     }
 
     fn github_listing(
@@ -440,39 +459,54 @@ mod tests {
 
     #[test]
     fn an_addon_on_a_branch_is_its_manifest() {
-        for (url, kind, status, asked) in [
+        // "{'name': 'rma'}", in lines as GitHub sends it.
+        let github = r#"{"content":"eyduYW1lJzog\nJ3JtYSd9\n","encoding":"base64"}"#;
+        for (url, kind, status, body, asked) in [
             (
                 "https://github.com/OCA/rma",
                 ForgeKind::Github,
                 200,
+                github,
                 "https://api.github.com/repos/OCA/rma/contents/rma/__manifest__.py?ref=17.0",
             ),
             (
                 "https://gitlab.com/g/rma",
                 ForgeKind::Gitlab,
                 404,
+                "",
                 "https://gitlab.com/api/v4/projects/g%2Frma/repository/files/rma%2F__manifest__.py?ref=17.0",
             ),
             (
                 "https://codeberg.org/o/rma",
                 ForgeKind::Gitea,
                 500,
+                "",
                 "https://codeberg.org/api/v1/repos/o/rma/contents/rma/__manifest__.py?ref=17.0",
             ),
         ] {
-            let http = Scripted::new(vec![Ok(reply(status, "{}"))]);
+            let http = Scripted::new(vec![Ok(reply(status, body))]);
             let env = MapEnv::default();
             let runner = ScriptedRunner::default();
             let client = ForgeClient::new(&http, &env, &runner, &std::thread::sleep);
             let repo = RepoUrl::parse(url).unwrap();
-            let found = client.has_addon(&repo, kind, "17.0", "rma");
+            let found = client.manifest(&repo, kind, "17.0", "rma");
             assert_eq!(http.urls(), [asked]);
             match status {
-                200 => assert_eq!(found, Ok(true)),
-                404 => assert_eq!(found, Ok(false)),
+                200 => assert_eq!(found, Ok(Some("{'name': 'rma'}".to_owned()))),
+                404 => assert_eq!(found, Ok(None)),
                 _ => assert!(found.is_err()),
             }
         }
+        // A file that is no base64 says so.
+        let http = Scripted::new(vec![Ok(reply(200, r#"{"content":"!!"}"#))]);
+        let env = MapEnv::default();
+        let runner = ScriptedRunner::default();
+        let client = ForgeClient::new(&http, &env, &runner, &std::thread::sleep);
+        let repo = RepoUrl::parse("https://codeberg.org/o/rma").unwrap();
+        assert!(matches!(
+            client.manifest(&repo, ForgeKind::Gitea, "17.0", "rma"),
+            Err(ForgeError::Json(_))
+        ));
     }
 
     #[test]

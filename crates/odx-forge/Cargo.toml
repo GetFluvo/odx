@@ -13,6 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+base64.workspace = true
 keyring-core.workspace = true
 odx-core.workspace = true
 reqwest.workspace = true

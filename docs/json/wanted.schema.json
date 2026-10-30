@@ -80,7 +80,7 @@
           "type": "string"
         },
         "last_series": {
-          "description": "The series it was last on, when it is not started.",
+          "description": "The series it was last on, when it is not started or unchecked.",
           "type": [
             "string",
             "null"

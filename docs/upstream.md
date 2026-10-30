@@ -339,7 +339,8 @@ $ odx wanted remove contract
 A customer will want an addon some day, but not yet; on the project's
 series, or on the next one, it may not even exist yet. `odx wanted add`
 records it in `pyproject.toml` (run again, it changes only what it is
-given), and `odx wanted` says per series where it stands:
+given; remove and add it again to drop a key), and `odx wanted` says per
+series where it stands:
 
 ```toml
 [[tool.odx.wanted]]
@@ -362,7 +363,7 @@ contract (customer asks in Q3)
 | `available`, `released` | on the series: on the series branch of its repository (merged, not released yet), or released on the package index |
 | `migrating` | not on the series yet, but a migration pull request of the addon is open in its repository |
 | `not-started` | neither; odx says on which series it was last, up to three series back |
-| `unchecked` | odx could not ask: offline, or the forge did not answer; `--json` says why in `reason` |
+| `unchecked` | odx could not ask: offline, or the forge did not answer; `--json` says why in `reason`, and where it was last when known |
 
 The repository is where the addon lived on an earlier series, unless
 `repository` names it; an addon that is new, or lived more than three
@@ -372,12 +373,13 @@ pages). A migration pull request says `[MIG]` in its title, or `[ADD]`
 for an addon brought to the series anew, in any case.
 Which addon it is about comes from the `mod:<addon>` labels the OCA bot
 puts on pull requests, and the title picks among them when there are
-several; without such labels, the title must name the addon as a whole
-word: `[17.0][MIG] contract_sale` does not count for `contract`.
+several (a title naming none of them counts for each); without such
+labels, the title must name the addon as a whole word: `[17.0][MIG]
+contract_sale` does not count for `contract`.
 
 Without an open pull request, odx looks for the addon's manifest on the
 series branch of that repository: a migration merged but not released yet
-is `available` there. Every run asks the package index again for a wanted
+is `available` there, unless its manifest says `installable: False`. Every run asks the package index again for a wanted
 addon it did not know on the wanted series, so the release is seen at once;
 the rest of what the index learnt is kept for `[tool.odx.index] ttl`, and
 `--fresh` asks again.

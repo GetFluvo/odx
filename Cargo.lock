@@ -2787,6 +2787,7 @@ name = "odx-forge"
 version = "0.0.10"
 dependencies = [
  "apple-native-keyring-store",
+ "base64 0.22.1",
  "keyring-core",
  "odx-core",
  "reqwest",

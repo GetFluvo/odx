@@ -121,16 +121,18 @@ pub(crate) fn migrates(pr: &PullRequest, addon: &str) -> bool {
     if !title.contains("[mig]") && !title.contains("[add]") {
         return false;
     }
-    let touched: Vec<&str> = pr
+    let addon = addon.to_ascii_lowercase();
+    let touched: Vec<String> = pr
         .labels
         .iter()
         .filter_map(|label| label.strip_prefix("mod:"))
+        .map(str::to_ascii_lowercase)
         .collect();
     if touched.is_empty() {
-        return names(&title, addon);
+        return names(&title, &addon);
     }
     touched.contains(&addon)
-        && (names(&title, addon) || !touched.iter().any(|other| names(&title, other)))
+        && (names(&title, &addon) || !touched.iter().any(|other| names(&title, other)))
 }
 
 /// Looks dependencies up on the package index and the forges, remembering
@@ -311,6 +313,19 @@ mod tests {
             &["mod:contract_sale"],
             "contract"
         ));
+        // Untitled, every labelled addon counts: a pull request adding two.
+        assert!(labelled(
+            "[18.0][ADD] Subscriptions",
+            &["mod:contract_sale", "mod:contract"],
+            "contract"
+        ));
+        // Labels and titles in another case.
+        assert!(labelled(
+            "[18.0][MIG] Contract",
+            &["mod:Contract"],
+            "contract"
+        ));
+        assert!(labelled("[18.0][MIG] Contract", &[], "Contract"));
         assert!(!labelled(
             "[18.0][IMP] contract",
             &["mod:contract"],

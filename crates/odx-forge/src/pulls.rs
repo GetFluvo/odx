@@ -234,7 +234,9 @@ impl ForgeClient<'_> {
                 100,
             ),
             // Gitea/Forgejo cannot filter by base: every open one is read.
-            ForgeKind::Gitea => (format!("{api}/pulls?state=open&limit=50"), 50),
+            // A server may cap pages below the limit, so only an empty page
+            // ends the listing.
+            ForgeKind::Gitea => (format!("{api}/pulls?state=open&limit=50"), 1),
         };
         let listed = self
             .pages(&url, size, repo, kind)?
@@ -421,8 +423,8 @@ mod tests {
             urls,
             ["https://api.github.com/repos/OCA/pos/pulls?state=open&base=19.0&per_page=100&page=1"]
         );
-        let (prs, urls) = list("https://codeberg.org/o/r", ForgeKind::Gitea, 200, github);
-        assert_eq!(prs.unwrap().len(), 1);
+        let (prs, urls) = list("https://codeberg.org/o/r", ForgeKind::Gitea, 200, "[]");
+        assert_eq!(prs.unwrap().len(), 0);
         assert_eq!(
             urls,
             ["https://codeberg.org/api/v1/repos/o/r/pulls?state=open&limit=50&page=1"]
@@ -466,8 +468,12 @@ mod tests {
             let prs = client.open_pull_requests(&repo, ForgeKind::Gitea, "19.0");
             (prs.unwrap().len(), http.urls().len())
         };
+        // A server capping pages below the limit is read on to an empty page.
         let last = r#"[{"number":51,"state":"open","base":{"ref":"19.0"}}]"#;
-        assert_eq!(read(vec![reply(200, &full), reply(200, last)]), (51, 2));
+        assert_eq!(
+            read(vec![reply(200, &full), reply(200, last), reply(200, "[]")]),
+            (51, 3)
+        );
         // A page past the end that the forge does not show ends the listing.
         assert_eq!(read(vec![reply(200, &full), reply(404, "")]), (50, 2));
         let pages: Vec<HttpResponse> = (0..12).map(|_| reply(200, &full)).collect();
