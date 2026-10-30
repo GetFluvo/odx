@@ -110,14 +110,15 @@ pub(crate) fn names(title: &str, addon: &str) -> bool {
         })
 }
 
-/// Whether `pr` migrates `addon`: its title says `[MIG]` (in any case),
-/// and it is about `addon`. The `mod:<addon>` labels the OCA bot puts on a
+/// Whether `pr` migrates `addon`: its title says `[MIG]`, or `[ADD]` for
+/// an addon brought to the series anew (in any case), and it is about
+/// `addon`. The `mod:<addon>` labels the OCA bot puts on a
 /// pull request say which addons it touches, more reliably than a title
 /// typed by hand; when it touches several, the title says which one it
 /// migrates. Without such labels, the title must name `addon`.
 pub(crate) fn migrates(pr: &PullRequest, addon: &str) -> bool {
     let title = pr.title.to_ascii_lowercase();
-    if !title.contains("[mig]") {
+    if !title.contains("[mig]") && !title.contains("[add]") {
         return false;
     }
     let touched: Vec<&str> = pr
@@ -253,6 +254,7 @@ mod tests {
         assert!(titled("[18.0][MIG] contract: Migration to 18.0"));
         assert!(titled("[MIG] contract_sale, contract"));
         assert!(titled("[18.0][mig]contract"));
+        assert!(titled("[18.0][ADD] contract"));
         assert!(!titled("[18.0][MIG] contract_sale: Migration"));
         assert!(!titled("[18.0][MIG] sale_contract"));
         assert!(!titled("[18.0][FIX] contract"));

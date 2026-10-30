@@ -20,7 +20,7 @@ series has it:
 - `available`: the addon is on the target branch of a repository odx has in
   its cache, `[tool.odx.index.overrides]` names its repository, or a
   repository of an organization in `[tool.odx.index] orgs` has it;
-- `migration PR #n`: an open `[MIG]` pull request of the addon for the
+- `migration PR #n`: an open `[MIG]` (or `[ADD]`) pull request of the addon for the
   target series in the repository the addon lives in now (see
   [wanted addons](upstream.md#wanted-addons) for how one is recognised);
 - `missing`: none of the above, so the team migrates it.
@@ -128,7 +128,7 @@ the OCA migration guide on a new branch `<to>-mig-<addon>` made from the
 target series:
 
 1. When an open pull request on the remote's forge already migrates the
-   addon (`[MIG]` in its title, and its `mod:` label or its title naming
+   addon (`[MIG]` or `[ADD]` in its title, and its `mod:` label or its title naming
    the addon), odx stops and names
    it: the work belongs there. `--force` migrates anyway; `--offline` does
    not ask.
