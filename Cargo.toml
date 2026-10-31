@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.0.10"
+version = "0.0.11"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
@@ -16,24 +16,24 @@ categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 # Internal crates.
-odx-core = { path = "crates/odx-core", version = "0.0.10" }
-git-aggregate-rs = { path = "crates/git-aggregate-rs", version = "0.0.10" }
-odx-config = { path = "crates/odx-config", version = "0.0.10" }
-odx-git = { path = "crates/odx-git", version = "0.0.10" }
-odx-aggregate = { path = "crates/odx-aggregate", version = "0.0.10" }
-odx-forge = { path = "crates/odx-forge", version = "0.0.10" }
-odx-analyze = { path = "crates/odx-analyze", version = "0.0.10" }
-odx-dashboard = { path = "crates/odx-dashboard", version = "0.0.10" }
-odx-index = { path = "crates/odx-index", version = "0.0.10" }
-odx-port = { path = "crates/odx-port", version = "0.0.10" }
-odx-lint = { path = "crates/odx-lint", version = "0.0.10" }
-odx-verdicts = { path = "crates/odx-verdicts", version = "0.0.10" }
-odx-platform = { path = "crates/odx-platform", version = "0.0.10" }
-odx-vendor = { path = "crates/odx-vendor", version = "0.0.10" }
-odx-dev = { path = "crates/odx-dev", version = "0.0.10" }
-odx-sync = { path = "crates/odx-sync", version = "0.0.10" }
-odx-env = { path = "crates/odx-env", version = "0.0.10" }
-odx-bot = { path = "crates/odx-bot", version = "0.0.10" }
+odx-core = { path = "crates/odx-core", version = "0.0.11" }
+git-aggregate-rs = { path = "crates/git-aggregate-rs", version = "0.0.11" }
+odx-config = { path = "crates/odx-config", version = "0.0.11" }
+odx-git = { path = "crates/odx-git", version = "0.0.11" }
+odx-aggregate = { path = "crates/odx-aggregate", version = "0.0.11" }
+odx-forge = { path = "crates/odx-forge", version = "0.0.11" }
+odx-analyze = { path = "crates/odx-analyze", version = "0.0.11" }
+odx-dashboard = { path = "crates/odx-dashboard", version = "0.0.11" }
+odx-index = { path = "crates/odx-index", version = "0.0.11" }
+odx-port = { path = "crates/odx-port", version = "0.0.11" }
+odx-lint = { path = "crates/odx-lint", version = "0.0.11" }
+odx-verdicts = { path = "crates/odx-verdicts", version = "0.0.11" }
+odx-platform = { path = "crates/odx-platform", version = "0.0.11" }
+odx-vendor = { path = "crates/odx-vendor", version = "0.0.11" }
+odx-dev = { path = "crates/odx-dev", version = "0.0.11" }
+odx-sync = { path = "crates/odx-sync", version = "0.0.11" }
+odx-env = { path = "crates/odx-env", version = "0.0.11" }
+odx-bot = { path = "crates/odx-bot", version = "0.0.11" }
 
 # External crates. Versions are pinned in Cargo.lock.
 clap = { version = "4.5", features = ["derive"] }
