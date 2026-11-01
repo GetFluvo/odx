@@ -141,7 +141,8 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          toolchain: nightly
+          # Pinned: nightly-2026-11-01 fails to compile zbus (E0391).
+          toolchain: nightly-2026-10-26
           components: llvm-tools-preview
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
@@ -179,7 +180,7 @@ jobs:
           esac
           echo "$native" >> "$GITHUB_PATH"
       - run: >-
-          cargo +nightly llvm-cov --workspace --all-features --doctests --locked
+          cargo +nightly-2026-10-26 llvm-cov --workspace --all-features --doctests --locked
           --fail-under-lines 100 --fail-under-functions 100 --fail-under-regions 100
           --html
         env:
