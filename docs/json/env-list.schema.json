@@ -65,6 +65,20 @@
           "description": "Its branch, or a pattern where `*` matches anything.",
           "type": "string"
         },
+        "connection": {
+          "description": "Its connection file, relative to the project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "database": {
+          "description": "Its database.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "disposable": {
           "description": "Never chosen as the default source of a promotion.",
           "type": "boolean"
@@ -90,6 +104,13 @@
         "series": {
           "description": "The series it runs.",
           "type": "string"
+        },
+        "url": {
+          "description": "The URL of its Odoo instance.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
