@@ -89,6 +89,12 @@ struct EnvironmentJson<'a> {
     repo: Option<&'a str>,
     /// Never chosen as the default source of a promotion.
     disposable: bool,
+    /// The URL of its Odoo instance.
+    url: Option<&'a str>,
+    /// Its database.
+    database: Option<&'a str>,
+    /// Its connection file, relative to the project.
+    connection: Option<&'a str>,
 }
 
 fn json(model: &Model, current: Option<&str>) -> String {
@@ -105,6 +111,9 @@ fn json(model: &Model, current: Option<&str>) -> String {
                 series: &env.series,
                 repo: env.repo.as_deref(),
                 disposable: env.disposable,
+                url: env.url.as_deref(),
+                database: env.database.as_deref(),
+                connection: env.connection.as_deref(),
             })
             .collect(),
         promotion: &model.promotion,
@@ -141,6 +150,19 @@ fn text(model: &Model, branch: Option<&str>, current: Option<&str>) -> String {
             line.push_str("  (disposable)");
         }
         let _ = writeln!(out, "{}", line.trim_end());
+        let mut odoo = String::new();
+        for (label, value) in [
+            ("odoo", &env.url),
+            ("database", &env.database),
+            ("connection", &env.connection),
+        ] {
+            if let Some(value) = value {
+                let _ = write!(odoo, "  {label} {value}");
+            }
+        }
+        if !odoo.is_empty() {
+            let _ = writeln!(out, "  {odoo}");
+        }
     }
     let edges: Vec<String> = model
         .promotion

@@ -25,6 +25,12 @@ pub struct Environment {
     pub repo: Option<String>,
     /// Never chosen as the default source of a promotion.
     pub disposable: bool,
+    /// The URL of its Odoo instance.
+    pub url: Option<String>,
+    /// Its database.
+    pub database: Option<String>,
+    /// Its connection file, relative to the project.
+    pub connection: Option<String>,
 }
 
 impl Environment {
@@ -147,6 +153,9 @@ fn resolve_one(
         disposable: set
             .and_then(|env| env.disposable)
             .unwrap_or_else(|| role == Some(Role::Uat)),
+        url: set.and_then(|env| env.url.clone()),
+        database: set.and_then(|env| env.database.clone()),
+        connection: set.and_then(|env| env.connection.clone()),
     })
 }
 

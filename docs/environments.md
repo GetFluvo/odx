@@ -47,6 +47,34 @@ branch-specific: .template-answers.yml
 `*` marks the environment of the current branch. `odx suggest --env <name>`
 and the dashboard use each environment's series.
 
+## Databases
+
+An environment can say where it runs, for tools that read or change its
+database, such as [Fluvo](https://github.com/getfluvo/fluvo):
+
+```toml
+[tool.odx.environments.env.test]
+url = "https://test.erp.example.com"
+database = "customer-test"
+connection = "conf/test.conf"      # Fluvo connection file, kept out of git
+
+[tool.odx.environments.env.prod]
+url = "https://erp.example.com"
+database = "customer"
+connection = "conf/prod.conf"
+```
+
+`odx env list` shows them under each environment, and `odx --json env list`
+gives them to scripts:
+
+```console
+$ fluvo export --connection-file "$(odx --json env list | jq -r '.environments[] | select(.name == "test") | .connection')" ...
+```
+
+The connection file holds the credentials: keep it out of the repository,
+for instance with `conf/*.conf` in `.gitignore`. odx itself does not
+connect to the databases.
+
 ## Comparing environments
 
 ```console

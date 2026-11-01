@@ -259,6 +259,9 @@ One environment.
 | `series` | string | Series of this environment. Default: `[tool.odx.environments] series`. |
 | `repo` | string | Separate repository of this environment. Default: none (the project repository). |
 | `disposable` | boolean | Excluded as a promotion target unless named explicitly. Default: on for the `uat` role, else off. |
+| `url` | string | URL of the environment's Odoo instance. Default: none. |
+| `database` | string | Database of the environment. Default: none. |
+| `connection` | string | Connection file of the environment, relative to the project, for tools that read and write its database (a Fluvo `connection.conf`); it holds the credentials, so keep it out of git. Default: none. |
 
 ## `[tool.odx.promote]`
 

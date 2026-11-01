@@ -679,6 +679,14 @@ pub struct Environment {
     /// Excluded as a promotion target unless named explicitly. Default: on for the `uat` role, else
     /// off.
     pub disposable: Option<bool>,
+    /// URL of the environment's Odoo instance. Default: none.
+    pub url: Option<String>,
+    /// Database of the environment. Default: none.
+    pub database: Option<String>,
+    /// Connection file of the environment, relative to the project, for tools that read and write
+    /// its database (a Fluvo `connection.conf`); it holds the credentials, so keep it out of git.
+    /// Default: none.
+    pub connection: Option<String>,
 }
 
 /// The role of an environment.

@@ -47,7 +47,9 @@ fn presets_and_the_current_branch() {
     project(
         root,
         "[tool.odx.environments]\npreset = \"major-branches\"\nbranch_specific = [\".template-answers.yml\"]\n\
-         [tool.odx.environments.env.prod]\nrepo = \"https://example.com/prod.git\"\n",
+         [tool.odx.environments.env.prod]\nrepo = \"https://example.com/prod.git\"\n\
+         url = \"https://erp.example.com\"\ndatabase = \"prod\"\nconnection = \"conf/prod.conf\"\n\
+         [tool.odx.environments.env.test]\ndatabase = \"test\"\n",
     );
     git(root, &["init", "-q", "-b", "19-test"]);
     let (exit, out, err) = odx(root, &["env", "list"]);
@@ -56,7 +58,9 @@ fn presets_and_the_current_branch() {
         out,
         "preset major-branches\n\
          \x20 prod  prod  19.0  19-prod  https://example.com/prod.git\n\
+         \x20   odoo https://erp.example.com  database prod  connection conf/prod.conf\n\
          * test  test  19.0  19-test\n\
+         \x20   database test\n\
          \x20 uat   uat   19.0  19-uat   (disposable)\n\
          promotion: test → uat, test → prod, uat → prod, prod → test\n\
          branch-specific: .template-answers.yml\n"
@@ -71,6 +75,16 @@ fn presets_and_the_current_branch() {
         "https://example.com/prod.git"
     );
     assert_eq!(value["environments"][2]["disposable"], true);
+    let prod = &value["environments"][0];
+    assert_eq!(
+        (&prod["url"], &prod["database"], &prod["connection"]),
+        (
+            &serde_json::json!("https://erp.example.com"),
+            &serde_json::json!("prod"),
+            &serde_json::json!("conf/prod.conf")
+        )
+    );
+    assert_eq!(value["environments"][1]["url"], serde_json::Value::Null);
     assert_eq!(value["promotion"][0], serde_json::json!(["test", "uat"]));
     // A branch of no environment, and explicit environments without edges
     // or roles.
