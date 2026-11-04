@@ -344,6 +344,15 @@ pub(crate) mod tests {
         }
         let err = extract(&unsupported, "m.whl", &wheel_entry, &|_| false, tmp.path()).unwrap_err();
         assert!(err.to_string().starts_with("m.whl: "), "{err}");
+        // An entry whose local header is not where the directory says.
+        let mut misplaced = stored.clone();
+        let at = misplaced
+            .windows(4)
+            .position(|window| window == b"PK\x03\x04")
+            .unwrap();
+        misplaced[at] = b'X';
+        let err = extract(&misplaced, "h.whl", &wheel_entry, &|_| false, tmp.path()).unwrap_err();
+        assert!(err.to_string().starts_with("h.whl: "), "{err}");
         let mut corrupt = stored;
         let at = corrupt
             .windows(11)
