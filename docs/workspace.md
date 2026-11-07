@@ -487,7 +487,11 @@ The platform only updates an addon when its manifest `version` changes. When
 an addon's content changed but its version did not (a pull request head
 that moved), odx bumps the last segment (`17.0.1.2.0` becomes `17.0.1.2.1`)
 and keeps that version for as long as the content stays the same; turn this
-off with `[tool.odx.vendor] bump_on_content_change = false`. What was
+off with `[tool.odx.vendor] bump_on_content_change = false`. Without a
+vendor manifest (the first run, or a project moving from another vendoring
+script), an addon already in the directory is the previous run: its
+version stays while the content is the same, goes up by one when only the
+content changed, and is never lowered below what is there. What was
 written, with the wheel hash or commit and content hashes, goes to the
 vendor manifest `.odx/vendor.lock` (`[tool.odx.vendor] manifest`); do not
 commit it.
