@@ -166,7 +166,7 @@ pub fn vendor(
             fetched.push((dir, item, fetch_item(item, options, http, git_archive)?));
         }
     }
-    let baselines = baselines(options);
+    let baselines = baselines(options, exclude);
     for dir in options.group_dirs.values() {
         if dir.exists() {
             std::fs::remove_dir_all(dir).map_err(io_at(dir))?;
@@ -187,13 +187,24 @@ pub fn vendor(
                 |subdirectory| subdirectory_entry(subdirectory, name),
             )
         };
+        // A kept directory is vendored as it is: nothing is left out.
+        let keep_all = |_: &str| false;
+        let exclude: &dyn Fn(&str) -> bool = if matches!(item.source, ItemSource::Directory { .. })
+        {
+            &keep_all
+        } else {
+            exclude
+        };
         let entries = extract(&got.bytes, &got.what, &select, exclude, dir).and_then(|addons| {
             addons
                 .iter()
                 .map(|addon| {
+                    // A kept directory is its own source: its version is
+                    // whatever it says.
+                    let kept = matches!(item.source, ItemSource::Directory { .. });
                     let written = Written {
-                        previous: options.previous.addon(addon),
-                        baseline: baselines.get(addon),
+                        previous: options.previous.addon(addon).filter(|_| !kept),
+                        baseline: baselines.get(addon).filter(|_| !kept),
                         bump: options.bump,
                     };
                     record_addon(&dir.join(addon), item, addon, &written, &mut result)
@@ -503,8 +514,8 @@ fn neutral_hash(files: &[(String, Vec<u8>)]) -> String {
 }
 
 /// The addons in the group directories that the previous vendor manifest
-/// does not know, by name.
-fn baselines(options: &Options<'_>) -> BTreeMap<String, Baseline> {
+/// does not know, by name; files `exclude` leaves out do not count.
+fn baselines(options: &Options<'_>, exclude: &dyn Fn(&str) -> bool) -> BTreeMap<String, Baseline> {
     options
         .group_dirs
         .values()
@@ -515,7 +526,8 @@ fn baselines(options: &Options<'_>) -> BTreeMap<String, Baseline> {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let files = read_tree(&path).unwrap_or_default();
+            let mut files = read_tree(&path).unwrap_or_default();
+            files.retain(|(file, _)| !exclude(file));
             let version = files
                 .iter()
                 .find(|(file, _)| file == MANIFEST)
