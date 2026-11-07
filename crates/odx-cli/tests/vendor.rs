@@ -786,6 +786,8 @@ fn versions_another_tool_bumped_never_go_down() {
     let pos_x = project.root.join("modules/oca/pos_x");
     write(&pos_x.join("__manifest__.py"), &manifest("17.0.1.0.0.3"));
     write(&pos_x.join("models/x.py"), "x = 1\n");
+    // A file odx leaves out does not make the content different.
+    write(&pos_x.join("static/description/index.html"), "<html/>");
     write(&project.root.join("modules/oca/no_manifest/x.py"), "");
     write(
         &project.root.join("modules/oca/no_version/__manifest__.py"),
@@ -836,6 +838,8 @@ fn a_kept_path_source_is_vendored_as_it_is() {
     let kept = project.root.join("modules/oca/kept");
     write(&kept.join("__manifest__.py"), &manifest("17.0.1.0.0"));
     write(&kept.join("models/k.py"), "k = 1\n");
+    // Excluded elsewhere, kept here.
+    write(&kept.join("static/description/index.html"), "<html/>");
     let uv_lock = project.read("uv.lock").replace(
         "oca = [{ name = \"odoo-addon-pos-x\" }",
         "oca = [{ name = \"odoo-addon-kept\" }, { name = \"odoo-addon-pos-x\" }",
@@ -844,6 +848,19 @@ fn a_kept_path_source_is_vendored_as_it_is() {
     let (exit, out, err) = project.odx(&["vendor"]);
     assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
     assert_eq!(project.read("modules/oca/kept/models/k.py"), "k = 1\n");
+    assert_eq!(
+        project.read("modules/oca/kept/static/description/index.html"),
+        "<html/>"
+    );
+    // Its own source: changed content keeps the version it says.
+    write(&kept.join("models/k.py"), "k = 2\n");
+    let (exit, out, err) = project.odx(&["vendor"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    assert!(
+        project
+            .read("modules/oca/kept/__manifest__.py")
+            .contains("\"17.0.1.0.0\"")
+    );
     assert!(project.root.join("modules/oca/pos_x").exists());
 
     // An unreadable file or directory stops odx before anything is replaced.

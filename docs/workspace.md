@@ -471,8 +471,9 @@ addon packages they depend on:
 - a package from git comes from the commit `odx.lock` locked, out of the
   cache, so the vault and `odx lock` decide what is vendored;
 - a package with a non-editable path source (`{ path = "modules/oca/x" }`),
-  a local copy kept on purpose, is vendored from that directory as it is,
-  even when it lives in the group directory itself (an editable one is
+  a local copy kept on purpose, is vendored from that directory as it is
+  (`exclude` does not apply, and its version is never bumped: it is its
+  own source), even when it lives in the group directory itself (an editable one is
   develop mode, and refused);
 - files matching `[tool.odx.vendor] exclude` (default
   `static/description/index.html`) are left out.
