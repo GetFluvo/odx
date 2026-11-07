@@ -263,6 +263,33 @@ fn every_check() {
 }
 
 #[test]
+fn provided_addons_can_come_from_files() {
+    let project = Project::new();
+    project.edit(
+        "provided = [\"account_accountant\"]",
+        "provided_files = [\"data/enterprise.json\"]",
+    );
+    write(
+        &project.root.join("data/enterprise.json"),
+        "[\"account_accountant\"]",
+    );
+    let (_, out, _) = project.odx(&["check-deps"]);
+    assert!(out.contains("missing: missing_z"), "{out}");
+    assert!(!out.contains("account_accountant"), "{out}");
+    write(&project.root.join("data/enterprise.json"), "{}");
+    let (exit, _, err) = project.odx(&["check-deps"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(err.contains("enterprise.json: invalid type"), "{err}");
+    std::fs::remove_file(project.root.join("data/enterprise.json")).unwrap();
+    let (exit, _, err) = project.odx(&["check-deps"]);
+    assert_eq!(exit, Exit::Usage);
+    assert!(
+        err.contains("(provided_files lists JSON files holding a list of addon names)"),
+        "{err}"
+    );
+}
+
+#[test]
 fn a_clean_project_and_an_unknown_series() {
     let project = Project::new();
     std::fs::remove_dir_all(project.root.join("addons")).unwrap();

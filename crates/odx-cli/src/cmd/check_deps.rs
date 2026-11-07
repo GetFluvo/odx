@@ -359,6 +359,43 @@ fn licenses(inventory: &Inventory, core: &BTreeSet<&str>, findings: &mut Finding
     }
 }
 
+/// The addons `[tool.odx.check_deps]` says the platform provides: `provided`
+/// and the names listed in each of `provided_files`.
+fn provided(
+    ctx: &Context<'_>,
+    root: &Path,
+    check: Option<&odx_config::schema::CheckDeps>,
+) -> Result<BTreeSet<String>, Report> {
+    let mut provided: BTreeSet<String> = check
+        .and_then(|check| check.provided.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    for file in check
+        .and_then(|check| check.provided_files.as_ref())
+        .into_iter()
+        .flatten()
+    {
+        let path = root.join(file);
+        let names: Vec<String> = ctx
+            .fs
+            .read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string()))
+            .map_err(|e| {
+                Report::error(
+                    Exit::Usage,
+                    format!(
+                        "{}: {e} (provided_files lists JSON files holding a list of addon names)",
+                        path.display()
+                    ),
+                )
+            })?;
+        provided.extend(names);
+    }
+    Ok(provided)
+}
+
 fn check_deps(
     args: &CheckDepsArgs,
     global: &GlobalArgs,
@@ -380,13 +417,7 @@ fn check_deps(
         },
         |core| core.into_iter().collect(),
     );
-    let provided: BTreeSet<String> = config
-        .check_deps
-        .as_ref()
-        .and_then(|check| check.provided.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    let provided = provided(ctx, &prepared.project.root, config.check_deps.as_ref())?;
     let inventory = inventory(&prepared);
     // An addon whose manifest odx cannot read has no dependencies to check:
     // say so rather than find it fine.
