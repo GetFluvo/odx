@@ -33,6 +33,7 @@ of for the series to `[tool.odx.groups] default`; run `uv lock` afterwards.
 ```toml
 [tool.odx.check_deps]
 provided = ["account_accountant"]   # available on the platform, not in the project
+provided_files = ["data/enterprise_modules_19.0.json"]   # JSON lists of such names
 ```
 
 ## Linting

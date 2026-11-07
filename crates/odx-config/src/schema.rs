@@ -797,6 +797,9 @@ pub struct CheckDeps {
     /// Addons the platform provides beyond Odoo's community addons (for example enterprise addons),
     /// counted as available. Default: none.
     pub provided: Option<Vec<String>>,
+    /// JSON files, each a list of addon names the platform provides, added to `provided`.
+    /// Default: none.
+    pub provided_files: Option<Vec<PathBuf>>,
 }
 
 /// `[tool.odx.glue]`: glue addons (`odx glue`).

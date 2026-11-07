@@ -327,6 +327,7 @@ Defaults of `odx check-deps`.
 | Key | Type | Description |
 | --- | --- | --- |
 | `provided` | list of strings | Addons the platform provides beyond Odoo's community addons (for example enterprise addons), counted as available. Default: none. |
+| `provided_files` | list of paths | JSON files, each a list of addon names the platform provides, added to `provided`. Default: none. |
 
 ## `[tool.odx.glue]`
 
