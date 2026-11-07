@@ -312,7 +312,7 @@ pub(crate) fn prefetch_wheels(ctx: &Context<'_>, prepared: &Prepared) -> Result<
                 .iter()
                 .filter_map(|item| match &item.source {
                     ItemSource::Wheel { url, hash } => Some((url, hash)),
-                    ItemSource::Git { .. } => None,
+                    ItemSource::Git { .. } | ItemSource::Directory { .. } => None,
                 })
                 .map(|(url, hash)| fetch(&http, &wheel_cache, url, hash))
                 .collect::<Result<Vec<_>, _>>()
@@ -568,9 +568,9 @@ fn uv_export(
     let none = UvPackage::default();
     let project = lock.root().unwrap_or(&none);
     for group in groups {
-        if project.optional_dependencies.contains_key(group) {
+        if project.extra(group).is_some() {
             invocation = invocation.arg("--extra").arg(group);
-        } else if project.dev_dependencies.contains_key(group) {
+        } else if project.dependency_group(group).is_some() {
             invocation = invocation.arg("--group").arg(group);
         }
     }

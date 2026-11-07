@@ -148,6 +148,9 @@ pub fn rewrite_packages(
         let tag = format!("odx/{}", entry.sha);
         let group = spec.group.as_deref().and_then(|name| read_group(doc, name));
         let written = match (&spec.origin, group) {
+            (PackageOrigin::UvSource(_), _) => {
+                set_uv_git_source(doc, &spec.dist, &git, &tag, spec.subdirectory.as_deref())
+            }
             (PackageOrigin::Table, group) => {
                 let listed = group.as_ref().is_none_or(|group| {
                     group
@@ -380,8 +383,15 @@ oca = [
                 PackageOrigin::Table,
             )
         };
+        let sourced = spec(
+            "odoo-addon-sourced",
+            POS,
+            src(None, None, Some("17.0")),
+            PackageOrigin::UvSource("oca".into()),
+        );
         let mut entries = BTreeMap::new();
         for (name, sha) in [
+            ("odoo-addon-sourced", "s"),
             ("odoo-addon-direct", "d"),
             ("odoo-addon-listed", "l"),
             ("odoo-addon-added", "n"),
@@ -397,7 +407,7 @@ oca = [
                 ..vaulted(&"u".repeat(40))
             },
         );
-        let specs = [direct, listed, added, unvaulted, orphan, groupless];
+        let specs = [direct, listed, added, unvaulted, orphan, groupless, sourced];
         let failures = rewrite_packages(&mut doc, &specs, &entries, "git@forge:odoo/vault.git");
         assert_eq!(failures, ["odoo-addon-orphan"]);
         let text = doc.to_string();
@@ -406,6 +416,7 @@ oca = [
         assert!(text.contains("\"odoo-addon-added\""), "{text}");
         assert!(text.contains(&format!("odoo-addon-listed = {{ git = \"ssh://git@forge/odoo/vault.git\", tag = \"odx/{}\", subdirectory = \"listed\" }}", "l".repeat(40))), "{text}");
         assert!(text.contains("odoo-addon-groupless = {"), "{text}");
+        assert!(text.contains(&format!("odoo-addon-sourced = {{ git = \"ssh://git@forge/odoo/vault.git\", tag = \"odx/{}\", subdirectory = \"sourced\" }}", "s".repeat(40))), "{text}");
         assert!(!text.contains("unvaulted"), "{text}");
 
         // A pyproject whose tool table cannot take sources.

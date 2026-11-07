@@ -117,6 +117,40 @@ impl UvRequirement {
     }
 }
 
+impl UvPackage {
+    /// The dependencies of extra `name`, in any spelling: uv writes extra
+    /// names normalized (`oca_unmerged` becomes `oca-unmerged`).
+    ///
+    /// ```
+    /// let lock = odx_config::uvlock::UvLock::parse(
+    ///     "[[package]]\nname = \"p\"\nsource = { virtual = \".\" }\n\n\
+    ///      [package.optional-dependencies]\noca-unmerged = [{ name = \"x\" }]\n\n\
+    ///      [package.dev-dependencies]\nlint-tools = [{ name = \"y\" }]\n",
+    /// )
+    /// .unwrap();
+    /// let project = &lock.packages[0];
+    /// assert_eq!(project.extra("oca_unmerged").unwrap()[0].name, "x");
+    /// assert_eq!(project.dependency_group("lint_tools").unwrap()[0].name, "y");
+    /// assert!(project.extra("oca").is_none());
+    /// ```
+    pub fn extra(&self, name: &str) -> Option<&Vec<UvDependency>> {
+        named(&self.optional_dependencies, name)
+    }
+
+    /// The dependencies of dependency group `name`, in any spelling.
+    pub fn dependency_group(&self, name: &str) -> Option<&Vec<UvDependency>> {
+        named(&self.dev_dependencies, name)
+    }
+}
+
+/// The entry of `map` whose key normalizes like `name`.
+fn named<'a, T>(map: &'a BTreeMap<String, T>, name: &str) -> Option<&'a T> {
+    let wanted = normalize_name(name);
+    map.iter()
+        .find(|(key, _)| normalize_name(key) == wanted)
+        .map(|(_, value)| value)
+}
+
 impl UvLock {
     /// Parse `uv.lock` text.
     ///

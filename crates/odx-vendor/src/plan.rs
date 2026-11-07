@@ -27,6 +27,12 @@ pub enum ItemSource {
         /// The addon's directory in the repository.
         subdirectory: Option<String>,
     },
+    /// A directory of the project, a non-editable path source: a local
+    /// copy kept on purpose, vendored as it is.
+    Directory {
+        /// Its path, relative to the project root.
+        path: String,
+    },
 }
 
 /// Repository URL, commit and subdirectory of a package from git.
@@ -67,9 +73,8 @@ pub fn plan(
     let project = lock.root().ok_or(VendorError::NoProject)?;
     let declared = |group: &str| -> Vec<String> {
         project
-            .optional_dependencies
-            .get(group)
-            .or_else(|| project.dev_dependencies.get(group))
+            .extra(group)
+            .or_else(|| project.dependency_group(group))
             .map(|deps| deps.iter().map(|dep| normalize_name(&dep.name)).collect())
             .unwrap_or_default()
     };
@@ -131,7 +136,10 @@ fn source(
         });
     }
     let local = &package.source;
-    if local.editable.is_some() || local.directory.is_some() || local.virtual_path.is_some() {
+    if let (None, None, Some(path)) = (&local.editable, &local.virtual_path, &local.directory) {
+        return Ok(ItemSource::Directory { path: path.clone() });
+    }
+    if local.editable.is_some() || local.virtual_path.is_some() {
         return Err(VendorError::Develop(name.to_owned()));
     }
     let wheel = package
@@ -175,6 +183,7 @@ unmerged = [{ name = "odoo-addon-g" }, { name = "odoo-addon-b" }]
 
 [package.dev-dependencies]
 private = [{ name = "odoo-addon-local" }]
+kept = [{ name = "odoo-addon-kept" }]
 
 [[package]]
 name = "odoo-addon-a"
@@ -205,6 +214,11 @@ source = { git = "https://github.com/OCA/pos.git?subdirectory=pos_g&rev=refs%2Fp
 name = "odoo-addon-local"
 version = "17.0.1.0.0"
 source = { editable = "../local" }
+
+[[package]]
+name = "odoo-addon-kept"
+version = "17.0.1.0.0"
+source = { directory = "modules/oca/kept" }
 "#;
 
     #[test]
@@ -267,7 +281,13 @@ source = { editable = "../local" }
             plan(&lock, &["private".to_owned()], &none)
                 .unwrap_err()
                 .to_string(),
-            "odoo-addon-local: in develop mode (a local path source); restore it before vendoring"
+            "odoo-addon-local: in develop mode (an editable path source); restore it before vendoring"
+        );
+        assert_eq!(
+            plan(&lock, &["kept".to_owned()], &none).unwrap()[0].source,
+            ItemSource::Directory {
+                path: "modules/oca/kept".to_owned()
+            }
         );
         assert_eq!(plan(&lock, &["missing".to_owned()], &none).unwrap(), []);
     }

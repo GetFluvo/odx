@@ -73,8 +73,8 @@ pub enum VendorError {
     /// A package from an index has no wheel in `uv.lock`.
     #[error("{0}: uv.lock has no wheel for it")]
     NoWheel(String),
-    /// A package points at a local directory.
-    #[error("{0}: in develop mode (a local path source); restore it before vendoring")]
+    /// A package is installed editable (develop mode).
+    #[error("{0}: in develop mode (an editable path source); restore it before vendoring")]
     Develop(String),
     /// A package from git could not be exported.
     #[error("{package}: {message}")]
@@ -158,6 +158,14 @@ pub fn vendor(
             return Err(VendorError::UnsafeDirectory(dir));
         }
     }
+    // Everything is fetched before a directory is touched: a source that
+    // cannot be had leaves the addon directories as they were.
+    let mut fetched = Vec::new();
+    for (group, dir) in options.group_dirs {
+        for item in items.iter().filter(|item| &item.group == group) {
+            fetched.push((dir, item, fetch_item(item, options, http, git_archive)?));
+        }
+    }
     for dir in options.group_dirs.values() {
         if dir.exists() {
             std::fs::remove_dir_all(dir).map_err(io_at(dir))?;
@@ -171,52 +179,25 @@ pub fn vendor(
         },
         ..Vendored::default()
     };
-    for (group, dir) in options.group_dirs {
-        for item in items.iter().filter(|item| &item.group == group) {
-            let (bytes, what, subdirectory, source, wheel) = match &item.source {
-                ItemSource::Wheel { url, hash } => (
-                    fetch(http, options.wheel_cache, url, hash)?,
-                    url.rsplit('/').next().unwrap_or(url).to_owned(),
-                    None,
-                    item.version.clone(),
-                    Some(hash.clone()),
-                ),
-                ItemSource::Git {
-                    url,
-                    sha,
-                    subdirectory,
-                } => (
-                    git_archive(url, sha, subdirectory.as_deref()).map_err(|message| {
-                        VendorError::Git {
-                            package: item.package.clone(),
-                            message,
-                        }
-                    })?,
-                    item.package.clone(),
-                    Some(subdirectory.clone().unwrap_or_default()),
-                    format!("git {sha}"),
-                    None,
-                ),
-            };
-            let select = |name: &str| {
-                subdirectory.as_deref().map_or_else(
-                    || wheel_entry(name),
-                    |subdirectory| subdirectory_entry(subdirectory, name),
-                )
-            };
-            let entries = extract(&bytes, &what, &select, exclude, dir).and_then(|addons| {
-                addons
-                    .iter()
-                    .map(|addon| record_addon(&dir.join(addon), item, addon, options, &mut result))
-                    .collect::<Result<Vec<_>, _>>()
-            })?;
-            for entry in entries {
-                result.record.addons.push(VendoredAddon {
-                    source: source.clone(),
-                    wheel: wheel.clone(),
-                    ..entry
-                });
-            }
+    for (dir, item, got) in fetched {
+        let select = |name: &str| {
+            got.subdirectory.as_deref().map_or_else(
+                || wheel_entry(name),
+                |subdirectory| subdirectory_entry(subdirectory, name),
+            )
+        };
+        let entries = extract(&got.bytes, &got.what, &select, exclude, dir).and_then(|addons| {
+            addons
+                .iter()
+                .map(|addon| record_addon(&dir.join(addon), item, addon, options, &mut result))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+        for entry in entries {
+            result.record.addons.push(VendoredAddon {
+                source: got.source.clone(),
+                wheel: got.wheel.clone(),
+                ..entry
+            });
         }
     }
     result
@@ -224,6 +205,105 @@ pub fn vendor(
         .addons
         .sort_by(|a, b| (&a.group, &a.name).cmp(&(&b.group, &b.name)));
     Ok(result)
+}
+
+/// The archive of one item, with what the vendor manifest records of it.
+struct Fetched {
+    /// The wheel or `git archive` bytes.
+    bytes: Vec<u8>,
+    /// What the archive is called in errors.
+    what: String,
+    /// The addon's directory in a git archive; `None` for a wheel.
+    subdirectory: Option<String>,
+    /// The version, or `git <sha>`.
+    source: String,
+    /// The wheel's hash.
+    wheel: Option<String>,
+}
+
+/// Download or archive `item`.
+fn fetch_item(
+    item: &Item,
+    options: &Options<'_>,
+    http: &dyn Http,
+    git_archive: &GitArchive<'_>,
+) -> Result<Fetched, VendorError> {
+    Ok(match &item.source {
+        ItemSource::Wheel { url, hash } => Fetched {
+            bytes: fetch(http, options.wheel_cache, url, hash)?,
+            what: url.rsplit('/').next().unwrap_or(url).to_owned(),
+            subdirectory: None,
+            source: item.version.clone(),
+            wheel: Some(hash.clone()),
+        },
+        ItemSource::Git {
+            url,
+            sha,
+            subdirectory,
+        } => Fetched {
+            bytes: git_archive(url, sha, subdirectory.as_deref()).map_err(|message| {
+                VendorError::Git {
+                    package: item.package.clone(),
+                    message,
+                }
+            })?,
+            what: item.package.clone(),
+            subdirectory: Some(subdirectory.clone().unwrap_or_default()),
+            source: format!("git {sha}"),
+            wheel: None,
+        },
+        ItemSource::Directory { path } => {
+            let name = Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Fetched {
+                bytes: zip_directory(&options.root.join(path), &name)?,
+                what: item.package.clone(),
+                subdirectory: Some(name),
+                source: format!("path {path}"),
+                wheel: None,
+            }
+        }
+    })
+}
+
+/// A zip of `dir`, its files under `name/`.
+fn zip_directory(dir: &Path, name: &str) -> Result<Vec<u8>, VendorError> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let entries = std::fs::read_dir(&current)
+            .and_then(|entries| {
+                entries
+                    .map(|entry| entry.map(|entry| entry.path()))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(io_at(&current))?;
+        for path in entries {
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = std::fs::read(&path).map_err(io_at(&path))?;
+                files.push((path, bytes));
+            }
+        }
+    }
+    files.sort();
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (path, bytes) in &files {
+        let relative = path.strip_prefix(dir).unwrap_or(path);
+        let entry = format!("{name}/{}", relative.to_string_lossy().replace('\\', "/"));
+        // Writing into memory cannot fail.
+        let _ = writer.start_file(entry, options);
+        let _ = std::io::Write::write_all(&mut writer, bytes);
+    }
+    Ok(writer
+        .finish()
+        .map(std::io::Cursor::into_inner)
+        .unwrap_or_default())
 }
 
 /// Turns an IO failure at `path` into a [`VendorError`].
@@ -402,6 +482,96 @@ mod tests {
                 hash: String::new(),
             },
         }
+    }
+
+    #[test]
+    fn a_kept_directory_survives_its_own_group_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oca = tmp.path().join("modules/oca");
+        std::fs::create_dir_all(oca.join("kept/models")).unwrap();
+        std::fs::write(oca.join("kept").join(MANIFEST), "{'version': '17.0.1.0.0'}").unwrap();
+        std::fs::write(oca.join("kept/models/a.py"), "a = 1\n").unwrap();
+        std::fs::create_dir_all(oca.join("stale")).unwrap();
+        let groups = BTreeMap::from([("oca".to_owned(), oca.clone())]);
+        let previous = VendorRecord::default();
+        let options = Options {
+            root: tmp.path(),
+            group_dirs: &groups,
+            wheel_cache: tmp.path(),
+            previous: &previous,
+            bump: true,
+        };
+        let kept = Item {
+            source: ItemSource::Directory {
+                path: "modules/oca/kept".to_owned(),
+            },
+            ..item()
+        };
+        let no_git = |_: &str, _: &str, _: Option<&str>| Err(String::new());
+        let http = archive::tests::Answers::default();
+        let vendored = vendor(
+            std::slice::from_ref(&kept),
+            &options,
+            &http,
+            &no_git,
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(oca.join("kept/models/a.py")).unwrap(),
+            "a = 1\n"
+        );
+        assert!(!oca.join("stale").exists());
+        assert_eq!(vendored.record.addons[0].source, "path modules/oca/kept");
+
+        // An unreadable directory or file fails before anything is removed.
+        std::fs::set_permissions(
+            oca.join("kept/models/a.py"),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+        let failed = vendor(
+            std::slice::from_ref(&kept),
+            &options,
+            &http,
+            &no_git,
+            &|_| false,
+        );
+        std::fs::set_permissions(
+            oca.join("kept/models/a.py"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert!(failed.is_err());
+        std::fs::set_permissions(
+            oca.join("kept/models"),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+        let failed = vendor(
+            std::slice::from_ref(&kept),
+            &options,
+            &http,
+            &no_git,
+            &|_| false,
+        );
+        std::fs::set_permissions(
+            oca.join("kept/models"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        assert!(failed.is_err());
+        assert!(oca.join("kept/models/a.py").exists());
+        let git = Item {
+            source: ItemSource::Git {
+                url: "https://forge/a.git".to_owned(),
+                sha: "0".repeat(40),
+                subdirectory: None,
+            },
+            ..item()
+        };
+        assert!(vendor(&[kept, git], &options, &http, &no_git, &|_| false).is_err());
+        assert!(oca.join("kept/models/a.py").exists());
     }
 
     #[test]
