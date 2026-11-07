@@ -779,6 +779,36 @@ fn verify_vendored_and_deployed() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_kept_path_source_is_vendored_as_it_is() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let project = Project::new("profile = \"vendored-source\"", false);
+    let kept = project.root.join("modules/oca/kept");
+    write(&kept.join("__manifest__.py"), &manifest("17.0.1.0.0"));
+    write(&kept.join("models/k.py"), "k = 1\n");
+    let uv_lock = project.read("uv.lock").replace(
+        "oca = [{ name = \"odoo-addon-pos-x\" }",
+        "oca = [{ name = \"odoo-addon-kept\" }, { name = \"odoo-addon-pos-x\" }",
+    ) + "\n[[package]]\nname = \"odoo-addon-kept\"\nversion = \"17.0.1.0.0\"\nsource = { directory = \"modules/oca/kept\" }\n";
+    write(&project.root.join("uv.lock"), &uv_lock);
+    let (exit, out, err) = project.odx(&["vendor"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    assert_eq!(project.read("modules/oca/kept/models/k.py"), "k = 1\n");
+    assert!(project.root.join("modules/oca/pos_x").exists());
+
+    // An unreadable file or directory stops odx before anything is replaced.
+    let models = kept.join("models");
+    for (path, restore) in [(models.join("k.py"), 0o644), (models, 0o755)] {
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let (exit, _, err) = project.odx(&["vendor"]);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(restore)).unwrap();
+        assert_eq!(exit, Exit::Failure, "{err}");
+        assert!(project.root.join("modules/oca/pos_x").exists());
+    }
+}
+
+#[test]
 fn packages_from_git_come_from_the_cache() {
     let project = Project::new("profile = \"vendored-source\"", false);
     let up = project.tmp.path().join("up");
@@ -858,6 +888,8 @@ fn packages_from_git_come_from_the_cache() {
         )),
         "{err}"
     );
+    // A source that cannot be had leaves the addon directories as they were.
+    assert_eq!(project.read("modules/oca/pos_g/models/g.py"), "g = 1\n");
 }
 
 #[test]

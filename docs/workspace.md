@@ -346,14 +346,19 @@ vaulted pos: 3 commits
 ## Packages
 
 Addons installed as Python packages from git are locked too: entries of
-`[tool.odx.packages]` and git direct references in the dependency groups of
-`[tool.odx.groups]`:
+`[tool.odx.packages]`, git direct references in the dependency groups of
+`[tool.odx.groups]`, and plain requirements of those groups with a git
+`[tool.uv.sources]` entry:
 
 ```toml
 [project.optional-dependencies]
 oca_unmerged = [
   "odoo-addon-pos_vouchers @ git+https://github.com/OCA/pos.git@refs/pull/45/head#subdirectory=pos_vouchers",
+  "odoo-addon-pos_receipt",
 ]
+
+[tool.uv.sources]
+odoo-addon-pos_receipt = { git = "https://github.com/OCA/pos.git", rev = "refs/pull/52/head", subdirectory = "pos_receipt" }
 
 [tool.odx.packages]
 odoo-addon-private-reports = { url = "https://forge.example.com/odoo/private-reports.git", branch = "17.0", subdirectory = "private_reports", group = "private" }
@@ -364,8 +369,9 @@ odoo-addon-private-reports = { url = "https://forge.example.com/odoo/private-rep
 vault configured, every package commit is vaulted as the tag
 `refs/tags/odx/<commit>` (uv fetches tags and branches, not other refs) and
 the project is pointed at it: a direct reference becomes
-`…@odx/<commit>`, and a `[tool.odx.packages]` entry gets a
-`[tool.uv.sources]` entry (and is added to its group when missing). The
+`…@odx/<commit>`, a `[tool.uv.sources]` entry points at the tag, and a
+`[tool.odx.packages]` entry gets one (and is added to its group when
+missing). The
 original source stays in `odx.lock`, so `--update` still follows the pull
 request. Then `uv lock` runs (`--no-uv` skips it; `ODX_UV` names another
 executable).
@@ -454,8 +460,9 @@ $ odx verify --deployed ../deploy     # the same, for a deployment repository ch
 
 For platforms that receive addon directories (`vendored-source`, `odoo-sh`,
 `custom`), `odx vendor` fills the directory of every dependency group with
-the addons of the packages the group declares in `uv.lock`, and of the addon
-packages they depend on:
+the addons of the packages the group declares in `uv.lock` (uv writes
+`oca_unmerged` as `oca-unmerged`; either spelling matches), and of the
+addon packages they depend on:
 
 - a package from an index comes from its wheel: odx downloads the exact
   file `uv.lock` names, refuses it when its sha256 differs, keeps it in the
@@ -463,11 +470,16 @@ packages they depend on:
   `*.dist-info` stays behind);
 - a package from git comes from the commit `odx.lock` locked, out of the
   cache, so the vault and `odx lock` decide what is vendored;
+- a package with a non-editable path source (`{ path = "modules/oca/x" }`),
+  a local copy kept on purpose, is vendored from that directory as it is,
+  even when it lives in the group directory itself (an editable one is
+  develop mode, and refused);
 - files matching `[tool.odx.vendor] exclude` (default
   `static/description/index.html`) are left out.
 
-The group directories belong to odx: they are replaced on every run, which
-is why odx refuses a directory outside the project or one holding a
+The group directories belong to odx: they are replaced on every run, once
+every package was fetched (a source that cannot be had leaves them as they
+were), which is why odx refuses a directory outside the project or one holding a
 `pyproject.toml` or `.git`. Vendoring twice from the same lockfiles writes
 byte-identical files.
 

@@ -1,5 +1,8 @@
-//! The project's addon packages that come from git: `[tool.odx.packages]`
-//! and git direct references in the configured dependency groups.
+//! The project's addon packages that come from git.
+//!
+//! `[tool.odx.packages]`, git direct references in the configured dependency
+//! groups, and plain requirements of those groups with a git
+//! `[tool.uv.sources]` entry.
 
 use std::collections::BTreeMap;
 
@@ -7,7 +10,7 @@ use toml_edit::DocumentMut;
 
 use crate::OdxConfig;
 use crate::Problem;
-use crate::deps::{normalize_name, read_group};
+use crate::deps::{GitSource, Group, normalize_name, read_group, read_uv_git_sources};
 use crate::lock::{LockSource, LockedPackage};
 use odx_core::repo_key;
 
@@ -19,6 +22,9 @@ pub enum PackageOrigin {
     Table,
     /// A git direct reference in this group; `odx lock` rewrites it.
     DirectReference(String),
+    /// A plain requirement of this group with a git `[tool.uv.sources]`
+    /// entry; `odx lock` rewrites the entry.
+    UvSource(String),
 }
 
 /// A package to lock.
@@ -51,6 +57,64 @@ fn source(
         remote: None,
         tag: tag.map(str::to_owned),
     }
+}
+
+/// The upstream URL and source a vault reference stands for, from the
+/// distribution, the repository and the reference.
+type Vaulted<'a> = dyn Fn(&str, &str, &str) -> Option<(String, LockSource)> + 'a;
+
+/// The plain requirements of `groups` with a git `[tool.uv.sources]` entry,
+/// appended to `specs` unless already there.
+fn uv_source_specs(
+    doc: &DocumentMut,
+    groups: &[Group],
+    resolve: &Vaulted<'_>,
+    specs: &mut Vec<PackageSpec>,
+) {
+    for entry in read_uv_git_sources(doc) {
+        let wanted = normalize_name(&entry.name);
+        if specs
+            .iter()
+            .any(|spec| normalize_name(&spec.dist) == wanted)
+        {
+            continue;
+        }
+        let Some(group) = groups.iter().find(|group| {
+            group
+                .requirements
+                .iter()
+                .any(|req| req.direct.is_none() && normalize_name(&req.name) == wanted)
+        }) else {
+            continue;
+        };
+        let written = uv_source(&entry);
+        let reference = entry
+            .tag
+            .as_deref()
+            .or(entry.rev.as_deref())
+            .unwrap_or_default();
+        let (url, source) = resolve(&entry.name, &entry.git, reference)
+            .unwrap_or_else(|| (entry.git.clone(), written));
+        specs.push(PackageSpec {
+            dist: entry.name.clone(),
+            group: Some(group.name.clone()),
+            url,
+            source,
+            subdirectory: entry.subdirectory.clone(),
+            origin: PackageOrigin::UvSource(group.name.clone()),
+        });
+    }
+}
+
+/// What a git `[tool.uv.sources]` entry asks for: its `rev` (read like a
+/// direct reference's), its `tag`, else its branch (uv's default: `HEAD`).
+fn uv_source(entry: &GitSource) -> LockSource {
+    if let Some(rev) = &entry.rev {
+        return reference_source(rev);
+    }
+    let branch = entry.branch.as_deref().unwrap_or("HEAD");
+    let tag = entry.tag.as_deref();
+    source(None, None, tag.is_none().then_some(branch), tag)
 }
 
 /// The source a direct reference's `@<ref>` stands for: `refs/pull/N/head`
@@ -92,9 +156,11 @@ pub fn uv_git_url(url: &str) -> String {
 /// The git packages of the project in `doc`.
 ///
 /// `[tool.odx.packages]` come first, then git direct references in the
-/// groups of `[tool.odx.groups]`, by group. A direct reference that already points at the vault
-/// (`<mirror>@odx/<sha>`) stands for the source `locked` records for it.
-/// Direct references without a ref are reported and skipped.
+/// groups of `[tool.odx.groups]`, by group, then plain requirements of
+/// those groups with a git `[tool.uv.sources]` entry. A reference that
+/// already points at the vault (`<mirror>@odx/<sha>`) stands for the source
+/// `locked` records for it. Direct references without a ref are reported
+/// and skipped.
 pub fn package_specs(
     doc: &DocumentMut,
     config: &OdxConfig,
@@ -127,9 +193,25 @@ pub fn package_specs(
         })
         .collect();
     let mirror = config.mirror.as_ref().map(|mirror| repo_key(&mirror.url));
+    // A reference that already points at the vault (`odx/<sha>`) stands for
+    // the source `locked` records for the package.
+    let resolve = |dist: &str, repository: &str, reference: &str| {
+        reference
+            .strip_prefix("odx/")
+            .filter(|_| mirror.as_deref() == Some(repo_key(repository).as_str()))
+            .and_then(|sha| {
+                locked
+                    .iter()
+                    .find(|(name, entry)| {
+                        normalize_name(name) == normalize_name(dist) && entry.sha == sha
+                    })
+                    .map(|(_, entry)| (entry.url.clone(), entry.source.clone()))
+            })
+    };
     let mut problems = Vec::new();
     let names = config.groups.iter().flat_map(|groups| groups.dirs.keys());
-    for group in names.filter_map(|name| read_group(doc, name)) {
+    let groups: Vec<_> = names.filter_map(|name| read_group(doc, name)).collect();
+    for group in &groups {
         let direct = group
             .requirements
             .iter()
@@ -144,21 +226,8 @@ pub fn package_specs(
                 });
                 continue;
             };
-            let vaulted = reference
-                .strip_prefix("odx/")
-                .filter(|_| mirror.as_deref() == Some(repo_key(&direct.repository).as_str()))
-                .and_then(|sha| {
-                    locked
-                        .iter()
-                        .find(|(name, entry)| {
-                            normalize_name(name) == normalize_name(&req.name) && entry.sha == sha
-                        })
-                        .map(|(_, entry)| entry)
-                });
-            let (url, source) = vaulted.map_or_else(
-                || (direct.repository.clone(), reference_source(reference)),
-                |entry| (entry.url.clone(), entry.source.clone()),
-            );
+            let (url, source) = resolve(&req.name, &direct.repository, reference)
+                .unwrap_or_else(|| (direct.repository.clone(), reference_source(reference)));
             specs.push(PackageSpec {
                 dist: req.name.clone(),
                 group: Some(group.name.clone()),
@@ -169,6 +238,7 @@ pub fn package_specs(
             });
         }
     }
+    uv_source_specs(doc, &groups, &resolve, &mut specs);
     (specs, problems)
 }
 
@@ -184,7 +254,15 @@ name = "client"
 version = "1"
 
 [project.optional-dependencies]
-oca = ["odoo-addon-web_responsive==17.0.1.2.0"]
+oca = [
+  "odoo-addon-web_responsive==17.0.1.2.0",
+  "odoo-addon-uv_rev>=17.0",
+  "odoo-addon-uv_tag",
+  "odoo-addon-uv_branch",
+  "odoo-addon-uv_default",
+  "odoo-addon-uv_vaulted",
+  "odoo-addon-private",
+]
 oca_unmerged = [
   "odoo-addon-pos_vouchers @ git+https://github.com/OCA/pos.git@refs/pull/45/head#subdirectory=pos_vouchers",
   "odoo-addon-pos_fix @ git+https://github.com/OCA/pos.git@17.0-fix#subdirectory=pos_fix",
@@ -213,6 +291,16 @@ odoo-addon-private = { url = "https://forge.example/odoo/private.git", branch = 
 odoo-addon-gh = { repo = "OCA/server-tools", tag = "v1", group = "oca_unmerged" }
 odoo-addon-rev = { repo = "OCA/web", rev = "abc", group = "oca" }
 odoo-addon-pr = { repo = "OCA/web", pr = 7, group = "oca" }
+
+[tool.uv.sources]
+odoo = { git = "https://github.com/OCA/OCB", branch = "17.0" }
+odoo-addon-private = { git = "https://forge.example/odoo/other.git", branch = "17.0" }
+odoo-addon-uv-rev = { git = "https://github.com/OCA/web.git", rev = "refs/pull/8/head", subdirectory = "uv_rev" }
+odoo_addon_uv_tag = { git = "https://github.com/OCA/web.git", tag = "v2" }
+odoo-addon-uv-branch = { git = "https://github.com/OCA/web.git", branch = "17.0-x" }
+odoo-addon-uv-default = { git = "https://github.com/OCA/web.git" }
+odoo-addon-uv-vaulted = { git = "ssh://git@forge.example/odoo/vault.git", tag = "odx/cccccccccccccccccccccccccccccccccccccccc" }
+odoo-addon-pos_vouchers = { git = "https://github.com/OCA/pos.git", branch = "17.0" }
 "#;
 
     #[test]
@@ -233,6 +321,17 @@ odoo-addon-pr = { repo = "OCA/web", pr = 7, group = "oca" }
                 subdirectory: Some("pos_vaulted".into()),
                 sha: "a".repeat(40),
                 mirror_ref: Some("refs/tags/odx/aaaa".into()),
+            },
+        );
+        locked.insert(
+            "odoo-addon-uv-vaulted".to_owned(),
+            LockedPackage {
+                group: Some("oca".into()),
+                url: "https://github.com/OCA/web.git".into(),
+                source: source(None, None, Some("17.0-v"), None),
+                subdirectory: None,
+                sha: "c".repeat(40),
+                mirror_ref: Some("refs/tags/odx/cccc".into()),
             },
         );
         let (specs, problems) = package_specs(&doc, &config, &locked);
@@ -333,8 +432,40 @@ odoo-addon-pr = { repo = "OCA/web", pr = 7, group = "oca" }
                         None
                     )
                 ),
+                (
+                    "odoo-addon-uv-rev",
+                    Some("oca"),
+                    "https://github.com/OCA/web.git",
+                    fmt(Some(8), None, None, None)
+                ),
+                (
+                    "odoo_addon_uv_tag",
+                    Some("oca"),
+                    "https://github.com/OCA/web.git",
+                    fmt(None, None, None, Some("v2"))
+                ),
+                (
+                    "odoo-addon-uv-branch",
+                    Some("oca"),
+                    "https://github.com/OCA/web.git",
+                    fmt(None, None, Some("17.0-x"), None)
+                ),
+                (
+                    "odoo-addon-uv-default",
+                    Some("oca"),
+                    "https://github.com/OCA/web.git",
+                    fmt(None, None, Some("HEAD"), None)
+                ),
+                (
+                    "odoo-addon-uv-vaulted",
+                    Some("oca"),
+                    "https://github.com/OCA/web.git",
+                    fmt(None, None, Some("17.0-v"), None)
+                ),
             ]
         );
+        assert_eq!(specs[9].subdirectory.as_deref(), Some("uv_rev"));
+        assert_eq!(specs[9].origin, PackageOrigin::UvSource("oca".into()));
         assert_eq!(specs[4].subdirectory.as_deref(), Some("pos_vouchers"));
         assert_eq!(
             specs[4].origin,
