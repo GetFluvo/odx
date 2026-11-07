@@ -779,6 +779,55 @@ fn verify_vendored_and_deployed() {
 }
 
 #[test]
+fn versions_another_tool_bumped_never_go_down() {
+    let project = Project::new("profile = \"vendored-source\"", false);
+    // Vendored before by another tool, which bumped the version; no vendor
+    // manifest yet.
+    let pos_x = project.root.join("modules/oca/pos_x");
+    write(&pos_x.join("__manifest__.py"), &manifest("17.0.1.0.0.3"));
+    write(&pos_x.join("models/x.py"), "x = 1\n");
+    write(&project.root.join("modules/oca/no_manifest/x.py"), "");
+    write(
+        &project.root.join("modules/oca/no_version/__manifest__.py"),
+        "{}",
+    );
+    let (exit, out, err) = project.odx(&["vendor"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    assert!(
+        project
+            .read("modules/oca/pos_x/__manifest__.py")
+            .contains("17.0.1.0.0.3")
+    );
+
+    // Changed content on top of it: one more.
+    std::fs::remove_file(project.root.join(".odx/vendor.lock")).unwrap();
+    write(&pos_x.join("models/x.py"), "x = 0\n");
+    let (exit, out, err) = project.odx(&["vendor"]);
+    assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+    assert!(
+        project
+            .read("modules/oca/pos_x/__manifest__.py")
+            .contains("17.0.1.0.0.4"),
+        "{out}"
+    );
+
+    // An older version gives way to the shipped one, same content or not.
+    for content in ["x = 1\n", "x = 0\n"] {
+        std::fs::remove_file(project.root.join(".odx/vendor.lock")).unwrap();
+        write(&pos_x.join("__manifest__.py"), &manifest("17.0.0.9.0"));
+        write(&pos_x.join("models/x.py"), content);
+        let (exit, out, err) = project.odx(&["vendor"]);
+        assert_eq!((exit, err.as_str()), (Exit::Success, ""), "{out}");
+        assert!(
+            project
+                .read("modules/oca/pos_x/__manifest__.py")
+                .contains("\"17.0.1.0.0\""),
+            "{out}"
+        );
+    }
+}
+
+#[test]
 #[cfg(unix)]
 fn a_kept_path_source_is_vendored_as_it_is() {
     use std::os::unix::fs::PermissionsExt as _;

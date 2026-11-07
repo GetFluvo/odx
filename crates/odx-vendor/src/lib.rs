@@ -166,6 +166,7 @@ pub fn vendor(
             fetched.push((dir, item, fetch_item(item, options, http, git_archive)?));
         }
     }
+    let baselines = baselines(options);
     for dir in options.group_dirs.values() {
         if dir.exists() {
             std::fs::remove_dir_all(dir).map_err(io_at(dir))?;
@@ -189,7 +190,14 @@ pub fn vendor(
         let entries = extract(&got.bytes, &got.what, &select, exclude, dir).and_then(|addons| {
             addons
                 .iter()
-                .map(|addon| record_addon(&dir.join(addon), item, addon, options, &mut result))
+                .map(|addon| {
+                    let written = Written {
+                        previous: options.previous.addon(addon),
+                        baseline: baselines.get(addon),
+                        bump: options.bump,
+                    };
+                    record_addon(&dir.join(addon), item, addon, &written, &mut result)
+                })
                 .collect::<Result<Vec<_>, _>>()
         })?;
         for entry in entries {
@@ -334,7 +342,7 @@ fn record_addon(
     dir: &Path,
     item: &Item,
     addon: &str,
-    options: &Options<'_>,
+    written: &Written<'_>,
     result: &mut Vendored,
 ) -> Result<VendoredAddon, VendorError> {
     let io = io_at(dir);
@@ -350,10 +358,12 @@ fn record_addon(
             .unwrap_or_default();
         let source_content = hash_files(&files);
         let written_version = written_version(
-            options.previous.addon(addon),
-            &source_content,
-            &source_version,
-            options.bump,
+            written,
+            &Shipped {
+                content: &source_content,
+                neutral: &neutral_hash(&files),
+                version: &source_version,
+            },
             addon,
             result,
         );
@@ -385,37 +395,143 @@ fn record_addon(
     })
 }
 
-/// The version to write for an addon with `source_content` and
-/// `source_version`, given what the previous run wrote: the previous
-/// version while the content is unchanged, a bump when only the content
-/// changed (recorded in `result`), else the shipped version.
+/// What decides the version written for an addon: the previous run's
+/// entry, the addon that was in the directory when there is none, and
+/// whether bumping is allowed.
+struct Written<'a> {
+    previous: Option<&'a VendoredAddon>,
+    baseline: Option<&'a Baseline>,
+    bump: bool,
+}
+
+/// What the package ships: its content hash, the hash with the manifest
+/// version left out, and its version.
+struct Shipped<'a> {
+    content: &'a str,
+    neutral: &'a str,
+    version: &'a str,
+}
+
+/// An addon found in a group directory that the vendor manifest does not
+/// know (vendored by another tool): its version, and its content hash with
+/// the manifest version left out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Baseline {
+    /// The version its manifest says.
+    version: String,
+    /// [`neutral_hash`] of its files.
+    neutral: String,
+}
+
+/// The version to write for an addon: the previous version while the
+/// content is unchanged, a bump when only the content changed (recorded in
+/// `result`), else the shipped version. Without a previous run, an addon
+/// already in the directory counts as one, so a version another tool bumped
+/// never goes down.
 fn written_version(
-    previous: Option<&VendoredAddon>,
-    source_content: &str,
-    source_version: &str,
-    bump_allowed: bool,
+    written: &Written<'_>,
+    shipped: &Shipped<'_>,
     addon: &str,
     result: &mut Vendored,
 ) -> String {
-    match previous {
-        Some(previous) if previous.source_content == source_content => {
-            previous.written_version.clone()
-        }
-        Some(previous) if bump_allowed && previous.source_version == source_version => {
-            if let Some(next) = bump(&previous.written_version) {
-                result.bumped.push(Bumped {
-                    addon: addon.to_owned(),
-                    from: source_version.to_owned(),
-                    to: next.clone(),
-                });
-                next
-            } else {
-                result.not_bumped.push(addon.to_owned());
-                source_version.to_owned()
-            }
-        }
-        _ => source_version.to_owned(),
+    let (previous_version, unchanged, same_source) = match (written.previous, written.baseline) {
+        (Some(previous), _) => (
+            previous.written_version.as_str(),
+            previous.source_content == shipped.content,
+            previous.source_version == shipped.version,
+        ),
+        (None, Some(baseline)) => (
+            baseline.version.as_str(),
+            baseline.neutral == shipped.neutral,
+            !newer(shipped.version, &baseline.version),
+        ),
+        (None, None) => return shipped.version.to_owned(),
+    };
+    if unchanged {
+        return if newer(shipped.version, previous_version) {
+            shipped.version.to_owned()
+        } else {
+            previous_version.to_owned()
+        };
     }
+    if !(written.bump && same_source) {
+        return shipped.version.to_owned();
+    }
+    bump(previous_version).map_or_else(
+        || {
+            result.not_bumped.push(addon.to_owned());
+            shipped.version.to_owned()
+        },
+        |next| {
+            result.bumped.push(Bumped {
+                addon: addon.to_owned(),
+                from: shipped.version.to_owned(),
+                to: next.clone(),
+            });
+            next
+        },
+    )
+}
+
+/// Whether dotted version `a` is newer than `b`, segment by segment,
+/// numerically where both segments are numbers.
+fn newer(a: &str, b: &str) -> bool {
+    let key = |version: &str| -> Vec<(u64, String)> {
+        version
+            .split('.')
+            .map(|part| (part.parse().unwrap_or(0), part.to_owned()))
+            .collect()
+    };
+    key(a) > key(b)
+}
+
+/// The content hash of `files` with the manifest version left out.
+fn neutral_hash(files: &[(String, Vec<u8>)]) -> String {
+    let neutral: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .map(|(name, bytes)| {
+            let text = (name == MANIFEST)
+                .then(|| set_manifest_version(&String::from_utf8_lossy(bytes), ""))
+                .flatten();
+            (
+                name.clone(),
+                text.map_or_else(|| bytes.clone(), String::into_bytes),
+            )
+        })
+        .collect();
+    hash_files(&neutral)
+}
+
+/// The addons in the group directories that the previous vendor manifest
+/// does not know, by name.
+fn baselines(options: &Options<'_>) -> BTreeMap<String, Baseline> {
+    options
+        .group_dirs
+        .values()
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flat_map(|entries| entries.flatten().map(|entry| entry.path()))
+        .filter_map(|path| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let files = read_tree(&path).unwrap_or_default();
+            let version = files
+                .iter()
+                .find(|(file, _)| file == MANIFEST)
+                .and_then(|(_, bytes)| parse_manifest(&String::from_utf8_lossy(bytes)).ok())
+                .and_then(|manifest| manifest.version)?;
+            options.previous.addon(&name).is_none().then(|| {
+                (
+                    name,
+                    Baseline {
+                        version,
+                        neutral: neutral_hash(&files),
+                    },
+                )
+            })
+        })
+        .collect()
 }
 
 /// The addons under the group directories that differ from `record`:
@@ -577,44 +693,88 @@ mod tests {
     #[test]
     fn unreadable_or_unwritable_addons_fail() {
         let tmp = tempfile::tempdir().unwrap();
-        let groups = BTreeMap::new();
-        let previous = VendorRecord::default();
-        let options = Options {
-            root: tmp.path(),
-            group_dirs: &groups,
-            wheel_cache: tmp.path(),
-            previous: &previous,
+        let fresh = Written {
+            previous: None,
+            baseline: None,
             bump: true,
         };
         let dangling = tmp.path().join("dangling");
         std::fs::create_dir_all(&dangling).unwrap();
         std::os::unix::fs::symlink("nowhere", dangling.join("x.py")).unwrap();
         let mut result = Vendored::default();
-        assert!(record_addon(&dangling, &item(), "dangling", &options, &mut result).is_err());
+        assert!(record_addon(&dangling, &item(), "dangling", &fresh, &mut result).is_err());
 
         // A content change that needs a bump the manifest cannot take.
         let addon = tmp.path().join("a");
         std::fs::create_dir_all(&addon).unwrap();
         std::fs::write(addon.join(MANIFEST), "{'version': '1.0'}").unwrap();
-        let previous = VendorRecord {
-            version: VERSION,
-            addons: vec![VendoredAddon {
-                name: "a".to_owned(),
-                source_version: "1.0".to_owned(),
-                written_version: "1.0".to_owned(),
-                source_content: "sha256:old".to_owned(),
-                ..VendoredAddon::default()
-            }],
+        let previous = VendoredAddon {
+            name: "a".to_owned(),
+            source_version: "1.0".to_owned(),
+            written_version: "1.0".to_owned(),
+            source_content: "sha256:old".to_owned(),
+            ..VendoredAddon::default()
         };
-        let options = Options {
-            previous: &previous,
-            ..options
+        let known = Written {
+            previous: Some(&previous),
+            ..fresh
         };
         std::fs::set_permissions(addon.join(MANIFEST), std::fs::Permissions::from_mode(0o444))
             .unwrap();
-        let failed = record_addon(&addon, &item(), "a", &options, &mut result);
+        let failed = record_addon(&addon, &item(), "a", &known, &mut result);
         std::fs::set_permissions(addon.join(MANIFEST), std::fs::Permissions::from_mode(0o644))
             .unwrap();
         assert!(failed.is_err());
+    }
+
+    #[test]
+    fn an_addon_another_tool_vendored_is_the_baseline() {
+        let shipped = |content, version| Shipped {
+            content,
+            neutral: content,
+            version,
+        };
+        let baseline = |version: &str, neutral: &str| Baseline {
+            version: version.to_owned(),
+            neutral: neutral.to_owned(),
+        };
+        let decide = |base: &Baseline, ship: &Shipped<'_>, bump: bool| {
+            let written = Written {
+                previous: None,
+                baseline: Some(base),
+                bump,
+            };
+            let mut result = Vendored::default();
+            (
+                written_version(&written, ship, "a", &mut result),
+                result.bumped.len(),
+            )
+        };
+        // Bumped by the other tool, same content: kept, never lowered.
+        let base = baseline("17.0.1.0.0.1", "x");
+        assert_eq!(
+            decide(&base, &shipped("x", "17.0.1.0.0"), true),
+            ("17.0.1.0.0.1".into(), 0)
+        );
+        // New content, same upstream version: bumped once more.
+        assert_eq!(
+            decide(&base, &shipped("y", "17.0.1.0.0"), true),
+            ("17.0.1.0.0.2".into(), 1)
+        );
+        assert_eq!(
+            decide(&base, &shipped("y", "17.0.1.0.0"), false),
+            ("17.0.1.0.0".into(), 0)
+        );
+        // A newer upstream version wins.
+        assert_eq!(
+            decide(&base, &shipped("y", "17.0.2.0.0"), true),
+            ("17.0.2.0.0".into(), 0)
+        );
+        assert_eq!(
+            decide(&base, &shipped("x", "17.0.2.0.0"), true),
+            ("17.0.2.0.0".into(), 0)
+        );
+        assert!(newer("17.0.10.0.0", "17.0.9.0.0"));
+        assert!(!newer("17.0.1", "17.0.1"));
     }
 }
