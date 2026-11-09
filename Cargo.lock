@@ -2632,9 +2632,9 @@ dependencies = [
 
 [[package]]
 name = "odoo-lint"
-version = "0.1.0-alpha.17"
+version = "0.1.0-alpha.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88f38eb45eb0b0d39bbf3a807d6c19decba0a27e5f128bd7dfc060d540c52e5c"
+checksum = "d98126ae7bf8d8c9f178793e031a03318312d436be2b061e5d09c98c208c58d7"
 dependencies = [
  "clap",
  "comrak",
@@ -2643,6 +2643,7 @@ dependencies = [
  "globset",
  "lax-css",
  "lax-markup",
+ "libc",
  "lsp-server",
  "lsp-types",
  "oxc_allocator",
