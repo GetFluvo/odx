@@ -365,7 +365,10 @@ odoo-addon-private-reports = { url = "https://forge.example.com/odoo/private-rep
 ```
 
 `odx lock` resolves each to a commit and records it in `odx.lock`
-(`[packages.<name>]`); until `--update`, a package keeps its commit. With a
+(`[packages.<name>]`); until `--update`, a package keeps its commit. A
+package `odx.lock` does not pin yet takes the commit `uv.lock` resolved
+from the same repository, so odx and uv agree; `--update` follows the
+branch or pull request. With a
 vault configured, every package commit is vaulted as the tag
 `refs/tags/odx/<commit>` (uv fetches tags and branches, not other refs) and
 the project is pointed at it: a direct reference becomes

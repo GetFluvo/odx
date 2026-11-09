@@ -196,6 +196,47 @@ fn packages_and_the_core_are_locked() {
 }
 
 #[test]
+fn a_package_keeps_the_commit_uv_lock_resolved() {
+    let project = Project::new();
+    project.write(false, "");
+    let base = git(&project.up, &["rev-parse", "17.0"]);
+    // uv resolved the branch at `base`; it has moved on since.
+    std::fs::write(project.up.join("other").join("o.py"), "o2").unwrap();
+    git(&project.up, &["commit", "--quiet", "-am", "o2"]);
+    let tip = git(&project.up, &["rev-parse", "17.0"]);
+    let url = &project.url;
+    std::fs::write(
+        project.root.join("uv.lock"),
+        format!(
+            "version = 1\n\n\
+             [[package]]\nname = \"odoo-addon-branchy\"\nversion = \"1\"\n\
+             source = {{ git = \"{url}?subdirectory=other&branch=17.0#{base}\" }}\n\n\
+             [[package]]\nname = \"odoo-addon-fixed\"\nversion = \"1\"\n\
+             source = {{ git = \"https://elsewhere/other.git?subdirectory=other#{tip}\" }}\n\n\
+             [[package]]\nname = \"odoo-addon-other\"\nversion = \"1\"\n\
+             source = {{ git = \"{url}?subdirectory=other\" }}\n"
+        ),
+    )
+    .unwrap();
+    let (exit, _, err) = project.run(&["lock"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let entry = |lock: &str| {
+        lock.split("[packages.odoo-addon-branchy]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let lock = project.read("odx.lock");
+    assert!(entry(&lock).contains(&base), "{lock}");
+    // --update follows the branch.
+    let (exit, _, err) = project.run(&["lock", "--update"]);
+    assert_eq!(exit, Exit::Success, "{err}");
+    let lock = project.read("odx.lock");
+    assert!(entry(&lock).contains(&tip), "{lock}");
+}
+
+#[test]
 fn vaulted_packages_point_uv_at_the_vault() {
     let project = Project::new();
     project.write(true, "");

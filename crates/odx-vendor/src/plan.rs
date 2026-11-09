@@ -157,8 +157,14 @@ fn source(
     })
 }
 
-/// `<url>?subdirectory=<dir>&rev=<ref>#<commit>` from `uv.lock`.
-fn parse_git(git: &str) -> GitLocation {
+/// `<url>?subdirectory=<dir>&rev=<ref>#<commit>` from `uv.lock`: the URL,
+/// the commit and the subdirectory.
+///
+/// ```
+/// let (url, sha, dir) = odx_vendor::plan::parse_git("https://forge/a.git?subdirectory=x&branch=19.0#abc");
+/// assert_eq!((url.as_str(), sha.as_str(), dir.as_deref()), ("https://forge/a.git", "abc", Some("x")));
+/// ```
+pub fn parse_git(git: &str) -> GitLocation {
     let (rest, sha) = git.split_once('#').unwrap_or((git, ""));
     let (url, query) = rest.split_once('?').unwrap_or((rest, ""));
     let subdirectory = query
