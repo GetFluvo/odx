@@ -6,20 +6,24 @@ use std::sync::Arc;
 
 use odx_aggregate::{
     HeadDecision, Planned, PlannedSource, classify, date, decide, lock_changes, locked_entry,
-    package_entries, package_fetch_plans, pin, plan_config, rewrite_packages, run_fetches,
+    locked_package, package_entries, package_fetch_plans, pin, plan_config, rewrite_packages,
+    run_fetches,
 };
 use odx_config::deps::{normalize_name, read_uv_git_sources};
 use odx_config::edit::PyprojectEdit;
 use odx_config::lock::{
-    CiState as LockCi, LockedRepository, Lockfile, MergeStatus, OdooPin, RedClassification,
+    CiState as LockCi, LockedPackage, LockedRepository, Lockfile, MergeStatus, OdooPin,
+    RedClassification,
 };
 use odx_config::packages::{PackageSpec, package_specs};
 use odx_config::schema::OnHeadChange;
+use odx_config::uvlock::UvLock;
 use odx_config::{Source, discover};
 use odx_core::system::OsRunner;
 use odx_core::{Exit, Invocation, ProcessRunner, repo_key};
 use odx_forge::{CachedHttp, CiState, ForgeClient, ForgeKind, RepoUrl, ReqwestHttp};
 use odx_git::{Cache, Fetched, GitBackend, Merger, SystemGit, bundle, url_hash};
+use odx_vendor::plan::parse_git;
 use toml_edit::DocumentMut;
 
 use super::super::Report;
@@ -241,6 +245,41 @@ pub(super) fn in_scratch_dirs(cache: &Cache, planned: &mut [Planned]) {
     }
 }
 
+/// `pinned` plus, for each package it does not pin, the commit `uv_lock`
+/// resolved from the same repository.
+fn pinned_by_uv_lock(
+    specs: &[PackageSpec],
+    pinned: &BTreeMap<String, LockedPackage>,
+    uv_lock: &UvLock,
+) -> BTreeMap<String, LockedPackage> {
+    let mut seeded = pinned.clone();
+    for spec in specs
+        .iter()
+        .filter(|spec| locked_package(spec, pinned).is_none())
+    {
+        let resolved = uv_lock
+            .packages_named(&normalize_name(&spec.dist))
+            .into_iter()
+            .filter_map(|package| package.source.git.as_deref())
+            .map(parse_git)
+            .find(|(url, sha, _)| repo_key(url) == repo_key(&spec.url) && !sha.is_empty());
+        if let Some((_, sha, _)) = resolved {
+            seeded.insert(
+                spec.dist.clone(),
+                LockedPackage {
+                    group: spec.group.clone(),
+                    url: spec.url.clone(),
+                    source: spec.source.clone(),
+                    subdirectory: spec.subdirectory.clone(),
+                    sha,
+                    mirror_ref: None,
+                },
+            );
+        }
+    }
+    seeded
+}
+
 /// Resolve the project's git packages (pinned by `odx.lock` unless
 /// `update`) and its Odoo core source into `lock`; returns the packages and
 /// the parsed `pyproject.toml` for rewriting.
@@ -255,9 +294,19 @@ pub(super) fn lock_packages(
     let edit = PyprojectEdit::parse(&prepared.project.text).unwrap_or_default();
     let doc = edit.document();
     let previous = prepared.lock_or_default();
-    let none = BTreeMap::new();
-    let pinned = if update { &none } else { &previous.packages };
     let (specs, problems) = package_specs(doc, &prepared.project.config, &previous.packages);
+    // Until `--update`, a package keeps its commit: the one odx.lock pins,
+    // else the one uv.lock resolved, so odx and uv agree on what is installed.
+    let seeded = if update {
+        BTreeMap::new()
+    } else {
+        let uv_lock = std::fs::read_to_string(prepared.project.root.join("uv.lock"))
+            .ok()
+            .and_then(|text| UvLock::parse(&text).ok())
+            .unwrap_or_default();
+        pinned_by_uv_lock(&specs, &previous.packages, &uv_lock)
+    };
+    let pinned = &seeded;
     warnings.extend(problems);
     let vault = prepared
         .project
