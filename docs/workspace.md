@@ -497,8 +497,9 @@ script), an addon already in the directory is the previous run: its
 version stays while the content is the same, goes up by one when only the
 content changed, and is never lowered below what is there. What was
 written, with the wheel hash or commit and content hashes, goes to the
-vendor manifest `.odx/vendor.lock` (`[tool.odx.vendor] manifest`); do not
-commit it.
+vendor manifest `.odx/vendor.lock` (`[tool.odx.vendor] manifest`). Commit
+it with `odx.lock`: it holds the versions odx bumped, so the next run, on
+another machine or in CI, keeps them instead of starting over.
 
 `odx verify --vendored` fails when a vendored addon changed, is missing or
 is not odx's, and when `uv.lock` or `odx.lock` moved on since `odx vendor`.
