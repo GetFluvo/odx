@@ -673,10 +673,7 @@ mod tests {
         ] {
             let http = Scripted::new(vec![Ok(answer)]);
             let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
-            assert_eq!(
-                client.visibility(&target, ForgeKind::Gitea),
-                Err(expected)
-            );
+            assert_eq!(client.visibility(&target, ForgeKind::Gitea), Err(expected));
             assert!(
                 http.seen.lock().unwrap()[0].1.is_empty(),
                 "no token, no header"
