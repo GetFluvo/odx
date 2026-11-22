@@ -116,7 +116,7 @@ impl Catalogue {
                     depends: manifest.depends.clone(),
                     triggers,
                     url: repo.url.clone(),
-                    path: path.clone(),
+                    path,
                 });
             }
             self.depends.entry(addon).or_insert(manifest.depends);

@@ -675,7 +675,7 @@ mod tests {
             let client = ForgeClient::new(&http, &env, &runner, &no_sleep);
             assert_eq!(
                 client.visibility(&target, ForgeKind::Gitea),
-                Err(expected.clone())
+                Err(expected)
             );
             assert!(
                 http.seen.lock().unwrap()[0].1.is_empty(),

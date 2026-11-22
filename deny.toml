@@ -14,6 +14,12 @@ ignore = [
   { id = "RUSTSEC-2026-0370", reason = "zvariant via zbus 5 (keyring store); merged into zbus 6" },
   { id = "RUSTSEC-2026-0371", reason = "zbus_names via zbus 5 (keyring store); merged into zbus 6" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via zbus 5 (keyring store); merged into zbus 6" },
+  # chrono, chrono-tz and chrono-tz-build only reach the build through tera,
+  # a build-dependency of tokei; nothing in odx calls them at run time.
+  # Unmaintained only, no vulnerability; drop once tokei leaves tera.
+  { id = "RUSTSEC-2026-0543", reason = "chrono via tera, a tokei build-dependency" },
+  { id = "RUSTSEC-2026-0555", reason = "chrono-tz via tera, a tokei build-dependency" },
+  { id = "RUSTSEC-2026-0559", reason = "chrono-tz-build via tera, a tokei build-dependency" },
 ]
 
 [licenses]
