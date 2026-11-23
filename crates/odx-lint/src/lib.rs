@@ -19,7 +19,7 @@ pub use odoo_lint::output::OutputFormat;
 #[macro_export]
 macro_rules! odoo_lint_version {
     () => {
-        "0.1.0-alpha.17"
+        "0.1.0-alpha.21"
     };
 }
 
@@ -202,21 +202,35 @@ mod tests {
         assert!(text.contains("__manifest__.py"), "{text}");
         let github = render(OutputFormat::Github, &outcome.violations);
         assert!(github.starts_with("::"), "{github}");
-        // Selecting nothing that exists finds nothing, and says so.
-        let none = lint(&Request {
+        // Selecting a rule that does not exist is refused, naming it.
+        let error = lint(&Request {
             select: Some(vec!["NOPE9999".to_owned()]),
             ..request(tmp.path())
         })
-        .unwrap();
-        assert_eq!(none.violations, []);
-        assert_ne!(none.warnings, Vec::<String>::new());
-        // The addons path is passed on.
+        .unwrap_err();
+        assert!(
+            error.contains("'NOPE9999' does not match any rule"),
+            "{error}"
+        );
+        // The addons path is passed on, and a folder that is not there is
+        // a warning.
         let pathed = lint(&Request {
             addons_path: vec![tmp.path().join("elsewhere")],
             ..request(tmp.path())
         })
         .unwrap();
         assert_eq!(pathed.violations, outcome.violations);
+        // In the configuration, an unknown rule is only a warning.
+        write(
+            &tmp.path().join("pyproject.toml"),
+            "[tool.odoo-lint]\nignore = [\"NOPE9999\"]\n",
+        );
+        let configured = lint(&request(tmp.path())).unwrap();
+        assert!(
+            configured.warnings.iter().any(|w| w.contains("'NOPE9999'")),
+            "{:?}",
+            configured.warnings
+        );
     }
 
     #[test]
@@ -292,7 +306,7 @@ mod tests {
         );
         assert_eq!(addon_of(root, &root.join("README.md")), None);
         assert_eq!(addon_of(&addon, &addon.join("__init__.py")), None);
-        assert_eq!(odoo_lint_version!(), "0.1.0-alpha.17");
+        assert_eq!(odoo_lint_version!(), "0.1.0-alpha.21");
         // The version above is the one depended on.
         let manifest =
             std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))

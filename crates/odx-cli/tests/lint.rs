@@ -84,10 +84,23 @@ fn findings_formats_and_fixes() {
     assert!(value.as_array().is_some_and(|all| !all.is_empty()), "{out}");
     let (_, out, _) = odx(root, &["lint", "modules/oca", "--output-format", "github"]);
     insta::assert_snapshot!("lint-github", out);
-    // Selecting a rule that does not exist finds nothing, and says why.
+    // Selecting a rule that does not exist is a usage error that names it.
     let (exit, out, err) = odx(root, &["lint", "--select", "NOPE9999"]);
-    assert_eq!((exit, out.as_str()), (Exit::Success, "no findings\n"));
-    assert!(err.contains("warning: "), "{err}");
+    assert_eq!((exit, out.as_str()), (Exit::Usage, ""));
+    assert!(err.contains("'NOPE9999' does not match any rule"), "{err}");
+    // In the configuration, an unknown rule is only a warning.
+    let pyproject = root.join("pyproject.toml");
+    let before = std::fs::read_to_string(&pyproject).unwrap();
+    write(
+        &pyproject,
+        &format!("{before}\n[tool.odoo-lint]\nignore = [\"NOPE9999\"]\n"),
+    );
+    let (_, _, err) = odx(root, &["lint", "--exit-zero"]);
+    assert!(
+        err.contains("warning: ") && err.contains("'NOPE9999'"),
+        "{err}"
+    );
+    write(&pyproject, &before);
     // Fixes: shown, then applied.
     let manifest = root.join("modules/custom/a/__manifest__.py");
     let (exit, out, _) = odx(root, &["lint", "--diff", "--ignore", "C8101"]);
